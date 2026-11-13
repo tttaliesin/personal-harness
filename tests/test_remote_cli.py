@@ -351,6 +351,24 @@ class RemoteCliTests(unittest.TestCase):
         self.run_cli(expected=1)
         self.assertFalse(self.manager.exists())
 
+    def test_output_targets_cannot_overlap_sources_or_advance_a_receipt(self):
+        self.run_cli()
+        receipt = (self.manager / "active.json").read_bytes()
+        calls = self.log.read_bytes()
+        source = {p.relative_to(self.payload): p.read_bytes() for p in self.payload.rglob("*") if p.is_file()}
+        roots = ["--install-root", str(self.manager), "--state-root", str(self.state)]
+        for flags in (["--codex-home", str(self.payload / "hosts")],
+                      ["--codex-home", str(self.manager / "releases/target")],
+                      ["--home", str(self.payload)],
+                      ["--home", str(self.manager / "releases/target")]):
+            with self.subTest(flags=flags):
+                result = self.run_cli("update", extra=[*roots, *flags], home=False, expected=1)
+                self.assertIn(b"Output targets", result.stderr)
+                self.assertEqual((self.manager / "active.json").read_bytes(), receipt)
+                self.assertEqual(self.log.read_bytes(), calls)
+                self.assertEqual({p.relative_to(self.payload): p.read_bytes() for p in self.payload.rglob("*") if p.is_file()}, source)
+        self.run_cli("update", extra=[*roots, "--home", str(self.root)], home=False)
+
     def junction(self, link, destination):
         script = "New-Item -ItemType Junction -Path $env:HARNESS_FIXTURE_LINK -Target $env:HARNESS_FIXTURE_DESTINATION | Out-Null"
         environment = dict(self.environment, HARNESS_FIXTURE_LINK=str(link), HARNESS_FIXTURE_DESTINATION=str(destination))

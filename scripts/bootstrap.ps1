@@ -160,6 +160,14 @@ try {
     if ((Test-Within $releases $state) -or (Test-Within $source $state)) {
         throw 'State root must not contain the source payload or managed releases.'
     }
+    $agentsPath = Get-CanonicalPath ([IO.Path]::Combine($homePath, '.agents')) $caller
+    foreach ($target in @($codexPath, $agentsPath)) {
+        foreach ($protected in @($source, $releases)) {
+            if ((Test-Within $target $protected) -or (Test-Within $protected $target)) {
+                throw 'Output targets must not overlap the source payload or managed releases.'
+            }
+        }
+    }
     Assert-NoLinks $homePath
     Assert-NoLinks $codexPath
     Assert-NoLinks $releases
