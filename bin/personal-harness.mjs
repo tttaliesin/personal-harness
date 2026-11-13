@@ -75,7 +75,11 @@ function verifyPackage(entry) {
       !/^git\+(?:ssh:\/\/git@|https:\/\/)github\.com\/tttaliesin\/personal-harness\.git#[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(installed.resolved || '') ||
       request.dependencies?.[packageName] !== 'github:tttaliesin/personal-harness' ||
       lock.packages?.['']?.dependencies?.[packageName] !== request.dependencies[packageName] ||
-      !Array.isArray(request._npx?.packages) || !request._npx.packages.includes(gitSpec)) {
+      (Object.hasOwn(request, '_npx') &&
+       (request._npx === null || typeof request._npx !== 'object' || Array.isArray(request._npx) ||
+        !Array.isArray(request._npx.packages) ||
+        !request._npx.packages.every(value => typeof value === 'string') ||
+        !request._npx.packages.includes(gitSpec)))) {
     throw new Error('Source cleanup refused unverified npm package ownership.');
   }
 }
