@@ -2,6 +2,9 @@
 
 ## 설치 준비
 
+소스를 직접 받지 않고 설치하려면 [비공개 저장소에서 한 명령으로 설치하기](remote-install.md)를 따른다.
+아래 Task 명령은 저장소에서 실행하는 개발·관리 절차다.
+
 대상 PC에서 Codex를 한 번 실행한다.
 저장소 루트에서 `task setup`으로 Python 가상환경과 패키지를 준비한다.
 `task plan`으로 현재 상태를 읽는다.
@@ -25,8 +28,9 @@ agent_desktop = "D:/tools/agent-desktop.exe"
 codegraph = "D:/tools/codegraph.cmd"
 ```
 
-`${USERPROFILE}`, `${CODEX_HOME}`, `${REPO_ROOT}`만 치환한다.
-상대경로는 이 저장소를 기준으로 해석한다.
+`${USERPROFILE}`, `${CODEX_HOME}`, `${REPO_ROOT}`, `${STATE_ROOT}`를 치환한다.
+`${STATE_ROOT}`는 선택한 상태 경로이며, 저장소 기본값은 `.local`이다.
+상대경로는 실행 중인 소스 루트를 기준으로 해석한다.
 `task plan -- -HomeDirectory 'D:/Test Profile'`은 해당 사용자 홈을 대상으로 하며, 실제 `CODEX_HOME` 환경변수를 자동으로 끌어오지 않는다.
 사용자 홈과 다른 Codex 홈을 함께 사용할 때는 `-CodexHome`도 지정한다.
 다른 PC 프로필을 확인할 때는 `task plan HOST=roylabs-desktop`처럼 호스트를 지정한다.

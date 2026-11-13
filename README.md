@@ -3,9 +3,32 @@
 Roylabs Desktop의 Codex User Harness를 기준으로 사용자 지침, 스킬, 공통 설정을 관리한다.
 공통 설정을 각 PC의 기존 설정에 병합하고, 앱 경로와 실행 중 생성되는 값은 해당 PC에서 유지한다.
 
-[관리 범위와 기준 구성](docs/baseline.md) · [적용과 복구](docs/deployment.md) · [원본과 버전](sources/NOTICE.md)
+[한 명령으로 설치](docs/remote-install.md) · [관리 범위와 기준 구성](docs/baseline.md) · [적용과 복구](docs/deployment.md) · [원본과 버전](sources/NOTICE.md)
 
 ## 시작하기
+
+Windows x64에서 Node.js 22 이상과 npm, Git, Python 3.11 이상, Codex가 필요하다.
+Git에서 이 비공개 저장소에 접근할 수 있도록 GitHub 인증을 준비한다.
+처음 사용하는 PC에서는 Codex를 한 번 실행해 로컬 런타임 설정을 생성한다.
+어느 폴더에서든 다음 명령으로 전체 Harness를 설치한다.
+
+```powershell
+npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git install
+```
+
+갱신할 때는 마지막 인자를 `update`로 바꾼다.
+
+```powershell
+npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git update
+```
+
+저장소는 비공개로 유지한다.
+소스는 설치기가 사용자 전용 경로에서 관리한다.
+PC별 경로와 의존성 기록은 `%LOCALAPPDATA%/PersonalHarness/state`에 보관한다.
+Codex가 생성한 런타임과 인증은 기존 Codex 홈에서 유지한다.
+기존 저장소의 `.local`을 재사용하거나 설치 경로를 지정하는 방법은 [설치 문서](docs/remote-install.md)를 참고한다.
+
+## 저장소에서 개발하기
 
 Windows, Python 3.11 이상, Codex 데스크톱 앱과 [Task](https://taskfile.dev/docs/installation)가 필요하다.
 Task가 없다면 `winget install --id Task.Task --exact`로 설치한다.
@@ -91,7 +114,8 @@ task install -- -Locked
 | [hosts](hosts) | PC 이름, 운영체제 설정, 로컬 경로의 기본 규칙 |
 | `.local/<hostname>.toml` | 해당 PC에서만 사용하는 경로와 선택적 설정 덮어쓰기. Git 제외 |
 | [sources/dependencies.lock.json](sources/dependencies.lock.json) | 마지막으로 설치·검증한 외부 도구 버전, Git revision, 배포 해시 |
-| [scripts](scripts) | Task가 호출하는 설치·적용 구현 |
+| [scripts](scripts) | 원격 설치 진입점과 Task가 사용하는 설치·적용 구현 |
+| [package.json](package.json) | 비공개 Git 패키지의 실행 명령과 배포 파일 목록 |
 
 ```mermaid
 flowchart LR
@@ -105,7 +129,8 @@ flowchart LR
     P --> A[백업 후 적용]
 ```
 
-PC 경로를 바꾸려면 [hosts/local.example.toml](hosts/local.example.toml)을 `.local/<hostname>.toml`로 복사한다.
+저장소에서 PC 경로를 바꾸려면 [hosts/local.example.toml](hosts/local.example.toml)을 `.local/<hostname>.toml`로 복사한다.
+한 명령 설치에서는 같은 형식의 설정을 설치 상태 경로의 `<hostname>.toml`에 둔다.
 설정 병합 순서는 **현재 설정 → 공통 설정 → PC 프로필 → 로컬 덮어쓰기**다.
 공통 파일에서 지정한 키만 덮어쓰며, 사용자 스킬의 선택 목록은 이름 또는 경로를 기준으로 병합한다.
 
