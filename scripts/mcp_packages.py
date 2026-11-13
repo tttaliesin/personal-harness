@@ -19,6 +19,7 @@ import venv
 import zipfile
 
 import registry
+from windows_paths import io_path
 
 
 def _json(value) -> bytes:
@@ -31,7 +32,8 @@ def _sha(value: bytes) -> str:
 
 def _run(command, *, cwd=None, env=None) -> str:
     try:
-        return subprocess.run(command, cwd=cwd, env=env, check=True, capture_output=True,
+        return subprocess.run(command, executable=command[0] if os.name == "nt" else None,
+                              cwd=cwd, env=env, check=True, capture_output=True,
                               text=True, encoding="utf-8", errors="replace").stdout
     except subprocess.CalledProcessError as error:
         if "EBADENGINE" in (error.stderr or ""):
@@ -78,7 +80,7 @@ def _npm_tools() -> tuple[list[str], dict]:
     candidates = [Path(npm).parent / "node_modules/npm/bin/npm-cli.js",
                   Path(node).parent / "node_modules/npm/bin/npm-cli.js",
                   Path(node).parent.parent / "lib/node_modules/npm/bin/npm-cli.js"]
-    cli = next((path for path in candidates if path.is_file()), None)
+    cli = next((path for path in candidates if io_path(path).is_file()), None)
     if cli is None:
         raise ValueError("Cannot locate npm's JavaScript CLI beside Node or npm")
     command = [node, str(cli)]
@@ -136,24 +138,24 @@ def _resolve_npm(spec: dict) -> dict:
                     "dependencies": {spec["package"]: spec["version"]}}
     with tempfile.TemporaryDirectory(prefix="harness-mcp-npm-") as temporary:
         root = Path(temporary)
-        (root / "package.json").write_bytes(_json(package_json))
+        io_path(root / "package.json").write_bytes(_json(package_json))
         _npm(command, ["install", "--package-lock-only"], root, root / "cache")
-        lock = json.loads((root / "package-lock.json").read_bytes())
+        lock = json.loads(io_path(root / "package-lock.json").read_bytes())
         selected = _npm_lock(lock, spec["package"])
         if spec["version"] != "latest" and selected["version"] != spec["version"]:
             raise ValueError("npm resolved a version different from the exact registration")
         _npm(command, ["ci"], root, root / "cache")
         package_root = root / "node_modules" / spec["package"]
-        manifest = json.loads((package_root / "package.json").read_bytes())
+        manifest = json.loads(io_path(package_root / "package.json").read_bytes())
         if manifest.get("name") != spec["package"] or manifest.get("version") != selected["version"]:
             raise ValueError("npm package identity does not match its lock")
         target = _npm_bin(manifest, spec["entrypoint"])
         executable = package_root / target
-        if not executable.is_file() or executable.is_symlink():
+        if not io_path(executable).is_file() or io_path(executable).is_symlink():
             raise ValueError("npm bin target is missing or linked")
         return {"target": context, "package_json": package_json, "package_lock": lock,
                 "version": selected["version"], "bin": f"node_modules/{spec['package']}/{target}",
-                "bin_sha256": _sha(executable.read_bytes())}
+                "bin_sha256": _sha(io_path(executable).read_bytes())}
 
 
 def _python_context() -> dict:
@@ -228,7 +230,7 @@ def _resolve_python(spec: dict) -> dict:
                   "install", "--dry-run", "--ignore-installed", "--only-binary=:all:", "--report", str(report_path), requirement])
         except ValueError:
             raise ValueError("Python MCP resolution requires compatible wheels and matching Requires-Python; check package-manager configuration") from None
-        report = json.loads(report_path.read_bytes())
+        report = json.loads(io_path(report_path).read_bytes())
         wheels = []
         entry = None
         selected_version = None
@@ -317,7 +319,7 @@ def _npm_closure(lock: dict, package_json: dict) -> None:
         if not isinstance(peers, dict) or not all(isinstance(value, dict) for value in peers.values()):
             raise ValueError("Invalid npm peer dependency metadata")
         for name in required:
-            if not re.fullmatch(r"(?:@[a-z0-9][a-z0-9_.-]*/)?[a-z0-9][a-z0-9_.-]*", name):
+            if not re.fullmatch(r"(?:@[A-Za-z0-9][A-Za-z0-9_.-]*/)?[A-Za-z0-9][A-Za-z0-9_.-]*", name):
                 raise ValueError("Invalid npm dependency name")
             if name in optional or peers.get(name, {}).get("optional") is True:
                 continue
@@ -415,7 +417,7 @@ def _python_recipe(recipe: dict, declaration: dict) -> None:
 def _validate_record(record: dict) -> None:
     try:
         _fields(record, {"name", "kind", "declaration", "declaration_sha256", "recipe"})
-        declaration = registry._mcp(record["declaration"])
+        declaration = registry.normalize_mcp(record["declaration"])
         if (declaration != record["declaration"] or record["name"] != declaration["name"]
                 or record["kind"] != declaration["kind"] or record["declaration_sha256"] != _sha(_json(declaration))):
             raise ValueError("MCP package record does not match its declaration")
@@ -466,25 +468,37 @@ def configuration(record: dict, state: Path, *, node: str = "node") -> dict:
         if declaration.get("bearer_token_env_var"):
             result["bearer_token_env_var"] = declaration["bearer_token_env_var"]
         return result
-    executable = str(_launch(record, _root(record, state)))
-    return {"command": node if record["kind"] == "npm" else executable,
-            "args": ([executable] if record["kind"] == "npm" else []) + declaration["args"],
+    launch = _launch(record, _root(record, state))
+    if record["kind"] == "npm":
+        command, arguments = node, [str(launch)]
+    elif os.name == "nt":
+        command, arguments = str(io_path(launch.parent / "python.exe")), [str(io_path(launch))]
+    else:
+        command, arguments = str(launch), []
+    return {"command": command, "args": arguments + declaration["args"],
             "env_vars": declaration["env_vars"].copy()}
 
 
 def _tree(root: Path, state: Path, guard) -> dict[str, str]:
     files = {}
     guard(root, state)
-    for directory, dirs, names in os.walk(root, followlinks=False):
-        current = Path(directory)
+    io_root = io_path(root)
+
+    def failed(error):
+        if not isinstance(error, FileNotFoundError) or error.filename != str(io_root):
+            raise error
+
+    for directory, dirs, names in os.walk(io_root, followlinks=False, onerror=failed):
+        current = root / Path(directory).relative_to(io_root)
         for name in dirs:
             guard(current / name, state)
         for name in names:
             path = current / name
             guard(path, state)
-            if name.endswith(".pyc") or "__pycache__" in path.parts or path == root / "receipt.json":
+            relative = path.relative_to(root)
+            if "__pycache__" in relative.parts or relative.as_posix() == "receipt.json":
                 continue
-            files[path.relative_to(root).as_posix()] = _sha(path.read_bytes())
+            files[relative.as_posix()] = _sha(io_path(path).read_bytes())
     return files
 
 
@@ -494,21 +508,20 @@ def missing(record: dict, state: Path, *, guard) -> list[str]:
     root = _root(record, state)
     receipt_path = root / "receipt.json"
     guard(receipt_path, state)
-    if not receipt_path.is_file():
+    if not io_path(receipt_path).is_file():
         return [f"MCP {record['name']} package receipt is missing"]
     try:
-        receipt = json.loads(receipt_path.read_bytes())
+        receipt = json.loads(io_path(receipt_path).read_bytes())
         if receipt.get("record_sha256") != _sha(_json(record)) or not receipt.get("files"):
             return [f"MCP {record['name']} package receipt does not match its recipe"]
         files = receipt["files"]
         launch = _launch(record, root)
         if launch.relative_to(root).as_posix() not in files:
             return [f"MCP {record['name']} launch file is absent from its receipt"]
-        for name, expected in files.items():
-            path = root / _relative(name)
-            guard(path, state)
-            if not path.is_file() or _sha(path.read_bytes()) != expected:
-                return [f"MCP {record['name']} installed artifact is missing or changed"]
+        for name in files:
+            _relative(name)
+        if _tree(root, state, guard) != files:
+            return [f"MCP {record['name']} installed artifact is missing or changed"]
         return []
     except (OSError, ValueError, TypeError, KeyError):
         return [f"MCP {record['name']} package receipt is invalid"]
@@ -527,38 +540,38 @@ def install(record: dict, state: Path, *, guard) -> None:
     if not missing(record, state, guard=guard):
         return
     _tree(root, state, guard)
-    root.mkdir(parents=True, exist_ok=True)
+    io_path(root).mkdir(parents=True, exist_ok=True)
     receipt = root / "receipt.json"
     guard(receipt, state)
-    receipt.unlink(missing_ok=True)
+    io_path(receipt).unlink(missing_ok=True)
     if record["kind"] == "npm":
         for name, data in (("package.json", recipe["package_json"]), ("package-lock.json", recipe["package_lock"])):
             path = root / name
             guard(path, state)
-            path.write_bytes(_json(data))
+            io_path(path).write_bytes(_json(data))
         cache = state / "tools/mcp-cache/npm"
         _tree(cache, state, guard)
         guard(cache, state)
         _npm(command, ["ci"], root, cache)
         manifest = root / "node_modules" / record["declaration"]["package"] / "package.json"
         guard(manifest, state)
-        metadata = json.loads(manifest.read_bytes())
+        metadata = json.loads(io_path(manifest).read_bytes())
         if (metadata.get("name") != record["declaration"]["package"] or metadata.get("version") != recipe["version"]
                 or f"node_modules/{metadata['name']}/{_npm_bin(metadata, record['declaration']['entrypoint'])}" != recipe["bin"]):
             raise ValueError("Installed npm package identity or bin differs from the recipe")
         launch = _launch(record, root)
         guard(launch, state)
-        if _sha(launch.read_bytes()) != recipe["bin_sha256"]:
+        if _sha(io_path(launch).read_bytes()) != recipe["bin_sha256"]:
             raise ValueError("Installed npm bin SHA256 mismatch")
     else:
         wheelhouse = root / "wheels"
         guard(wheelhouse, state)
-        wheelhouse.mkdir(exist_ok=True)
+        io_path(wheelhouse).mkdir(exist_ok=True)
         wheels = []
         for artifact in recipe["wheels"]:
             destination = wheelhouse / _relative(artifact["filename"])
             guard(destination, state)
-            data = destination.read_bytes() if destination.is_file() else b""
+            data = io_path(destination).read_bytes() if io_path(destination).is_file() else b""
             if _sha(data) != artifact["sha256"]:
                 data = _fetch(artifact["url"])
             if _sha(data) != artifact["sha256"]:
@@ -571,27 +584,35 @@ def install(record: dict, state: Path, *, guard) -> None:
                     raise ValueError("Python console script differs from the recipe")
             temporary = None
             try:
-                with tempfile.NamedTemporaryFile(dir=wheelhouse, prefix=".wheel-", delete=False) as stream:
-                    temporary = Path(stream.name)
+                with tempfile.NamedTemporaryFile(dir=io_path(wheelhouse), prefix=".wheel-", delete=False) as stream:
+                    temporary = wheelhouse / Path(stream.name).name
                     guard(temporary, state)
                     stream.write(data)
-                temporary.replace(destination)
+                io_path(temporary).replace(io_path(destination))
             finally:
                 if temporary is not None:
-                    temporary.unlink(missing_ok=True)
-            wheels.append(str(destination))
+                    io_path(temporary).unlink(missing_ok=True)
+            wheel_path = io_path(destination)
+            # pathname2url strips the extended prefix before pip reopens Windows wheels.
+            wheels.append("file://" + urllib.parse.quote(wheel_path.as_posix(), safe="/:")
+                          if os.name == "nt" else str(wheel_path))
         environment = root / "venv"
         guard(environment, state)
-        venv.EnvBuilder(with_pip=False, symlinks=False).create(environment)
+        if io_path(environment).exists():
+            _tree(environment, state, guard)
+            shutil.rmtree(io_path(environment))
+        venv.EnvBuilder(with_pip=False, symlinks=False).create(io_path(environment))
         interpreter = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         guard(interpreter, state)
         cache = state / "tools/mcp-cache/pip"
         _tree(cache, state, guard)
         guard(cache, state)
-        _run([sys.executable, "-I", "-B", "-m", "pip", "--disable-pip-version-check", "--cache-dir", str(cache),
-              "--python", str(interpreter), "install", "--no-index", "--no-deps", "--no-compile",
+        from pip._internal.build_env import get_runnable_pip
+        _run([str(io_path(interpreter)), "-I", "-B", str(io_path(Path(get_runnable_pip()))),
+              "--disable-pip-version-check", "--cache-dir", str(io_path(cache)),
+              "install", "--no-index", "--no-deps", "--no-compile",
               "--force-reinstall", "--no-warn-script-location", *wheels], env=_replay_environment())
     files = _tree(root, state, guard)
     if _launch(record, root).relative_to(root).as_posix() not in files:
         raise ValueError("Installed package console script is missing")
-    receipt.write_bytes(_json({"record_sha256": _sha(_json(record)), "files": files}))
+    io_path(receipt).write_bytes(_json({"record_sha256": _sha(_json(record)), "files": files}))

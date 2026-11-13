@@ -20,7 +20,8 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import mcp_packages as mcp
-from harness import safe_file
+from harness import HarnessError, safe_file
+from windows_paths import io_path
 
 
 def spec(kind):
@@ -104,16 +105,16 @@ def npm_archive(root, name, files, **fields):
 
 
 @contextmanager
-def npm_fixture(root, *, engine=">=20"):
+def npm_fixture(root, *, engine=">=20", dependency_name="fixture-dep"):
     command, _ = mcp._npm_tools()
     seed = root / "seed cache"
-    program = ("const readline=require('node:readline');const dep=require('fixture-dep');"
+    program = (f"const readline=require('node:readline');const dep=require('{dependency_name}');"
                "readline.createInterface({input:process.stdin}).on('line',line=>{const q=JSON.parse(line);"
                "console.log(JSON.stringify({jsonrpc:'2.0',id:q.id,result:{protocolVersion:'2024-11-05',"
                "capabilities:{},serverInfo:{name:dep,version:'1.0.0'},args:process.argv.slice(2)}}));});")
-    dependency, dep_integrity = npm_archive(root, "fixture-dep", {"index.js": b"module.exports='npm-closure';"})
+    dependency, dep_integrity = npm_archive(root, dependency_name, {"index.js": b"module.exports='npm-closure';"})
     package, integrity = npm_archive(root, "fixture-mcp", {"cli.js": program.encode()},
-                                     bin={"fixture-mcp": "cli.js"}, dependencies={"fixture-dep": "1.0.0"},
+                                     bin={"fixture-mcp": "cli.js"}, dependencies={dependency_name: "1.0.0"},
                                      engines={"node": engine}, scripts={"preinstall": "exit 99"})
     for archive in (dependency, package):
         mcp._run([*command, "cache", "add", str(archive), "--cache", str(seed), "--offline"])
@@ -147,8 +148,8 @@ def npm_fixture(root, *, engine=">=20"):
     execute = mcp._npm
 
     def offline(command, arguments, directory, cache):
-        if not cache.exists():
-            shutil.copytree(seed, cache)
+        if not io_path(cache).exists():
+            shutil.copytree(io_path(seed), io_path(cache))
         flags = ["--registry", registry] if "--package-lock-only" in arguments else ["--offline"]
         return execute(command, [*arguments, *flags], directory, cache)
 
@@ -166,7 +167,8 @@ def initialize(config):
     request = {"jsonrpc": "2.0", "id": 7, "method": "initialize",
                "params": {"protocolVersion": "2024-11-05", "capabilities": {},
                           "clientInfo": {"name": "fixture", "version": "1.0"}}}
-    result = subprocess.run([config["command"], *config["args"]], input=json.dumps(request) + "\n",
+    result = subprocess.run([config["command"], *config["args"]], executable=config["command"],
+                            input=json.dumps(request) + "\n",
                             capture_output=True, text=True, encoding="utf-8", timeout=20)
     if result.returncode:
         raise AssertionError(f"Isolated fixture executable failed with exit code {result.returncode}")
@@ -174,6 +176,172 @@ def initialize(config):
 
 
 class McpPackagesTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows long-path I/O")
+    def test_tree_reads_long_files_with_logical_guards_and_relative_inventory(self):
+        with TemporaryDirectory() as directory:
+            state = Path(directory)
+            root = state / ("state [client] & 한글 " + "x" * 90)
+            path = root / ("nested-" + "y" * 90) / ("z" * 50 + ".map")
+            self.assertGreater(len(str(path)), 260)
+            io_path(path.parent).mkdir(parents=True)
+            io_path(path).write_bytes(b"real long file")
+            io_path(root / "receipt.json").write_bytes(b"excluded receipt")
+            io_path(path.with_suffix(".pyc")).write_bytes(b"sourceless bytecode")
+            io_path(root / "__pycache__").mkdir()
+            io_path(root / "__pycache__/fixture.pyc").write_bytes(b"excluded bytecode")
+            guarded = []
+
+            def guard(candidate, boundary):
+                self.assertEqual(boundary, state)
+                self.assertFalse(str(candidate).startswith("\\\\?\\"))
+                self.assertTrue(candidate.is_relative_to(boundary))
+                guarded.append(candidate)
+                safe_file(candidate, boundary)
+
+            try:
+                files = mcp._tree(root, state, guard)
+                self.assertEqual(files, {path.relative_to(root).as_posix(): mcp._sha(b"real long file"),
+                                         path.with_suffix(".pyc").relative_to(root).as_posix():
+                                             mcp._sha(b"sourceless bytecode")})
+                self.assertIn(path, guarded)
+            finally:
+                shutil.rmtree(io_path(state))
+
+    @unittest.skipUnless(os.name == "nt", "Windows long-path I/O")
+    def test_real_wheel_replay_at_long_final_path_and_long_cached_wheels(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / ("state [client] & 한글 " + "x" * 100)
+            guards = []
+
+            def guard(candidate, boundary):
+                self.assertEqual(boundary, state)
+                self.assertFalse(str(candidate).startswith("\\\\?\\"))
+                self.assertTrue(candidate.is_relative_to(boundary))
+                guards.append(candidate)
+                safe_file(candidate, boundary)
+
+            try:
+                with python_fixture(root):
+                    record = mcp.resolve(spec("python"))
+                    self.assertNotIn(str(root), json.dumps(record, ensure_ascii=False))
+                    package_root = mcp._root(record, state)
+                    cached = package_root / "wheels" / record["recipe"]["wheels"][0]["filename"]
+                    self.assertGreater(len(str(cached)), 260)
+                    io_path(cached.parent).mkdir(parents=True)
+                    io_path(cached).write_bytes(b"corrupt cache")
+                    mcp.install(record, state, guard=guard)
+                    config = mcp.configuration(record, state)
+                    self.assertGreater(len(config["command"]), 260)
+                    reply = initialize(config)
+                    self.assertEqual(reply["result"]["serverInfo"]["name"], "wheel-closure")
+                    self.assertEqual(io_path(Path(reply["result"]["prefix"])), io_path(package_root / "venv"))
+                    self.assertEqual(mcp.missing(record, state, guard=guard), [])
+                    with patch.object(mcp, "_fetch", side_effect=AssertionError("healthy install fetched")), \
+                            patch.object(mcp.venv, "EnvBuilder") as builder:
+                        mcp.install(record, state, guard=guard)
+                        builder.assert_not_called()
+                    io_path(cached).write_bytes(b"corrupt again")
+                    self.assertTrue(mcp.missing(record, state, guard=guard))
+                    mcp.install(record, state, guard=guard)
+                    self.assertEqual(initialize(config)["result"]["serverInfo"]["name"], "wheel-closure")
+                    self.assertEqual(mcp.missing(record, state, guard=guard), [])
+                    self.assertIn(cached, guards)
+            finally:
+                shutil.rmtree(io_path(root))
+
+    def test_real_wheel_added_package_shadow_is_detected(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "state"
+            with python_fixture(root):
+                record = mcp.resolve(spec("python"))
+                mcp.install(record, state, guard=safe_file)
+                config = mcp.configuration(record, state)
+                environment = mcp._root(record, state) / "venv"
+                site = next(io_path(environment).rglob("fixture_dep.py")).parent
+                shadow = site / "fixture_dep/__init__.py"
+                shadow.parent.mkdir()
+                shadow.write_text("VALUE = 'added-package-shadow'\n")
+                self.assertEqual(initialize(config)["result"]["serverInfo"]["name"], "added-package-shadow")
+                self.assertTrue(mcp.missing(record, state, guard=safe_file), "extra runtime file was accepted")
+
+    def test_real_wheel_repair_removes_shadow_instead_of_blessing_it(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "state"
+            outside = root / "outside.txt"
+            outside.write_bytes(b"preserve outside managed state")
+            with python_fixture(root):
+                record = mcp.resolve(spec("python"))
+                mcp.install(record, state, guard=safe_file)
+                config = mcp.configuration(record, state)
+                package_root = mcp._root(record, state)
+                module = next(io_path(package_root / "venv").rglob("fixture_dep.py"))
+                shadow = module.parent / "fixture_dep/__init__.py"
+                shadow.parent.mkdir()
+                shadow.write_text("VALUE = 'added-package-shadow'\n")
+                for mutate_recorded in (False, True):
+                    with self.subTest(mutate_recorded=mutate_recorded):
+                        if mutate_recorded:
+                            shadow.parent.mkdir(exist_ok=True)
+                            shadow.write_text("VALUE = 'added-package-shadow'\n")
+                            module.write_text("VALUE = 'recorded-tamper'\n")
+                        with patch.object(mcp, "_fetch", side_effect=AssertionError("verified wheels were discarded")):
+                            mcp.install(record, state, guard=safe_file)
+                        self.assertEqual(initialize(config)["result"]["serverInfo"]["name"], "wheel-closure")
+                        self.assertFalse(shadow.exists())
+                        receipt = json.loads(io_path(package_root / "receipt.json").read_bytes())
+                        self.assertFalse(any(name.endswith("fixture_dep/__init__.py") for name in receipt["files"]))
+                        self.assertEqual(mcp.missing(record, state, guard=safe_file), [])
+                        self.assertEqual(outside.read_bytes(), b"preserve outside managed state")
+
+    @unittest.skipUnless(os.name == "nt", "Windows junction guard")
+    def test_repair_refuses_venv_junctions_before_recursive_removal(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "state"
+            outside = root / "outside"
+            outside.mkdir()
+            sentinel = outside / "keep.txt"
+            sentinel.write_bytes(b"outside managed state")
+            with python_fixture(root):
+                record = mcp.resolve(spec("python"))
+                environment = mcp._root(record, state) / "venv"
+                for nested in (False, True):
+                    with self.subTest(nested=nested):
+                        junction = environment / "Lib/injected" if nested else environment
+                        io_path(junction.parent).mkdir(parents=True, exist_ok=True)
+                        subprocess.run(["cmd.exe", "/c", "mklink", "/J", str(junction), str(outside)],
+                                       check=True, capture_output=True)
+                        try:
+                            with patch.object(mcp.shutil, "rmtree") as remove:
+                                with self.assertRaisesRegex(HarnessError, "would follow a link"):
+                                    mcp.install(record, state, guard=safe_file)
+                                remove.assert_not_called()
+                            self.assertEqual(sentinel.read_bytes(), b"outside managed state")
+                        finally:
+                            io_path(junction).rmdir()
+
+    @unittest.skipUnless(shutil.which("node") and shutil.which("npm"), "Node and npm are required")
+    def test_real_npm_legacy_uppercase_transitive_dependency_replays(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "state [client] & 한글"
+            with npm_fixture(root, dependency_name="JSONStream"):
+                record = mcp.resolve(spec("npm"))
+                self.assertIn("node_modules/JSONStream", record["recipe"]["package_lock"]["packages"])
+                mcp.preflight(record)
+                mcp.install(record, state, guard=safe_file)
+                config = mcp.configuration(record, state, node=shutil.which("node"))
+                self.assertEqual(initialize(config)["result"]["serverInfo"]["name"], "npm-closure")
+                self.assertEqual(mcp.missing(record, state, guard=safe_file), [])
+                for name in ("../escape", "@scope/../escape", "bad\\name", "C:escape"):
+                    bad = copy.deepcopy(record)
+                    bad["recipe"]["package_lock"]["packages"]["node_modules/fixture-mcp"]["dependencies"] = {name: "1.0.0"}
+                    with self.subTest(unsafe_dependency=name), self.assertRaisesRegex(ValueError, "Invalid npm dependency name"):
+                        mcp.preflight(bad)
+
     def test_http_record_and_configuration_are_pure_and_only_copy_token_names(self):
         declaration = {"name": "remote", "kind": "http", "url": "https://mcp.invalid/서비스",
                        "bearer_token_env_var": "FIXTURE_TOKEN"}
