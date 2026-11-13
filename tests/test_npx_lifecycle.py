@@ -30,6 +30,9 @@ if ($env:LAUNCHER_GATE) {
 if ($env:LAUNCHER_MUTATE) {
     [IO.File]::WriteAllText((Join-Path $request.sourceRoot 'package.json'), '{}')
 }
+if ($env:LAUNCHER_GIT_MARKER) {
+    [IO.File]::WriteAllText((Join-Path $request.sourceRoot $env:LAUNCHER_GIT_MARKER), 'gitdir: retained-checkout')
+}
 if ($env:LAUNCHER_LINK) {
     New-Item -ItemType Junction -Path (Join-Path $request.sourceRoot 'foreign') -Target $env:LAUNCHER_LINK | Out-Null
 }
@@ -154,6 +157,57 @@ class NpxLifecycleTests(unittest.TestCase):
         self.run_launcher(["update"], environment=direct)
         self.assertTrue(self.package.exists())
 
+    def test_git_checkouts_in_accepted_npm_package_are_refused_before_bootstrap(self):
+        for nested in (False, True):
+            for git_file in (False, True):
+                for args in (["--help"], ["install"]):
+                    with self.subTest(nested=nested, git_file=git_file, arguments=args):
+                        self.prepare_entry()
+                        sentinels = self.sentinels()
+                        checkout = self.package / "nested" if nested else self.package
+                        checkout.mkdir(exist_ok=True)
+                        git_args = [GIT, "-C", str(checkout), "init", "--quiet"]
+                        if git_file:
+                            git_args += ["--separate-git-dir", str(self.root / "git-metadata")]
+                        result = subprocess.run(git_args, env=self.environment,
+                                                capture_output=True, timeout=30)
+                        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+                        work = checkout / "uncommitted-work.txt"
+                        work.write_bytes(b"user checkout work must survive")
+                        preserved = {filename: filename.read_bytes() for filename in
+                                     self.package.rglob("*") if filename.is_file()}
+                        if git_file:
+                            preserved.update({filename: filename.read_bytes() for filename in
+                                              (self.root / "git-metadata").rglob("*") if filename.is_file()})
+                        result = self.run_launcher(args, expected=1)
+                        self.assertIn(b"Git checkout", result.stderr)
+                        self.assert_preserved(sentinels | preserved)
+                        self.assertFalse(self.log.exists())
+                        self.assertFalse((self.entry / ".personal-harness-source.lease").exists())
+                        shutil.rmtree(self.package)
+                        if git_file:
+                            shutil.rmtree(self.root / "git-metadata")
+
+    def test_git_marker_created_by_bootstrap_prevents_recursive_cleanup(self):
+        for marker in (".git", "nested/.git"):
+            for child_code in ("0", "43"):
+                with self.subTest(marker=marker, child_code=child_code):
+                    self.prepare_entry()
+                    (self.package / "nested").mkdir()
+                    work = self.package / "uncommitted-work.txt"
+                    work.write_bytes(b"keep checkout work")
+                    sentinels = self.sentinels()
+                    result = self.run_launcher(["update"], expected=int(child_code) or 1,
+                                               environment=dict(self.environment, LAUNCHER_EXIT=child_code,
+                                                                LAUNCHER_GIT_MARKER=marker))
+                    self.assertIn(b"Git checkout", result.stderr)
+                    self.assertIn(b"cleanup failed", result.stderr)
+                    self.assertEqual((self.package / marker).read_bytes(), b"gitdir: retained-checkout")
+                    self.assertEqual(work.read_bytes(), b"keep checkout work")
+                    self.assert_preserved(sentinels)
+                    self.assertFalse((self.entry / ".personal-harness-source.lease").exists())
+                    shutil.rmtree(self.package)
+
     def test_effective_cache_comes_from_npm_configuration(self):
         self.prepare_entry()
         self.npmrc.write_text(f"cache={self.cache.as_posix()}\n", encoding="utf-8")
@@ -205,7 +259,8 @@ class NpxLifecycleTests(unittest.TestCase):
         external.write_bytes(b"keep")
         os.link(external, self.package / "linked-file")
         result = self.run_launcher(["install"], expected=1)
-        self.assertIn(b"cleanup failed", result.stderr)
+        self.assertIn(b"linked or special package member", result.stderr)
+        self.assertFalse(self.log.exists())
         self.assertEqual(external.read_bytes(), b"keep")
         self.assertTrue(self.package.exists())
 

@@ -82,6 +82,7 @@ function verifyPackage(entry) {
 
 function verifyTree(directory) {
   for (const name of fs.readdirSync(directory)) {
+    if (name.toLowerCase() === '.git') throw new Error('Source cleanup refused a Git checkout.');
     const filename = path.join(directory, name);
     const stat = fs.lstatSync(filename);
     if (stat.isSymbolicLink() || (!stat.isDirectory() && (!stat.isFile() || stat.nlink !== 1))) {
@@ -117,6 +118,7 @@ function acquirePackage() {
     throw new Error('Source cleanup refused an aliased launcher.');
   }
   verifyPackage(entry);
+  verifyTree(sourceRoot);
   const lease = path.join(entry, '.personal-harness-source.lease');
   try { fs.mkdirSync(lease); }
   catch { throw new Error('Source cleanup lease is unavailable; another launcher may be running.'); }
