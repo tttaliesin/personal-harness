@@ -35,7 +35,7 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git update
 ```
 
-두 명령은 공식 최신 안정판 조회, 의존성 설치, Harness 적용과 검증을 차례로 수행한다.
+두 명령은 등록된 갱신 기준에 따른 의존성 조회, 설치, Harness 적용과 검증을 차례로 수행한다.
 소스 갱신은 npm의 Git 패키지 조회를 사용한다.
 `--prefer-online`은 캐시에 있는 Git 참조의 최신성을 다시 확인하게 한다.
 업데이트는 명령을 실행할 때만 수행한다.
@@ -52,6 +52,9 @@ Python이나 Codex를 자동으로 찾지 못하면 `--python 'D:/Python/python.
 WindowsApps의 Python 실행 별칭은 인터프리터로 사용하지 않는다.
 기록한 의존성 버전을 재현할 때는 `--locked`를 추가한다.
 `--locked`도 없는 배포물은 다운로드한다.
+등록 대상은 루트의 [registry.toml](../registry.toml)에서 관리한다.
+새 항목을 등록하거나 설치 출처를 바꾼 뒤에는 일반 `update`로 해당 PC의 정확한 버전 기록을 갱신한다.
+`--locked`는 현재 등록 목록과 기록이 일치할 때 사용한다.
 
 ## 소스와 PC별 상태
 
@@ -64,7 +67,7 @@ WindowsApps의 Python 실행 별칭은 인터프리터로 사용하지 않는다
 | `<설치 루트>/releases/<해시>` | 실행 코드, 공통 정책, 호스트 프로필과 초기 잠금 |
 | `<설치 루트>/active.json` | 적용과 검증을 모두 마친 마지막 실행의 기록 |
 | `<상태 루트>/<hostname>.toml` | 해당 PC의 경로와 선택적 설정 덮어쓰기 |
-| `<상태 루트>/tools` | agent-desktop과 CodeGraph 실행 파일 |
+| `<상태 루트>/tools` | agent-desktop, CodeGraph와 등록된 MCP 패키지의 실행 파일 |
 | `<상태 루트>/python` | 설치기용 Python 가상환경 |
 | `<상태 루트>/sources/dependencies.lock.json` | 실제로 설치한 버전과 commit, 배포 해시 |
 | `<상태 루트>/skills` | 같은 잠금에 대응하는 공식 desktop 스킬 원본 |
@@ -74,7 +77,10 @@ WindowsApps의 Python 실행 별칭은 인터프리터로 사용하지 않는다
 기본 상태 루트는 `<설치 루트>/state`다.
 도구와 가상환경은 npm 임시 캐시를 가리키지 않는다.
 기존 상태 잠금이 있으면 새 소스에 들어 있는 초기 잠금으로 덮어쓰지 않는다.
+설치 대상은 현재 등록 목록으로 정하므로 기존 상태 잠금에 없던 새 항목도 일반 업데이트에 포함된다.
 인증, 계정, 세션, 프로젝트 신뢰와 앱이 생성한 런타임은 기존 Codex 프로필에 남는다.
+등록된 MCP의 인증 변수는 해당 PC에서 제공한다.
+설치와 설정 검사 성공은 외부 서비스 인증 완료를 뜻하지 않는다.
 Ego와 `ego-browser`는 해당 PC의 브라우저가 관리한다.
 
 ```mermaid

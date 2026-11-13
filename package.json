@@ -11,6 +11,7 @@
     "node": ">=22"
   },
   "files": [
+    "registry.toml",
     "requirements.txt",
     "bin",
     "scripts",

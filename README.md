@@ -53,7 +53,8 @@ task update:plan
 task install
 ```
 
-설치 도우미는 실행할 때 pstack, EGM, agent-desktop의 공식 최신 안정 릴리스와 CodeGraph의 npm `latest` 배포를 조회한다.
+설치 도우미는 실행할 때 `registry.toml`에 등록된 플러그인과 MCP를 각 항목의 갱신 기준으로 조회한다.
+agent-desktop의 공식 최신 안정 릴리스와 CodeGraph의 npm `latest` 조회도 유지한다.
 실제 설치에 사용할 commit과 배포 해시를 확정한 뒤 도구를 설치한다.
 설치와 검증을 마치면 그 결과를 `sources/dependencies.lock.json`에 기록한다.
 agent-desktop의 공식 스킬과 참조 문서도 같은 릴리스로 갱신한다.
@@ -109,7 +110,8 @@ task install -- -Locked
 |---|---|
 | `Taskfile.yml` | 저장소 루트에서 사용하는 준비, 설치, 갱신, 적용과 검증 명령 |
 | [common/AGENTS.md](common/AGENTS.md) | 전역 사용자 지침. `${CODEX_HOME}`은 적용 대상 PC에서 치환 |
-| [common/config.toml](common/config.toml) | 모델, 추론 수준, 사용자 정책, Desktop 설정, 플러그인 선택, CodeGraph MCP |
+| [registry.toml](registry.toml) | 배포할 Git 플러그인과 npm·Python·HTTP MCP의 등록 정보 |
+| [common/config.toml](common/config.toml) | 모델, 추론 수준, 사용자 정책, Desktop 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
 | [skills](skills) | `create-readme`, `agent-desktop`, `agent-desktop-windows` 원본과 참조 문서 |
 | [hosts](hosts) | PC 이름, 운영체제 설정, 로컬 경로의 기본 규칙 |
 | `.local/<hostname>.toml` | 해당 PC에서만 사용하는 경로와 선택적 설정 덮어쓰기. Git 제외 |

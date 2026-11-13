@@ -21,6 +21,9 @@ try:
 except ImportError:
     raise SystemExit("Install the repository requirements first: python -m pip install -r requirements.txt")
 
+from registry import load_registry, lock_issues
+import mcp_packages
+
 REPO = Path(__file__).resolve().parents[1]
 PROTECTED = {"notify", "model_catalog_json", "openai_base_url", "experimental_realtime_ws_base_url",
              "projects", "hooks", "model_providers", "computer_use"}
@@ -263,6 +266,37 @@ def previously_applied_files(codex_home: Path) -> dict[str, str]:
     return files
 
 
+def registered_settings(registry, lock: Mapping, state: Path, plan: Plan,
+                        paths: Mapping, current: Mapping) -> dict:
+    issues = lock_issues(registry, lock)
+    if issues:
+        plan.missing.extend(issues)
+        return {}
+    overlay = {}
+    for plugin in registry.plugins:
+        selector = f"{plugin['name']}@{plugin['marketplace']}"
+        overlay.setdefault('plugins', {})[selector] = {'enabled': plugin['enabled']}
+    records = {item['name']: item for item in lock.get('mcp', [])}
+    for spec in registry.mcp:
+        record = records[spec['name']]
+        node = tool_path('node', paths) if spec['kind'] == 'npm' else 'node'
+        if spec['kind'] == 'npm' and not node:
+            plan.missing.append(f"Node.js executable is missing for MCP {spec['name']}")
+            continue
+        plan.missing.extend(mcp_packages.missing(record, state, guard=safe_file))
+        configured = mcp_packages.configuration(record, state, node=node)
+        previous = current.get('mcp_servers', {}).get(spec['name'], {})
+        values = [previous.get('command', ''), *previous.get('args', [])]
+        absolute = [Path(value) for value in values if isinstance(value, str) and Path(value).is_absolute()]
+        managed = any(path.resolve().is_relative_to((state / 'tools/mcp').resolve()) for path in absolute)
+        if previous.get('command') and absolute and not managed and spec['kind'] != 'http':
+            for key in ('command', 'args', 'cwd'):
+                if key in previous:
+                    configured[key] = copy.deepcopy(previous[key])
+        overlay.setdefault('mcp_servers', {})[spec['name']] = configured
+    return overlay
+
+
 def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None = None,
                local_config: Path | None = None, state_root: Path | None = None) -> Plan:
     if host not in ("roylabs-desktop", "homelab-desktop"):
@@ -294,15 +328,28 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     common_path = repo / "common" / "config.toml"
     common = read_toml(common_path)
     validate_common(common)
+    registry = load_registry(repo / 'registry.toml')
+    selectors = {f"{item['name']}@{item['marketplace']}" for item in registry.plugins}
+    if selectors.intersection(common.get('plugins', {})):
+        raise HarnessError('Registered plugin selections belong in registry.toml, not common/config.toml')
+    if {item['name'] for item in registry.mcp}.intersection(common.get('mcp_servers', {})):
+        raise HarnessError('Registered MCP settings belong in registry.toml, not common/config.toml')
+    lock = json.loads(layout.lock.read_text(encoding='utf-8')) if layout.lock.exists() else {}
     config_path = codex_home / "config.toml"
     original = config_path.read_text(encoding="utf-8-sig") if config_path.exists() else ""
     old = tomlkit.parse(original)
+    registered = registered_settings(registry, lock, layout.local, plan, paths, old)
     if "node_repl" not in old.get("mcp_servers", {}):
         plan.missing.append("Local Codex runtime configuration is missing: open Codex on this PC first (node_repl)")
     merged = tomlkit.parse(original)
     merge_into(merged, common)
+    merge_into(merged, registered)
     merge_into(merged, profile.get("config", {}))
     merge_into(merged, local.get("config", {}))
+    for spec in registry.mcp:
+        server = merged.get('mcp_servers', {}).get(spec['name'], {})
+        if server.get('command') and server.get('url'):
+            raise HarnessError(f"MCP {spec['name']} has conflicting STDIO and HTTP settings; reconcile its local transport")
     previous_codegraph = old.get("mcp_servers", {}).get("codegraph", {}).get("command")
     override_codegraph = (local.get("config", {}).get("mcp_servers", {}).get("codegraph", {}).get("command")
                           or profile.get("config", {}).get("mcp_servers", {}).get("codegraph", {}).get("command"))
@@ -321,7 +368,6 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     lock_path = layout.lock
     official_ready = not layout.persistent
     if lock_path.exists():
-        lock = json.loads(lock_path.read_text(encoding="utf-8"))
         if layout.persistent:
             try:
                 validate_official_sources(layout.sources, lock)
@@ -334,18 +380,17 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
                 plan.missing.append(f"Pinned plugin version is missing: {item['name']}@{item['version']}; run scripts/install-dependencies.ps1")
     elif layout.persistent:
         plan.missing.append(f"Persistent dependency lock is missing: {lock_path}; run scripts/install-dependencies.ps1")
-    else:
-        for selector in ("pstack@pstack-claude", "egm@egm"):
-            plugin, marketplace = selector.split("@")
-            cache = codex_home / "plugins" / "cache" / marketplace / plugin
-            manifests = list(cache.glob("*/.codex-plugin/plugin.json")) + list(cache.glob("*/plugin.json"))
-            if not manifests:
-                plan.missing.append(f"Plugin not installed: {selector}; run scripts/install-dependencies.ps1")
     if not old.get("model_catalog_json"):
         plan.notes.append("No local model catalog configured; verify gpt-6.1-sol/max availability with your provider")
     rendered = tomlkit.dumps(merged)
     tomlkit.parse(rendered)
     plan.settings = changed_settings(old, merged, common)
+    for selector in registered.get('plugins', {}):
+        if old.get('plugins', {}).get(selector) != merged.get('plugins', {}).get(selector):
+            plan.settings.append(f'plugins.{selector}: registered selection')
+    for name in registered.get('mcp_servers', {}):
+        if old.get('mcp_servers', {}).get(name) != merged.get('mcp_servers', {}).get(name):
+            plan.settings.append(f'mcp_servers.{name}: registered configuration')
     if rendered.replace("\r\n", "\n") != original.replace("\r\n", "\n"):
         plan.add(config_path, rendered.encode("utf-8"), codex_home)
     instructions = (repo / "common" / "AGENTS.md").read_text(encoding="utf-8")

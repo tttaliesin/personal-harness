@@ -178,9 +178,10 @@ try {
         $overrides.Codex = if ($options.codex -match '[/\\:]') { Get-CanonicalPath $options.codex $caller } else { $options.codex }
     }
     $manifest = [IO.File]::ReadAllText((Get-IOPath ([IO.Path]::Combine($source, 'package.json')))) | ConvertFrom-Json
-    $required = @('package.json', 'README.md', 'requirements.txt', 'bin/personal-harness.mjs',
+    $required = @('package.json', 'README.md', 'requirements.txt', 'registry.toml', 'bin/personal-harness.mjs',
         'scripts/bootstrap.ps1', 'scripts/update-dependencies.ps1', 'scripts/install-dependencies.ps1',
         'scripts/harness.ps1', 'scripts/install_dependencies.py', 'scripts/harness.py',
+        'scripts/registry.py', 'scripts/mcp_packages.py',
         'common/AGENTS.md', 'common/config.toml', 'skills/create-readme/SKILL.md',
         'skills/agent-desktop/SKILL.md', 'skills/agent-desktop-windows/SKILL.md',
         'sources/agent-desktop-LICENSE', 'sources/dependencies.lock.json', "hosts/$hostName.toml")
@@ -196,7 +197,7 @@ try {
     }
     foreach ($entry in $manifest.files) {
         if ($entry.StartsWith('!')) { continue }
-        if ($entry -notin @('bin', 'scripts', 'common', 'hosts', 'skills', 'sources', 'docs', 'requirements.txt')) {
+        if ($entry -notin @('bin', 'scripts', 'common', 'hosts', 'skills', 'sources', 'docs', 'requirements.txt', 'registry.toml')) {
             throw "Invalid payload allowlist entry: $entry"
         }
         $paths += @(Get-PayloadFiles $source $entry $exclusions)

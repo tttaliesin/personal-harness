@@ -52,11 +52,6 @@ enabled = true
 enabled = true
 [plugins."template-creator@openai-primary-runtime"]
 enabled = true
-[plugins."pstack@pstack-claude"]
-enabled = true
-[plugins."egm@egm"]
-enabled = true
-
 [[skills.config]]
 name = "computer-use"
 enabled = false

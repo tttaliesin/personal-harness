@@ -333,6 +333,23 @@ class RemoteCliTests(unittest.TestCase):
                 self.assertEqual(len(pip), 1 if captured == original else 2)
                 self.assertEqual(Path(pip[-1][-1]).read_bytes(), captured)
 
+    def test_registry_is_required_and_part_of_release_identity(self):
+        self.run_cli()
+        previous = self.receipt()
+        registry = self.payload / 'registry.toml'
+        registry.write_bytes(registry.read_bytes() + b'\n# new catalog revision\n')
+        self.run_cli('update')
+        current = self.receipt()
+        self.assertNotEqual(current['payload_sha256'], previous['payload_sha256'])
+        self.assertEqual(Path(current['python']), Path(previous['python']))
+        self.assertEqual((Path(current['source_root']) / 'registry.toml').read_bytes(), registry.read_bytes())
+        before = (self.manager / 'active.json').read_bytes()
+        calls = len(self.calls())
+        registry.unlink()
+        self.run_cli('update', expected=1)
+        self.assertEqual((self.manager / 'active.json').read_bytes(), before)
+        self.assertEqual(len(self.calls()), calls)
+
     def test_managed_python_failing_second_probe_never_recreates_itself(self):
         self.run_cli()
         managed = Path(self.receipt()["python"])
@@ -557,7 +574,8 @@ class RemoteCliTests(unittest.TestCase):
         package = json.loads(result.stdout)[0]
         files = {item["path"] for item in package["files"]}
         for name in ("skills/agent-desktop/references/commands-system.md", "skills/agent-desktop-windows/references/troubleshooting.md",
-                     "sources/agent-desktop-LICENSE", "docs/deployment.md", "scripts/bootstrap.ps1"):
+                     "sources/agent-desktop-LICENSE", "docs/deployment.md", "scripts/bootstrap.ps1",
+                     "registry.toml", "scripts/registry.py", "scripts/mcp_packages.py"):
             self.assertIn(name, files)
         self.assertFalse(any(name.startswith("docs/history/") for name in files))
         self.assertNotIn("scripts/test.ps1", files)

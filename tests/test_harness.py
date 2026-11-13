@@ -24,6 +24,8 @@ from unittest import mock
 
 
 _MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "harness.py"
+sys.path.insert(0, str(_MODULE_PATH.parent))
+from registry import declaration_hash
 _SPEC = importlib.util.spec_from_file_location("_harness_contract_target", _MODULE_PATH)
 assert _SPEC is not None and _SPEC.loader is not None
 harness = importlib.util.module_from_spec(_SPEC)
@@ -182,6 +184,8 @@ class FakeRepository:
             ("agent-desktop-windows", ".metadata"): b"hidden source file\n",
         }
         write_file(self.repo / "common" / "config.toml", COMMON_CONFIG)
+        write_file(self.repo / "registry.toml", 'schema_version = 1\n')
+        write_file(self.repo / 'sources/dependencies.lock.json', '{"schema_version":1,"plugins":[]}')
         write_file(
             self.repo / "common" / "AGENTS.md",
             "# 공통 지침\nSkills live in ${CODEX_HOME}/skills.\n",
@@ -238,7 +242,7 @@ class PersistentStateTests(unittest.TestCase):
                 files[f"skills/{skill}/{relative}"] = b"state:" + data
         for path, data in files.items():
             write_file(state / path, data)
-        lock = {"plugins": [], "agent_desktop": {"files_sha256": {
+        lock = {"schema_version": 1, "plugins": [], "agent_desktop": {"files_sha256": {
             path: hashlib.sha256(data).hexdigest() for path, data in files.items()}}}
         write_file(state / "sources/dependencies.lock.json", json.dumps(lock))
         return fixture, state, files
@@ -711,6 +715,132 @@ class TemporaryHarnessTestCase(unittest.TestCase):
         return harness.FileChange(path, before, after, root or self.fixture.codex)
 
 
+class RegistryPlanTests(TemporaryHarnessTestCase):
+    def register(self, text):
+        write_file(self.fixture.repo / 'registry.toml', 'schema_version = 1\n' + text)
+        registry = harness.load_registry(self.fixture.repo / 'registry.toml')
+        lock = {'schema_version': 2, 'registry_sha256': registry.fingerprint,
+                'registrations': {'plugins': list(registry.plugins), 'mcp': list(registry.mcp)},
+                'plugins': [], 'mcp': [harness.mcp_packages.resolve(spec) for spec in registry.mcp]}
+        for spec in registry.plugins:
+            lock['plugins'].append({**spec, 'version': '1.0.0', 'ref': 'a' * 40,
+                                    'content_sha256': 'b' * 64, 'declaration': spec,
+                                    'declaration_sha256': declaration_hash(spec)})
+            write_file(self.fixture.codex / 'plugins/cache' / spec['marketplace'] / spec['name'] /
+                       '1.0.0/plugin.json', json.dumps({'name': spec['name'], 'version': '1.0.0'}))
+        write_file(self.fixture.repo / 'sources/dependencies.lock.json', json.dumps(lock))
+        return registry, lock
+
+    def planned_config(self, plan):
+        content = next(change.after for change in plan.changes if change.path == self.fixture.codex / 'config.toml')
+        return tomllib.loads(content.decode())
+
+    def test_new_http_registration_merges_with_local_auth_and_runtime(self):
+        self.register('''[[mcp]]
+name = "service"
+kind = "http"
+url = "https://public.example.test/mcp"
+bearer_token_env_var = "SERVICE_TOKEN"
+''')
+        local_url = 'https://private.example.test/mcp?token=private-sentinel'
+        write_file(self.fixture.repo / '.local/roylabs-desktop.toml',
+                   '[config.mcp_servers.service]\nurl = ' + json.dumps(local_url) + '\n' +
+                   '[config.mcp_servers.service.http_headers]\nAuthorization = "private-auth-sentinel"\n')
+        auth = write_file(self.fixture.codex / 'auth.json', b'private-auth-file-sentinel')
+        before = tree_snapshot(self.root)
+        plan = self.build()
+        self.assertEqual(plan.missing, [])
+        self.assertEqual(tree_snapshot(self.root), before)
+        config = self.planned_config(plan)
+        self.assertEqual(config['mcp_servers']['service']['url'], local_url)
+        self.assertEqual(config['mcp_servers']['service']['http_headers']['Authorization'], 'private-auth-sentinel')
+        self.assertEqual(config['mcp_servers']['service']['bearer_token_env_var'], 'SERVICE_TOKEN')
+        self.assertEqual(config['mcp_servers']['node_repl'], tomllib.loads(CURRENT_CONFIG)['mcp_servers']['node_repl'])
+        self.assertEqual(config['mcp_servers']['unrelated'], {'command': 'keep-this-server'})
+        self.assertNotIn('private-sentinel', '\n'.join(plan.settings))
+        self.assertNotIn('private-auth-sentinel', '\n'.join(plan.settings))
+        harness.apply_plan(plan)
+        self.assertEqual(auth.read_bytes(), b'private-auth-file-sentinel')
+        self.assertEqual(self.build().changes, [])
+        self.process.assert_not_called()
+
+    def test_registered_plugin_selection_allows_local_disable(self):
+        self.register('''[[plugins]]
+name = "third"
+marketplace = "third-market"
+source = "https://github.com/example/third.git"
+channel = "git-ref"
+ref = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+manifest = "plugin.json"
+''')
+        write_file(self.fixture.repo / '.local/roylabs-desktop.toml',
+                   '[config.plugins."third@third-market"]\nenabled = false\n')
+        plan = self.build()
+        self.assertEqual(plan.missing, [])
+        config = self.planned_config(plan)
+        self.assertFalse(config['plugins']['third@third-market']['enabled'])
+        self.assertEqual(config['plugins']['unrelated@private'],
+                         tomllib.loads(CURRENT_CONFIG)['plugins']['unrelated@private'])
+
+    def test_old_state_lock_cannot_hide_a_new_registration(self):
+        self.register('''[[mcp]]
+name = "service"
+kind = "http"
+url = "https://public.example.test/mcp"
+''')
+        write_file(self.fixture.repo / 'sources/dependencies.lock.json', '{"schema_version":1,"plugins":[]}')
+        before = tree_snapshot(self.root)
+        plan = self.build()
+        self.assertTrue(plan.missing)
+        with self.assertRaises(harness.HarnessError):
+            harness.apply_plan(plan)
+        self.assertEqual(tree_snapshot(self.root), before)
+
+    def test_transport_conflict_is_reported_without_profile_writes(self):
+        self.register('''[[mcp]]
+name = "service"
+kind = "http"
+url = "https://public.example.test/mcp"
+''')
+        current = self.fixture.codex / 'config.toml'
+        current.write_text(current.read_text(encoding='utf-8-sig') +
+                           '\n[mcp_servers.service]\ncommand = "local-stdio"\n', encoding='utf-8')
+        before = tree_snapshot(self.root)
+        with self.assertRaisesRegex(harness.HarnessError, 'conflicting STDIO and HTTP'):
+            self.build()
+        self.assertEqual(tree_snapshot(self.root), before)
+
+    def test_duplicate_managed_selection_in_common_is_rejected(self):
+        self.register('''[[mcp]]
+name = "service"
+kind = "http"
+url = "https://public.example.test/mcp"
+''')
+        common = self.fixture.repo / 'common/config.toml'
+        common.write_text(common.read_text() + '\n[mcp_servers.service]\nurl = "https://other.example.test"\n')
+        with self.assertRaisesRegex(harness.HarnessError, 'registry.toml'):
+            self.build()
+
+    def test_private_launch_paths_survive_but_old_managed_launchers_update(self):
+        state = self.root / 'state'
+        fresh = state / 'tools/mcp/service/new/Scripts/service.exe'
+        private = self.root / 'private tooling/service.exe'
+        old_managed = state / 'tools/mcp/service/old/Scripts/service.exe'
+        registration = mock.Mock(plugins=(), mcp=({'name': 'service', 'kind': 'python'},))
+        lock = {'mcp': [{'name': 'service'}]}
+        for old, expected in ((private, private), (old_managed, fresh)):
+            with self.subTest(command=old), mock.patch.object(harness, 'lock_issues', return_value=[]), \
+                    mock.patch.object(harness.mcp_packages, 'missing', return_value=[]), \
+                    mock.patch.object(harness.mcp_packages, 'configuration',
+                                      return_value={'command': str(fresh), 'args': ['--managed']}):
+                current = {'mcp_servers': {'service': {'command': str(old), 'args': ['--local']}}}
+                plan = harness.Plan('roylabs-desktop', self.fixture.home, self.fixture.codex)
+                actual = harness.registered_settings(registration, lock, state, plan, {}, current)
+                server = actual['mcp_servers']['service']
+                self.assertEqual(Path(server['command']), expected)
+                self.assertEqual(server['args'], ['--local'] if old == private else ['--managed'])
+
+
 class BuildPlanTests(TemporaryHarnessTestCase):
     def test_plan_is_read_only_and_lists_all_managed_files(self):
         before = tree_snapshot(self.root)
@@ -735,7 +865,7 @@ class BuildPlanTests(TemporaryHarnessTestCase):
         self.assertFalse(self.fixture.home.exists())
         self.assertEqual({change.path for change in plan.changes}, self.fixture.expected_targets())
         self.assertTrue(all(change.before is None for change in plan.changes))
-        for expected in ("node_repl", "codegraph", "agent-desktop", "pstack@pstack-claude", "egm@egm"):
+        for expected in ("node_repl", "codegraph", "agent-desktop"):
             with self.subTest(prerequisite=expected):
                 self.assertTrue(any(expected in message for message in plan.missing), plan.missing)
         self.process.assert_not_called()
