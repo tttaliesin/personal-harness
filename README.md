@@ -8,7 +8,7 @@ Roylabs Desktop의 Codex User Harness를 기준으로 사용자 지침, 스킬, 
 ## 시작하기
 
 Windows x64에서 Node.js 22 이상과 npm, Git, Python 3.11 이상, Codex가 필요하다.
-Git에서 이 비공개 저장소에 접근할 수 있도록 GitHub 인증을 준비한다.
+공개 저장소에서 소스를 받는 데 GitHub 인증은 필요하지 않다.
 처음 사용하는 PC에서는 Codex를 한 번 실행해 로컬 런타임 설정을 생성한다.
 어느 폴더에서든 다음 명령으로 전체 Harness를 설치한다.
 
@@ -22,7 +22,7 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git update
 ```
 
-저장소는 비공개로 유지한다.
+저장소는 공개로 운영한다.
 소스는 설치기가 사용자 전용 경로에서 관리한다.
 PC별 경로와 의존성 기록은 `%LOCALAPPDATA%/PersonalHarness/state`에 보관한다.
 Codex가 생성한 런타임과 인증은 기존 Codex 홈에서 유지한다.
@@ -115,7 +115,7 @@ task install -- -Locked
 | `.local/<hostname>.toml` | 해당 PC에서만 사용하는 경로와 선택적 설정 덮어쓰기. Git 제외 |
 | [sources/dependencies.lock.json](sources/dependencies.lock.json) | 마지막으로 설치·검증한 외부 도구 버전, Git revision, 배포 해시 |
 | [scripts](scripts) | 원격 설치 진입점과 Task가 사용하는 설치·적용 구현 |
-| [package.json](package.json) | 비공개 Git 패키지의 실행 명령과 배포 파일 목록 |
+| [package.json](package.json) | Git 패키지의 실행 명령과 배포 파일 목록 |
 
 ```mermaid
 flowchart LR

@@ -1,6 +1,6 @@
-# 비공개 저장소에서 한 명령으로 설치하기
+# 한 명령으로 Harness 설치하기
 
-설치기는 비공개 GitHub 저장소에서 받은 공통 정책과 스킬을 해당 PC의 Codex 설정에 병합한다.
+설치기는 공개 GitHub 저장소에서 받은 공통 정책과 스킬을 해당 PC의 Codex 설정에 병합한다.
 의존성 설치, Harness 적용과 상태 검증을 하나의 명령으로 실행한다.
 사용자가 소스를 직접 clone하거나 Task를 설치할 필요는 없다.
 
@@ -8,8 +8,8 @@
 
 Windows x64에서 Node.js 22 이상과 npm, Git, Python 3.11 이상, Codex가 필요하다.
 대상 PC에서 Codex를 한 번 실행해 로컬 런타임 설정을 생성한다.
-Git의 자격 증명 도우미에 이 저장소를 읽을 수 있는 GitHub 계정을 연결한다.
-GitHub CLI를 사용하는 경우 `gh auth login`과 `gh auth setup-git`으로 준비할 수 있다.
+공개 소스를 내려받는 데 GitHub 로그인은 필요하지 않다.
+Codex 사용에 필요한 계정과 인증은 해당 PC의 기존 설정을 사용한다.
 
 다음 명령으로 저장소 접근을 확인한다.
 
@@ -17,9 +17,9 @@ GitHub CLI를 사용하는 경우 `gh auth login`과 `gh auth setup-git`으로 �
 git ls-remote https://github.com/tttaliesin/personal-harness.git HEAD
 ```
 
-인증은 Git과 npm이 처리한다.
+공개 소스는 Git과 npm이 내려받는다.
 설치기는 토큰을 추출하거나 별도 파일에 저장하지 않는다.
-저장소 공개 전환과 npm 레지스트리 게시는 필요하지 않다.
+npm 레지스트리에 패키지를 게시하지 않고 GitHub 소스에서 직접 실행한다.
 
 ## 설치와 갱신
 
@@ -79,7 +79,7 @@ Ego와 `ego-browser`는 해당 PC의 브라우저가 관리한다.
 
 ```mermaid
 flowchart LR
-    G[비공개 GitHub 저장소] --> N[npx 실행]
+    G[공개 GitHub 저장소] --> N[npx 실행]
     N --> S[버전별 공통 소스]
     S --> I[기존 설치·적용·검증 절차]
     L[PC별 상태와 경로] --> I

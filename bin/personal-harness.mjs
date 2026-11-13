@@ -5,9 +5,9 @@ import path from 'node:path';
 
 const usage = `Usage: personal-harness <install|update> [options]
 
-Install or update the private Windows harness and check the result.
+Install or update the Windows harness and check the result.
 Python 3.11+, Git, Node/npm and Codex must already be installed.
-Git and npm handle private repository authentication.
+The public GitHub source can be downloaded without signing in.
 
 Options:
   --host NAME           Bundled host profile (defaults to COMPUTERNAME)
