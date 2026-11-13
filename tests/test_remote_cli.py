@@ -10,6 +10,7 @@ import tarfile
 from tempfile import TemporaryDirectory
 import time
 import unittest
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,7 +32,8 @@ class FixturePython {
         catch (Exception error) { Console.Error.WriteLine(error.GetType().Name + ": " + error.Message); return 93; }
     }
     static int Run(string[] arguments) {
-        string self = System.Reflection.Assembly.GetExecutingAssembly().Location;
+        string self = Environment.GetCommandLineArgs()[0];
+        if (self.StartsWith(@"\\?\")) self = self.Substring(4);
         var record = new List<string>(); record.Add(self); record.AddRange(arguments);
         File.AppendAllText(Environment.GetEnvironmentVariable("HARNESS_FIXTURE_PYTHON_LOG"),
             Convert.ToBase64String(Encoding.UTF8.GetBytes(String.Join("\0", record))) + "\n");
@@ -63,8 +65,9 @@ class FixturePython {
             if (args[1].Contains("import tomlkit")) return Code("HARNESS_FIXTURE_IMPORT_EXIT");
             return 0;
         }
-        if (args.Count == 3 && args[0] == "-m" && args[1] == "venv") {
-            string target = @"\\?\" + args[2]; Directory.CreateDirectory(target);
+        if (args.Count >= 3 && args[0] == "-m" && args[1] == "venv") {
+            string path = args[args.Count - 1];
+            string target = path.StartsWith(@"\\?\") ? path : @"\\?\" + path; Directory.CreateDirectory(target);
             string attempt = Path.Combine(target, "fixture-attempt");
             if (Environment.GetEnvironmentVariable("HARNESS_FIXTURE_INCOMPLETE_VENV") == "1" && !File.Exists(attempt)) {
                 File.WriteAllText(attempt, "incomplete"); return 29;
@@ -75,6 +78,7 @@ class FixturePython {
             return 0;
         }
         if (args.Count >= 3 && args[0] == "-m" && args[1] == "pip" && args[2] == "install") return Code("HARNESS_FIXTURE_PIP_EXIT");
+        if (args.Count == 3 && args[0] == "-m" && args[1] == "ensurepip" && args[2] == "--upgrade") return 0;
         return 91;
     }
     static int Code(string name) {
@@ -211,9 +215,18 @@ class RemoteCliTests(unittest.TestCase):
     def receipt(self, manager=None):
         return json.loads(((manager or self.manager) / "active.json").read_text(encoding="utf-8"))
 
-    def legacy_source(self, change=None):
+    def legacy_source(self, change=None, pre_registry=True):
         hashes = dict([call for call in self.calls() if call["kind"] == "wrapper"][-1]["hashes"])
         content = {name: (self.payload / name).read_bytes() for name in hashes}
+        if pre_registry:
+            manifest = json.loads(content["package.json"])
+            manifest["files"].remove("registry.toml")
+            content["package.json"] = json.dumps(manifest, indent=2).encode()
+            old_scripts = {"bootstrap.ps1", "harness.ps1", "harness.py", "install_dependencies.py",
+                           "install-dependencies.ps1", "update-dependencies.ps1"}
+            content = {name: data for name, data in content.items()
+                       if name != "registry.toml" and
+                       (not name.startswith("scripts/") or name.removeprefix("scripts/") in old_scripts)}
         if change:
             content["README.md"] += change
         hashes = {name: hashlib.sha256(data).hexdigest() for name, data in content.items()}
@@ -473,7 +486,7 @@ class RemoteCliTests(unittest.TestCase):
     def test_verified_legacy_migration_waits_for_success_and_preserves_persistent_files(self):
         self.run_cli()
         first = self.legacy_source()
-        second = self.legacy_source(b"\nolder revision\n")
+        second = self.legacy_source(b"\nolder revision\n", pre_registry=False)
         previous = self.legacy_receipt(first)
         sentinels = {}
         for target in (self.state / "tools/unrelated.exe", self.state / "sources/lock.json",
@@ -532,12 +545,42 @@ class RemoteCliTests(unittest.TestCase):
         self.assertTrue(verified.exists())
         self.assertEqual((self.manager / "active.json").read_bytes(), previous)
 
+    def test_foreign_git_legacy_source_is_retained_without_success_receipt(self):
+        self.run_cli()
+        verified = self.legacy_source()
+        previous = self.legacy_receipt(verified)
+        git = verified / ".git"
+        git.mkdir()
+        self.run_cli("update", expected=1)
+        self.assertTrue(git.is_dir())
+        self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+        git.rmdir()
+        git.write_text("gitdir: unrelated", encoding="utf-8")
+        self.run_cli("update", expected=1)
+        self.assertEqual(git.read_text(), "gitdir: unrelated")
+        self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+
+    def test_incoming_pre_registry_payload_is_still_refused(self):
+        self.run_cli()
+        previous = (self.manager / "active.json").read_bytes()
+        manifest_path = self.payload / "package.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["files"].remove("registry.toml")
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        (self.payload / "registry.toml").unlink()
+        result = self.run_cli("update", expected=1)
+        self.assertIn(b"Required source is missing from the payload allowlist: registry.toml", result.stderr)
+        self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+
     def test_runtime_references_are_rejected_without_disclosing_values(self):
         self.run_cli()
         verified = self.legacy_source()
         previous = self.legacy_receipt(verified)
         config = self.state / "roylabs-desktop.toml"
         for content in (
+            {'config': {'notify': ['powershell', '-File', str(verified / 'scripts/harness.ps1')]}},
+            {'config': {'model_catalog_json': str(verified / 'catalog.json')}},
+            {'config': {'mcp_servers': {'custom': {'args': [str(self.state / '..' / 'releases' / verified.name / 'scripts/harness.ps1')]}}}},
             {'config': {'mcp_servers': {'custom': {'command': str(verified / 'tool.exe')}}}},
             {'config': {'mcp_servers': {'custom': {'args': [str(self.payload / 'tool.exe')]}}}},
             {'config': {'mcp_servers': {'custom': {'cwd': str(self.manager / 'runs/another/source')}}}},
@@ -580,15 +623,41 @@ class RemoteCliTests(unittest.TestCase):
     def test_cleanup_refusal_retains_receipt_and_preserves_child_failure_code(self):
         self.run_cli()
         previous = (self.manager / "active.json").read_bytes()
-        for stage, expected in ((None, 1), ("check", 43)):
-            environment = dict(self.environment, HARNESS_FIXTURE_BAD_OWNER="1")
-            if stage:
-                environment["HARNESS_FIXTURE_FAIL_STAGE"] = stage
-            result = self.run_cli("update", expected=expected, environment=environment, clean=False)
-            self.assertIn(b"Source cleanup failed", result.stderr)
-            self.assertEqual((self.manager / "active.json").read_bytes(), previous)
-            source = Path([call for call in self.calls() if call["kind"] == "wrapper"][-1]["source"])
-            self.assertTrue(source.exists())
+        environment = dict(self.environment, HARNESS_FIXTURE_BAD_OWNER="1", HARNESS_FIXTURE_FAIL_STAGE="check")
+        result = self.run_cli("update", expected=43, environment=environment, clean=False)
+        self.assertIn(b"Source cleanup failed", result.stderr)
+        self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+        source = Path([call for call in self.calls() if call["kind"] == "wrapper"][-1]["source"])
+        self.assertTrue(source.exists())
+        result = self.run_cli("update", expected=1)
+        self.assertIn(b"Abandoned source runs", result.stderr)
+        self.assertTrue(source.exists())
+        self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+
+    def test_interrupted_run_is_retained_and_retry_cannot_report_success(self):
+        self.run_cli()
+        previous = (self.manager / "active.json").read_bytes()
+        gate = self.root / "interrupted-gate"
+        first = subprocess.Popen(self.arguments("update"), cwd=self.caller,
+                                 env=dict(self.environment, HARNESS_FIXTURE_GATE=str(gate)),
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            deadline = time.monotonic() + 15
+            while not gate.with_suffix(".entered").exists() and first.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.03)
+            self.assertTrue(gate.with_suffix(".entered").exists(), "Bootstrap did not reach its held wrapper")
+            killed = subprocess.run(["taskkill.exe", "/PID", str(first.pid), "/T", "/F"], capture_output=True)
+            self.assertEqual(killed.returncode, 0, killed.stdout + killed.stderr)
+        finally:
+            gate.write_text("release", encoding="utf-8")
+            first.communicate(timeout=15)
+        runs = self.manager / "runs"
+        before = {path.relative_to(runs): path.read_bytes() for path in runs.rglob("*") if path.is_file()}
+        self.assertTrue(any(path.name == "owner.json" for path in before))
+        result = self.run_cli("update", expected=1)
+        self.assertIn(b"Abandoned source runs", result.stderr)
+        self.assertEqual({path.relative_to(runs): path.read_bytes() for path in runs.rglob("*") if path.is_file()}, before)
+        self.assertEqual((self.manager / "active.json").read_bytes(), previous)
 
     def test_real_python_base_inside_source_is_rejected(self):
         base = self.payload / "hidden-base.exe"
@@ -609,6 +678,28 @@ class RemoteCliTests(unittest.TestCase):
         self.run_cli("update", python=False, environment=dict(self.environment, PATH=str(self.root / "missing")))
         self.assertEqual(self.receipt()["python"], first["python"])
         probe = subprocess.run([first["python"], "-B", "-c", "import tomlkit; import sys; sys.exit(0)"], capture_output=True)
+        self.assertEqual(probe.returncode, 0, probe.stderr)
+
+    def test_real_python_provisions_pip_and_requirements_in_long_state(self):
+        self.state = self.root / ("long-state-" + "x" * max(10, 135 - len(str(self.root))))
+        wheel = self.root / "tomlkit-0.0.0-py3-none-any.whl"
+        with zipfile.ZipFile(wheel, "w") as archive:
+            archive.writestr("tomlkit.py", "fixture = True\n")
+            archive.writestr("tomlkit-0.0.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: tomlkit\nVersion: 0.0.0\n")
+            archive.writestr("tomlkit-0.0.0.dist-info/WHEEL", "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+            archive.writestr("tomlkit-0.0.0.dist-info/RECORD", "")
+        (self.payload / "requirements.txt").write_text(str(wheel), encoding="utf-8")
+        environment = dict(self.environment, PIP_NO_INDEX="1", PIP_CONFIG_FILE=os.devnull)
+        self.run_cli(extra=["--python", sys.executable, "--state-root", str(self.state)], python=False,
+                     environment=environment)
+        receipt = self.receipt()
+        managed = receipt["python"]
+        self.assertFalse(managed.startswith("\\\\?\\"))
+        self.assertGreater(len(managed + r"\..\Lib\site-packages\pip\_vendor\urllib3\contrib\emscripten\emscripten_fetch_worker.js"), 260)
+        self.assertEqual(Path(managed).parent.parent.parent.parent, self.state)
+        self.assertTrue((Path(managed).parent.parent / "ready.json").is_file())
+        probe = subprocess.run(["\\\\?\\" + managed, "-B", "-c", "import pip, tomlkit; assert tomlkit.fixture"],
+                               capture_output=True)
         self.assertEqual(probe.returncode, 0, probe.stderr)
 
     def test_invalid_python_is_not_silently_replaced(self):

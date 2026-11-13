@@ -161,20 +161,24 @@ function Assert-RuntimeReferences([string]$Python, [string[]]$Files, [string[]]$
     $audit = @'
 import base64, json, os, re, sys, tomllib
 request = json.loads(base64.b64decode(sys.argv[1]))
-roots = [root.replace('\\', '/').casefold().rstrip('/') for root in request['roots']]
-def walk(value, runtime=False, local_paths=False):
+def normalized(value):
+    return os.path.realpath(os.path.normpath(value)).replace('\\', '/').removeprefix('//?/').casefold().rstrip('/')
+roots = [normalized(root) for root in request['roots']]
+def walk(value, local_paths=False):
     if isinstance(value, dict):
         for key, child in value.items():
             if key != 'env_vars':
-                walk(child, runtime or key in ('command', 'args', 'cwd', 'path', 'paths', 'env', 'model_providers', 'hooks', 'skills'), local_paths or key == 'paths')
+                walk(child, local_paths or key == 'paths')
     elif isinstance(value, list):
         for child in value:
-            walk(child, runtime, local_paths)
-    elif runtime and isinstance(value, str):
-        normalized = value.replace('\\', '/').casefold()
-        if '${REPO_ROOT}' in value or any(re.search(re.escape(root) + r'(?=$|[/;:\s\x22\x27])', normalized) for root in roots):
+            walk(child, local_paths)
+    elif isinstance(value, str):
+        candidates = [value.replace('\\', '/').casefold()]
+        candidates.extend(normalized(part) for part in value.split(';') if part)
+        candidates.extend(normalized(part) for part in re.findall(r'(?:[A-Za-z]:[/\\]|\\\\)[^;\x22\x27]+', value))
+        if '${REPO_ROOT}' in value or any(re.search(re.escape(root) + r'(?=$|[/;:\s\x22\x27])', candidate) for root in roots for candidate in candidates):
             raise ValueError()
-        if local_paths and '/' in normalized and not os.path.isabs(value) and '${' not in value:
+        if local_paths and '/' in value.replace('\\', '/') and not os.path.isabs(value) and '${' not in value:
             raise ValueError()
 try:
     for filename in request['files']:
@@ -191,19 +195,24 @@ except Exception:
     if ($LASTEXITCODE -ne 0) { throw 'Runtime reference audit failed; no configuration values were disclosed.' }
 }
 
-function Get-CapturedPayload([string]$Root, [string]$HostName) {
+function Get-CapturedPayload([string]$Root, [string]$HostName, [switch]$Legacy) {
+    if ($Legacy -and (Test-Path -LiteralPath (Get-IOPath ([IO.Path]::Combine($Root, '.git'))))) {
+        throw 'Legacy source cleanup refused a foreign Git checkout.'
+    }
     $manifest = [IO.File]::ReadAllText((Get-IOPath ([IO.Path]::Combine($Root, 'package.json')))) | ConvertFrom-Json
     if ($manifest.name -cne '@tttaliesin/personal-harness' -or
         $manifest.bin.'personal-harness' -cne 'bin/personal-harness.mjs') {
         throw 'Source package identity is not personal-harness.'
     }
-    $required = @('package.json', 'README.md', 'requirements.txt', 'registry.toml', 'bin/personal-harness.mjs',
+    $required = @('package.json', 'README.md', 'requirements.txt', 'bin/personal-harness.mjs',
         'scripts/bootstrap.ps1', 'scripts/update-dependencies.ps1', 'scripts/install-dependencies.ps1',
         'scripts/harness.ps1', 'scripts/install_dependencies.py', 'scripts/harness.py',
-        'scripts/registry.py', 'scripts/mcp_packages.py', 'scripts/windows_paths.py',
         'common/AGENTS.md', 'common/config.toml', 'skills/create-readme/SKILL.md',
         'skills/agent-desktop/SKILL.md', 'skills/agent-desktop-windows/SKILL.md',
         'sources/agent-desktop-LICENSE', 'sources/dependencies.lock.json', "hosts/$hostName.toml")
+    if (-not $Legacy -or $manifest.files -contains 'registry.toml') {
+        $required += @('registry.toml', 'scripts/registry.py', 'scripts/mcp_packages.py', 'scripts/windows_paths.py')
+    }
     $paths = @('package.json', 'README.md')
     $exclusions = @()
     foreach ($entry in $manifest.files) {
@@ -360,6 +369,10 @@ try {
         finally { if (-not $acquired) { $mutex.Dispose() } }
     }
 
+    if ([IO.Directory]::Exists((Get-IOPath $runs)) -and
+        (Get-Item -LiteralPath (Get-IOPath $runs) -Force).GetFileSystemInfos().Count -gt 0) {
+        throw 'Abandoned source runs were retained; cleanup ownership must be resolved before retrying.'
+    }
     $nonce = [Guid]::NewGuid().ToString('N')
     $runRoot = Get-CanonicalPath ([IO.Path]::Combine($runs, $nonce)) $caller
     $runSource = @{ Root = $runRoot; Nonce = $nonce; Hash = $payloadHash }
@@ -389,7 +402,7 @@ try {
         if ($python -eq $venvPython) {
             throw 'The selected managed Python is unusable. Pass --python with a working Python 3.11+ executable outside this venv, then retry.'
         }
-        & $python -m venv $venv
+        & (Get-IOPath $python) -m venv --without-pip (Get-IOPath $venv) | Out-Host
         if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE; throw 'Python venv creation failed. Ensure the selected Python includes venv and pip, then retry.' }
     }
     $ready = $false
@@ -402,7 +415,9 @@ try {
         $ready = $LASTEXITCODE -eq 0
     }
     if (-not $ready) {
-        & $venvPython -m pip install --disable-pip-version-check --requirement ([IO.Path]::Combine($release, 'requirements.txt'))
+        & (Get-IOPath $venvPython) -m ensurepip --upgrade | Out-Host
+        if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE; throw 'Python pip bootstrap failed. Fix the reported ensurepip error and retry.' }
+        & (Get-IOPath $venvPython) -m pip install --disable-pip-version-check --requirement (Get-IOPath ([IO.Path]::Combine($release, 'requirements.txt'))) | Out-Host
         if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE; throw 'Installing the pinned Python requirements failed. Fix the reported pip error and retry.' }
         & $venvPython -c 'import tomlkit'
         if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE; throw 'Python requirements import check failed. Retry with a working Python 3.11+ installation.' }
@@ -432,7 +447,7 @@ try {
             }
             $oldRoot = Get-CanonicalPath $item.FullName $caller
             Assert-NoLinks $oldRoot
-            $old = Get-CapturedPayload $oldRoot $hostName
+            $old = Get-CapturedPayload $oldRoot $hostName -Legacy
             Assert-Payload $oldRoot $old.Files
             if ($old.Hash -cne $item.Name) { throw 'Legacy source cleanup is incomplete; a modified release was retained.' }
             $legacy += $oldRoot
