@@ -30,6 +30,9 @@ if ($env:LAUNCHER_GATE) {
 if ($env:LAUNCHER_MUTATE) {
     [IO.File]::WriteAllText((Join-Path $request.sourceRoot 'package.json'), '{}')
 }
+if ($env:LAUNCHER_REQUEST_MUTATE) {
+    [IO.File]::WriteAllText((Join-Path $request.sourceRoot '../../../package.json'), $env:LAUNCHER_REQUEST_MUTATE)
+}
 if ($env:LAUNCHER_GIT_MARKER) {
     [IO.File]::WriteAllText((Join-Path $request.sourceRoot $env:LAUNCHER_GIT_MARKER), 'gitdir: retained-checkout')
 }
@@ -82,12 +85,13 @@ class NpxLifecycleTests(unittest.TestCase):
             "bin": {"personal-harness": "bin/personal-harness.mjs"},
         }), encoding="utf-8")
 
-    def prepare_entry(self):
+    def prepare_entry(self, include_npx=False):
         self.write_package(self.package)
         dependency = {NAME: "github:tttaliesin/personal-harness"}
-        (self.entry / "package.json").write_text(json.dumps({
-            "dependencies": dependency, "_npx": {"packages": [SPEC]},
-        }), encoding="utf-8")
+        request = {"dependencies": dependency}
+        if include_npx:
+            request["_npx"] = {"packages": [SPEC]}
+        (self.entry / "package.json").write_text(json.dumps(request), encoding="utf-8")
         (self.entry / "package-lock.json").write_text(json.dumps({
             "lockfileVersion": 3, "packages": {
                 "": {"dependencies": dependency}, RELATIVE: {
@@ -157,6 +161,18 @@ class NpxLifecycleTests(unittest.TestCase):
         self.run_launcher(["update"], environment=direct)
         self.assertTrue(self.package.exists())
 
+    def test_absent_npx_metadata_allows_help_and_preserves_entry(self):
+        self.prepare_entry()
+        sentinels = self.sentinels()
+        metadata = {filename: filename.read_bytes() for filename in
+                    [self.entry / "package.json", self.entry / "package-lock.json"]}
+        result = self.run_launcher(["--help"])
+        self.assertIn(b"Usage:", result.stdout)
+        self.assertFalse(self.package.exists())
+        self.assertFalse((self.entry / ".personal-harness-source.lease").exists())
+        self.assertFalse(self.log.exists())
+        self.assert_preserved(sentinels | metadata)
+
     def test_git_checkouts_in_accepted_npm_package_are_refused_before_bootstrap(self):
         for nested in (False, True):
             for git_file in (False, True):
@@ -218,29 +234,66 @@ class NpxLifecycleTests(unittest.TestCase):
 
     def test_unverified_ownership_is_refused_without_starting_child(self):
         mutations = [
-            (self.entry / "package.json", lambda value: value["_npx"].update(packages=["other"])),
-            (self.entry / "package.json", lambda value: value["_npx"].update(packages=SPEC)),
             (self.entry / "package.json", lambda value: value["dependencies"].update({NAME: "file:other"})),
+            (self.entry / "package.json", lambda value: value.pop("dependencies")),
+            (self.entry / "package-lock.json", lambda value: value["packages"][""].update(dependencies={NAME: "file:other"})),
+            (self.entry / "package-lock.json", lambda value: value["packages"].pop("")),
+            (self.entry / "package-lock.json", lambda value: value["packages"].pop(RELATIVE)),
             (self.entry / "package-lock.json", lambda value: value["packages"][RELATIVE].update(resolved=SPEC.replace("tttaliesin", "other") + "#" + "a" * 40)),
+            (self.entry / "package-lock.json", lambda value: value["packages"][RELATIVE].update(resolved=SPEC)),
+            (self.entry / "package-lock.json", lambda value: value["packages"][RELATIVE].update(version="0.2.0")),
             (self.entry / "package-lock.json", lambda value: value["packages"][RELATIVE]["bin"].update({"personal-harness": "other.mjs"})),
             (self.package / "package.json", lambda value: value.update(name="other")),
+            (self.package / "package.json", lambda value: value.pop("version")),
             (self.package / "package.json", lambda value: value["bin"].update({"personal-harness": "other.mjs"})),
         ]
         self.prepare_entry()
-        for filename, mutate in mutations:
-            with self.subTest(metadata=filename.name):
+        for index, (filename, mutate) in enumerate(mutations):
+            with self.subTest(predicate=index, metadata=filename.name):
                 original = filename.read_bytes()
                 value = json.loads(original)
                 mutate(value)
                 filename.write_text(json.dumps(value), encoding="utf-8")
-                self.run_launcher(["install"], expected=1)
+                result = self.run_launcher(["install"], expected=1)
+                self.assertIn(b"unverified npm package ownership", result.stderr)
                 self.assertTrue(self.package.exists())
                 self.assertFalse(self.log.exists())
+                self.assertFalse((self.entry / ".personal-harness-source.lease").exists())
                 filename.write_bytes(original)
         self.run_launcher(["install"], expected=1,
                           environment=dict(self.environment, npm_config_cache=str(self.root / "other-cache")))
         self.assertTrue(self.package.exists())
         self.assertFalse(self.log.exists())
+
+    def test_present_npx_metadata_requires_an_object_with_exact_string_packages(self):
+        self.prepare_entry(include_npx=True)
+        filename = self.entry / "package.json"
+        request = json.loads(filename.read_text(encoding="utf-8"))
+        sentinels = self.sentinels()
+        malformed = [None, False, 1, SPEC, [], [SPEC], {}, {"packages": None},
+                     {"packages": SPEC}, {"packages": {}}, {"packages": []},
+                     {"packages": ["other"]}, {"packages": [SPEC + "#" + "a" * 40]},
+                     {"packages": [SPEC, None]}, {"packages": [SPEC, 1]},
+                     {"packages": [SPEC, {}]}, {"packages": [SPEC, [SPEC]]}]
+        for metadata in malformed:
+            with self.subTest(metadata=metadata):
+                request["_npx"] = metadata
+                filename.write_text(json.dumps(request), encoding="utf-8")
+                result = self.run_launcher(["install"], expected=1)
+                self.assertIn(b"unverified npm package ownership", result.stderr)
+                self.assertTrue(self.package.exists())
+                self.assertFalse(self.log.exists())
+                self.assertFalse((self.entry / ".personal-harness-source.lease").exists())
+                self.assertEqual(json.loads(filename.read_text(encoding="utf-8")), request)
+                self.assert_preserved(sentinels)
+        request["_npx"] = {"packages": ["other", SPEC]}
+        filename.write_text(json.dumps(request), encoding="utf-8")
+        result = self.run_launcher(["--help"])
+        self.assertIn(b"Usage:", result.stdout)
+        self.assertFalse(self.package.exists())
+        self.assertFalse((self.entry / ".personal-harness-source.lease").exists())
+        self.assertFalse(self.log.exists())
+        self.assert_preserved(sentinels)
 
     def test_stale_lease_is_preserved_and_refused(self):
         self.prepare_entry()
@@ -276,6 +329,26 @@ class NpxLifecycleTests(unittest.TestCase):
                 self.assertFalse((self.entry / ".personal-harness-source.lease").exists())
                 self.assertTrue(self.package.resolve().is_relative_to(self.root))
                 shutil.rmtree(self.package)
+
+    def test_npx_metadata_created_by_bootstrap_is_revalidated(self):
+        for metadata in (None, {"packages": [SPEC, 1]}):
+            for child_code in ("0", "43"):
+                with self.subTest(metadata=metadata, child_code=child_code):
+                    self.prepare_entry()
+                    sentinels = self.sentinels()
+                    request = json.dumps({"dependencies": {NAME: "github:tttaliesin/personal-harness"},
+                                          "_npx": metadata})
+                    result = self.run_launcher(["update"], expected=int(child_code) or 1,
+                                               environment=dict(self.environment, LAUNCHER_EXIT=child_code,
+                                                                LAUNCHER_REQUEST_MUTATE=request))
+                    self.assertIn(b"cleanup failed", result.stderr)
+                    self.assertIn(b"unverified npm package ownership", result.stderr)
+                    self.assertTrue(self.package.exists())
+                    self.assertEqual((self.entry / "package.json").read_text(encoding="utf-8"), request)
+                    self.assertFalse((self.entry / ".personal-harness-source.lease").exists())
+                    self.assert_preserved(sentinels)
+                    shutil.rmtree(self.package)
+        self.assertEqual(len(self.calls()), 4)
 
     def test_package_junction_and_linked_descendants_are_preserved(self):
         self.prepare_entry()
