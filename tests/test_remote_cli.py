@@ -10,6 +10,7 @@ import tarfile
 from tempfile import TemporaryDirectory
 import time
 import unittest
+from unittest.mock import patch
 import zipfile
 
 
@@ -619,6 +620,90 @@ class RemoteCliTests(unittest.TestCase):
         before = config.read_bytes()
         self.run_cli("update")
         self.assertEqual(config.read_bytes(), before)
+
+    def occupied_pipe(self):
+        import _winapi
+        pipe = rf"\\.\pipe\personal-harness-{os.getpid()}-{time.time_ns()}"
+        server = _winapi.CreateNamedPipe(pipe, _winapi.PIPE_ACCESS_DUPLEX, _winapi.PIPE_WAIT,
+                                        1, 4096, 4096, 0, 0)
+        self.addCleanup(_winapi.CloseHandle, server)
+        client = _winapi.CreateFile(pipe, _winapi.GENERIC_READ | _winapi.GENERIC_WRITE,
+                                    0, 0, _winapi.OPEN_EXISTING, 0, 0)
+        self.addCleanup(_winapi.CloseHandle, client)
+        with self.assertRaises(OSError) as busy:
+            os.path.realpath(pipe)
+        self.assertEqual(busy.exception.winerror, 231)
+        return pipe
+
+    def test_busy_runtime_pipe_preserves_config_and_cleans_source(self):
+        import tomlkit
+        pipe = self.occupied_pipe()
+        config = self.home / ".codex/config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_text(tomlkit.dumps({'mcp_servers': {'node_repl': {'env': {
+            'SKY_CUA_NATIVE_PIPE_DIRECTORY': pipe,
+        }}}}), encoding="utf-8")
+        before = config.read_bytes()
+        self.run_cli()
+        self.run_cli("update")
+        self.assertEqual(config.read_bytes(), before)
+        self.assertEqual(self.receipt()["schema_version"], 2)
+
+    def test_pipe_values_cannot_hide_runtime_source_references(self):
+        import tomlkit
+        pipe = self.occupied_pipe()
+        self.payload = self.payload.rename(self.root / "source")
+        self.run_cli()
+        previous = (self.manager / "active.json").read_bytes()
+        alias = self.root / "source-alias"
+        self.junction(alias, self.payload)
+        config = self.state / "roylabs-desktop.toml"
+        for index, value in enumerate((
+            f"{pipe};{self.payload}",
+            pipe + r"\${REPO_ROOT}\tool.exe",
+            f'{pipe};"{alias / "README.md"}"',
+            f'{pipe};"{alias / "missing-leaf.exe"}"',
+            f'command "{pipe}" "{alias / "missing-leaf.exe"}"',
+        )):
+            with self.subTest(case=index):
+                config.write_text(tomlkit.dumps({'config': {'mcp_servers': {'custom': {
+                    'env': {'PYTHONPATH': value},
+                }}}}), encoding="utf-8")
+                before = config.read_bytes()
+                calls = len(self.calls())
+                result = self.run_cli("update", expected=1)
+                self.assertIn(b"Runtime reference audit failed", result.stderr)
+                self.assertNotIn(value.encode(), result.stderr)
+                self.assertEqual(config.read_bytes(), before)
+                self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+                self.assertEqual(len(self.calls()), calls)
+
+    def test_runtime_normalization_only_bypasses_exact_pipe_namespaces(self):
+        bootstrap = (ROOT / "scripts/bootstrap.ps1").read_text(encoding="utf-8")
+        definition = bootstrap.split("def normalized(value):\n", 1)[1].split("\nroots =", 1)[0]
+        namespace = {"os": os}
+        exec("def normalized(value):\n" + definition, namespace)
+        normalized = namespace["normalized"]
+        disk = str(self.root / "canonical-disk")
+        with patch("os.path.realpath", return_value=disk) as realpath:
+            for value in (
+                "//./pipe/", "//?/pipe/", "//./PiPe/Name", "//?/PIPE/Name/",
+                r"\\.\PIPE\Name\Child", "//?/pipe/Name/Child/",
+            ):
+                with self.subTest(pipe=value):
+                    realpath.reset_mock()
+                    self.assertEqual(normalized(value), value.replace("\\", "/").casefold().rstrip("/"))
+                    realpath.assert_not_called()
+            for value in (
+                "//./pipe", "//?/pipe", "//server/pipe/name", "//./pipeline/name",
+                "//./pipe//", "//?/pipe/name//", "//./pipe/name//child",
+                "//./pipe/./name", "//?/pipe/name/../child", "//./pipe/../disk",
+                "//./pipe/..", "//?/pipe/.", "///./pipe/name", "prefix//./pipe/name",
+            ):
+                with self.subTest(disk=value):
+                    realpath.reset_mock()
+                    self.assertEqual(normalized(value), disk.replace("\\", "/").casefold())
+                    realpath.assert_called_once_with(os.path.normpath(value))
 
     def test_cleanup_refusal_retains_receipt_and_preserves_child_failure_code(self):
         self.run_cli()
