@@ -177,12 +177,6 @@ try {
     if ($options.ContainsKey('codex')) {
         $overrides.Codex = if ($options.codex -match '[/\\:]') { Get-CanonicalPath $options.codex $caller } else { $options.codex }
     }
-    $pythonRequest = if ($options.ContainsKey('python')) { [string]$options.python } else { '' }
-    $python = Find-Python $pythonRequest $caller
-    if ((Test-Within $python $source) -or (Test-Within $python $releases)) {
-        throw 'The base Python executable must be outside the source payload and managed releases.'
-    }
-
     $manifest = [IO.File]::ReadAllText((Get-IOPath ([IO.Path]::Combine($source, 'package.json')))) | ConvertFrom-Json
     $required = @('package.json', 'README.md', 'requirements.txt', 'bin/personal-harness.mjs',
         'scripts/bootstrap.ps1', 'scripts/update-dependencies.ps1', 'scripts/install-dependencies.ps1',
@@ -232,6 +226,23 @@ try {
     }
     $payloadHash = Get-Sha256 ([Text.Encoding]::UTF8.GetBytes($identity.ToString()))
 
+    $pythonRequest = if ($options.ContainsKey('python')) { [string]$options.python } else { '' }
+    $requirementsHash = $payload['requirements.txt'].Hash
+    $venv = [IO.Path]::Combine($state, 'python', $requirementsHash)
+    $venvPython = Get-CanonicalPath ([IO.Path]::Combine($venv, 'Scripts/python.exe')) $caller
+    $python = ''
+    if (-not $pythonRequest) {
+        Assert-NoLinks $venvPython
+        if ([IO.File]::Exists((Get-IOPath ([IO.Path]::Combine($venv, 'pyvenv.cfg'))))) {
+            try { $python = Find-Python $venvPython $caller }
+            catch { $python = '' }
+        }
+    }
+    if (-not $python) { $python = Find-Python $pythonRequest $caller }
+    if ((Test-Within $python $source) -or (Test-Within $python $releases)) {
+        throw 'The base Python executable must be outside the source payload and managed releases.'
+    }
+
     $resources = [string[]]@($manager, $state, $homePath, $codexPath | ForEach-Object { $_.ToUpperInvariant() } | Sort-Object -Unique)
     foreach ($resource in $resources) {
         $key = Get-Sha256 ([Text.Encoding]::UTF8.GetBytes($resource))
@@ -266,19 +277,22 @@ try {
         [IO.Directory]::Move((Get-IOPath $staging), (Get-IOPath $release))
     }
     Assert-Payload $release $payload
-    $requirementsHash = $payload['requirements.txt'].Hash
-    $venv = [IO.Path]::Combine($state, 'python', $requirementsHash)
-    $venvPython = [IO.Path]::Combine($venv, 'Scripts/python.exe')
     $readyPath = [IO.Path]::Combine($venv, 'ready.json')
     Assert-NoLinks $venvPython
     Assert-NoLinks $readyPath
     $probe = 'import sys; sys.exit(0) if sys.version_info >= (3, 11) else sys.exit(1)'
     $usable = $false
     if ([IO.File]::Exists((Get-IOPath $venvPython)) -and [IO.File]::Exists((Get-IOPath ([IO.Path]::Combine($venv, 'pyvenv.cfg'))))) {
-        & $venvPython -c $probe *> $null
-        $usable = $LASTEXITCODE -eq 0
+        try {
+            & $venvPython -c $probe *> $null
+            $usable = $LASTEXITCODE -eq 0
+        }
+        catch { $usable = $false }
     }
     if (-not $usable) {
+        if ($python -eq $venvPython) {
+            throw 'The selected managed Python is unusable. Pass --python with a working Python 3.11+ executable outside this venv, then retry.'
+        }
         & $python -m venv $venv
         if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE; throw 'Python venv creation failed. Ensure the selected Python includes venv and pip, then retry.' }
     }
