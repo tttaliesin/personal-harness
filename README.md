@@ -23,7 +23,7 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 ```
 
 저장소는 공개로 운영한다.
-소스는 설치기가 사용자 전용 경로에서 관리한다.
+소스는 명령 실행 중에만 사용하고 종료할 때 삭제한다.
 PC별 경로와 의존성 기록은 `%LOCALAPPDATA%/PersonalHarness/state`에 보관한다.
 Codex가 생성한 런타임과 인증은 기존 Codex 홈에서 유지한다.
 기존 저장소의 `.local`을 재사용하거나 설치 경로를 지정하는 방법은 [설치 문서](docs/remote-install.md)를 참고한다.
