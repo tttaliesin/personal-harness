@@ -108,7 +108,7 @@ def _plugin(spec: Mapping) -> dict:
     return normalized
 
 
-def _mcp(spec: Mapping) -> dict:
+def normalize_mcp(spec: Mapping) -> dict:
     if not isinstance(spec, Mapping):
         raise ValueError("Invalid MCP fields")
     kind = spec.get("kind")
@@ -175,7 +175,7 @@ def load_registry(path: Path) -> Registry:
         raise ValueError("Unsupported registry schema_version")
     groups = {}
     for key, normalize, identity in (("plugins", _plugin, lambda p: (p["marketplace"], p["name"])),
-                                     ("mcp", _mcp, lambda p: p["name"])):
+                                     ("mcp", normalize_mcp, lambda p: p["name"])):
         entries = raw.get(key, [])
         if not isinstance(entries, list):
             raise ValueError(f"Invalid registry {key} array")
