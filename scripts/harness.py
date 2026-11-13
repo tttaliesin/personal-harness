@@ -286,6 +286,14 @@ def registered_settings(registry, lock: Mapping, state: Path, plan: Plan,
         plan.missing.extend(mcp_packages.missing(record, state, guard=safe_file))
         configured = mcp_packages.configuration(record, state, node=node)
         previous = current.get('mcp_servers', {}).get(spec['name'], {})
+        if spec['kind'] != 'http':
+            forwarded = list(previous.get('env_vars', []))
+            names = {item if isinstance(item, str) else item['name'] for item in forwarded}
+            for variable in configured.get('env_vars', []):
+                if variable not in names:
+                    forwarded.append(variable)
+                    names.add(variable)
+            configured['env_vars'] = forwarded
         values = [previous.get('command', ''), *previous.get('args', [])]
         absolute = [Path(value) for value in values if isinstance(value, str) and Path(value).is_absolute()]
         managed = any(path.resolve().is_relative_to((state / 'tools/mcp').resolve()) for path in absolute)

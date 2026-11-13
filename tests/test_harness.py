@@ -832,13 +832,16 @@ url = "https://public.example.test/mcp"
             with self.subTest(command=old), mock.patch.object(harness, 'lock_issues', return_value=[]), \
                     mock.patch.object(harness.mcp_packages, 'missing', return_value=[]), \
                     mock.patch.object(harness.mcp_packages, 'configuration',
-                                      return_value={'command': str(fresh), 'args': ['--managed']}):
-                current = {'mcp_servers': {'service': {'command': str(old), 'args': ['--local']}}}
+                                      return_value={'command': str(fresh), 'args': ['--managed'],
+                                                    'env_vars': ['NEW_TOKEN', 'LOCAL_TOKEN']}):
+                current = {'mcp_servers': {'service': {'command': str(old), 'args': ['--local'],
+                                                     'env_vars': ['LOCAL_TOKEN']}}}
                 plan = harness.Plan('roylabs-desktop', self.fixture.home, self.fixture.codex)
                 actual = harness.registered_settings(registration, lock, state, plan, {}, current)
                 server = actual['mcp_servers']['service']
                 self.assertEqual(Path(server['command']), expected)
                 self.assertEqual(server['args'], ['--local'] if old == private else ['--managed'])
+                self.assertEqual(server['env_vars'], ['LOCAL_TOKEN', 'NEW_TOKEN'])
 
 
 class BuildPlanTests(TemporaryHarnessTestCase):
