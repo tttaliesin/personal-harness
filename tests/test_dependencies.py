@@ -3,7 +3,10 @@ from contextlib import redirect_stdout
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tarfile
 from tempfile import TemporaryDirectory
@@ -16,6 +19,38 @@ import tomlkit
 
 
 class DependencyTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt" and shutil.which("node"), "Windows and Node are required")
+    def test_codegraph_launcher_runs_from_a_state_path_with_ampersand(self):
+        with TemporaryDirectory() as directory:
+            local = Path(directory) / "state & literal"
+            prefix = local / "tools/codegraph"
+            package = prefix / "node_modules/@colbymchenry/codegraph"
+            package.mkdir(parents=True)
+            (package / "package.json").write_text(json.dumps({"version": "1.6.2"}))
+            (package / "npm-shim.js").write_text('console.log("1.6.2");\n')
+            (prefix / "package-lock.json").write_text(json.dumps({"packages": {
+                "node_modules/@colbymchenry/codegraph": {"integrity": "fixture-integrity"}}}))
+            bundle = prefix / "node_modules/@colbymchenry/codegraph-win32-x64"
+            (bundle / "lib/dist/bin").mkdir(parents=True)
+            (bundle / "node.exe").write_bytes(b"fixture bundle")
+            (bundle / "lib/dist/bin/codegraph.js").write_bytes(b"fixture entry")
+            shim = prefix / "node_modules/.bin/codegraph.cmd"
+            shim.parent.mkdir()
+            shim.write_text('@ECHO off\nSET dp0=%~dp0\nnode "%dp0%\\..\\@colbymchenry\\codegraph\\npm-shim.js" %*\n')
+            execute = subprocess.run
+
+            def install_or_execute(command, **kwargs):
+                if command[0] == "fixture-npm":
+                    return subprocess.CompletedProcess(command, 0)
+                return execute(command, **kwargs)
+
+            lock = {"package": "@colbymchenry/codegraph", "version": "1.6.2", "integrity": "fixture-integrity"}
+            with patch.object(installer.subprocess, "run", side_effect=install_or_execute):
+                installed = installer.install_codegraph(lock, local, "fixture-npm")
+            result = execute([str(installed), "--version"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "1.6.2")
+
     def test_locked_preview_creates_nothing_and_never_installs_or_downloads(self):
         with TemporaryDirectory() as directory:
             repo = Path(directory)

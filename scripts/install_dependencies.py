@@ -204,7 +204,13 @@ def install_codegraph(lock: dict, local: Path, npm: str) -> Path:
     bundle = prefix / "node_modules" / "@colbymchenry" / "codegraph-win32-x64"
     if not (bundle / "node.exe").is_file() or not (bundle / "lib/dist/bin/codegraph.js").is_file():
         raise HarnessError("CodeGraph's Windows x64 optional bundle is missing; no home-directory fallback was run")
-    return prefix / "node_modules" / ".bin" / "codegraph.cmd"
+    launcher = prefix / "node_modules" / ".bin" / "codegraph.cmd"
+    safe_file(launcher, local)
+    original = launcher.read_bytes()
+    quoted = original.replace(b"SET dp0=%~dp0", b'SET "dp0=%~dp0"')
+    if quoted != original:
+        atomic_write(launcher, quoted)
+    return launcher
 
 
 def plugin_cache_digest(plugin: dict, codex_home: Path) -> str | None:
