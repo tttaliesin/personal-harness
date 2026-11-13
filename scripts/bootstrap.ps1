@@ -6,9 +6,12 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $heldMutexes = [System.Collections.Generic.List[System.Threading.Mutex]]::new()
 $exitCode = 1
+$runSource = $null
 
 function Get-CanonicalPath([string]$Value, [string]$Base) {
     if ([string]::IsNullOrWhiteSpace($Value)) { throw 'An empty path is not valid.' }
+    if ($Value.StartsWith('\\?\UNC\')) { $Value = '\\' + $Value.Substring(8) }
+    elseif ($Value.StartsWith('\\?\')) { $Value = $Value.Substring(4) }
     if (-not [IO.Path]::IsPathRooted($Value)) { $Value = [IO.Path]::Combine($Base, $Value) }
     $result = [IO.Path]::GetFullPath($Value)
     $root = [IO.Path]::GetPathRoot($result)
@@ -123,6 +126,127 @@ function Get-PayloadFiles([string]$Root, [string]$Relative, [string[]]$Exclusion
     else { $Relative }
 }
 
+function Remove-OwnedSource([string]$Root, [string]$Parent, [string]$Name, [string[]]$ProtectedPaths) {
+    $canonical = Get-CanonicalPath $Root $Parent
+    if ($canonical -ne $Root -or [IO.Path]::GetDirectoryName($canonical) -ine $Parent -or
+        [IO.Path]::GetFileName($canonical) -cne $Name -or $Name -notmatch '^[a-f0-9]{32}([a-f0-9]{32})?$') {
+        throw 'Source cleanup refused an unowned directory.'
+    }
+    foreach ($persistent in $ProtectedPaths) {
+        if ((Test-Within $persistent $canonical) -or (Test-Within $canonical $persistent)) {
+            throw 'Source cleanup refused overlap with a persistent target.'
+        }
+    }
+    Assert-NoLinks $canonical
+    if (-not [IO.Directory]::Exists((Get-IOPath $canonical))) { return }
+    $null = @(Get-VerifiedFiles $canonical)
+    Remove-Item -LiteralPath (Get-IOPath $canonical) -Recurse -Force
+    if ([IO.Directory]::Exists((Get-IOPath $canonical))) { throw 'Source cleanup did not remove its owned directory.' }
+}
+
+function Remove-RunSource($Run, [string]$Runs, [string[]]$ProtectedPaths) {
+    Assert-NoLinks $Run.Root
+    if ([IO.File]::Exists((Get-IOPath $Run.Root))) { throw 'Source cleanup refused a replaced ownership root.' }
+    if (-not [IO.Directory]::Exists((Get-IOPath $Run.Root))) { return }
+    $marker = [IO.Path]::Combine($Run.Root, 'owner.json')
+    Assert-NoLinks $marker
+    $owner = [IO.File]::ReadAllText((Get-IOPath $marker)) | ConvertFrom-Json
+    if ($owner.nonce -cne $Run.Nonce -or $owner.payload_sha256 -cne $Run.Hash) {
+        throw 'Source cleanup refused an invalid ownership marker.'
+    }
+    Remove-OwnedSource $Run.Root $Runs $Run.Nonce $ProtectedPaths
+}
+
+function Assert-RuntimeReferences([string]$Python, [string[]]$Files, [string[]]$Roots) {
+    $audit = @'
+import base64, json, os, re, sys, tomllib
+request = json.loads(base64.b64decode(sys.argv[1]))
+roots = [root.replace('\\', '/').casefold().rstrip('/') for root in request['roots']]
+def walk(value, runtime=False, local_paths=False):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key != 'env_vars':
+                walk(child, runtime or key in ('command', 'args', 'cwd', 'path', 'paths', 'env', 'model_providers', 'hooks', 'skills'), local_paths or key == 'paths')
+    elif isinstance(value, list):
+        for child in value:
+            walk(child, runtime, local_paths)
+    elif runtime and isinstance(value, str):
+        normalized = value.replace('\\', '/').casefold()
+        if '${REPO_ROOT}' in value or any(re.search(re.escape(root) + r'(?=$|[/;:\s\x22\x27])', normalized) for root in roots):
+            raise ValueError()
+        if local_paths and '/' in normalized and not os.path.isabs(value) and '${' not in value:
+            raise ValueError()
+try:
+    for filename in request['files']:
+        if os.path.isfile(filename):
+            with open(filename, encoding='utf-8-sig') as stream:
+                walk(tomllib.loads(stream.read()))
+except Exception:
+    print('Runtime reference audit failed; configuration must not depend on executable source.', file=sys.stderr)
+    sys.exit(1)
+'@
+    $data = @{ files = @($Files); roots = @($Roots) } | ConvertTo-Json -Compress
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($data))
+    & $Python -c $audit $encoded
+    if ($LASTEXITCODE -ne 0) { throw 'Runtime reference audit failed; no configuration values were disclosed.' }
+}
+
+function Get-CapturedPayload([string]$Root, [string]$HostName) {
+    $manifest = [IO.File]::ReadAllText((Get-IOPath ([IO.Path]::Combine($Root, 'package.json')))) | ConvertFrom-Json
+    if ($manifest.name -cne '@tttaliesin/personal-harness' -or
+        $manifest.bin.'personal-harness' -cne 'bin/personal-harness.mjs') {
+        throw 'Source package identity is not personal-harness.'
+    }
+    $required = @('package.json', 'README.md', 'requirements.txt', 'registry.toml', 'bin/personal-harness.mjs',
+        'scripts/bootstrap.ps1', 'scripts/update-dependencies.ps1', 'scripts/install-dependencies.ps1',
+        'scripts/harness.ps1', 'scripts/install_dependencies.py', 'scripts/harness.py',
+        'scripts/registry.py', 'scripts/mcp_packages.py', 'scripts/windows_paths.py',
+        'common/AGENTS.md', 'common/config.toml', 'skills/create-readme/SKILL.md',
+        'skills/agent-desktop/SKILL.md', 'skills/agent-desktop-windows/SKILL.md',
+        'sources/agent-desktop-LICENSE', 'sources/dependencies.lock.json', "hosts/$hostName.toml")
+    $paths = @('package.json', 'README.md')
+    $exclusions = @()
+    foreach ($entry in $manifest.files) {
+        if (-not $entry.StartsWith('!')) { continue }
+        $pattern = $entry.Substring(1)
+        if ($pattern -notmatch '^[a-zA-Z0-9._*/-]+$' -or $pattern.Split('/') -contains '..') {
+            throw "Invalid payload exclusion: $entry"
+        }
+        $exclusions += $pattern
+    }
+    foreach ($entry in $manifest.files) {
+        if ($entry.StartsWith('!')) { continue }
+        if ($entry -notin @('bin', 'scripts', 'common', 'hosts', 'skills', 'sources', 'docs', 'requirements.txt', 'registry.toml')) {
+            throw "Invalid payload allowlist entry: $entry"
+        }
+        $paths += @(Get-PayloadFiles $Root $entry $exclusions)
+    }
+    $paths = [string[]]$paths
+    [Array]::Sort($paths, [StringComparer]::Ordinal)
+    $payload = [ordered]@{}
+    $identity = [Text.StringBuilder]::new()
+    foreach ($relative in $paths) {
+        if (@($relative.Split('/') | Where-Object { $_ -in @('.', '..', '') }).Count -gt 0 -or
+            $relative -match '[\\:*?\x00-\x1f]' -or $payload.Contains($relative)) {
+            throw "Invalid payload allowlist entry: $relative"
+        }
+        $file = [IO.Path]::Combine($Root, $relative)
+        $item = Get-Item -LiteralPath (Get-IOPath $file) -Force
+        while ($item.FullName.Length -gt $Root.Length) {
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Payload links are not supported: $file" }
+            $item = Get-Item -LiteralPath ([IO.Path]::GetDirectoryName($item.FullName)) -Force
+        }
+        $bytes = [IO.File]::ReadAllBytes((Get-IOPath $file))
+        $digest = Get-Sha256 $bytes
+        $payload.Add($relative, @{ Bytes = $bytes; Hash = $digest })
+        [void]$identity.Append($relative).Append("`n").Append($digest).Append("`n")
+    }
+    foreach ($relative in $required) {
+        if (-not $payload.Contains($relative)) { throw "Required source is missing from the payload allowlist: $relative" }
+    }
+    return @{ Files = $payload; Hash = (Get-Sha256 ([Text.Encoding]::UTF8.GetBytes($identity.ToString()))) }
+}
+
 try {
     if ($env:OS -ne 'Windows_NT') { throw 'This installer requires Windows.' }
     $request = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($RequestBase64)) | ConvertFrom-Json
@@ -150,19 +274,20 @@ try {
     $manager = Get-CanonicalPath $manager $caller
     $state = Get-CanonicalPath $state $caller
     $codexPath = Get-CanonicalPath $codexPath $caller
+    $runs = Get-CanonicalPath ([IO.Path]::Combine($manager, 'runs')) $caller
     $releases = Get-CanonicalPath ([IO.Path]::Combine($manager, 'releases')) $caller
     foreach ($persistent in @($manager, $state)) {
-        if ((Test-Within $persistent $source) -or (Test-Within $persistent $releases)) {
+        if ((Test-Within $persistent $source) -or (Test-Within $persistent $releases) -or (Test-Within $persistent $runs)) {
             throw 'Manager and state roots must be outside the source payload and managed releases.'
         }
         Assert-NoLinks $persistent
     }
-    if ((Test-Within $releases $state) -or (Test-Within $source $state)) {
+    if ((Test-Within $releases $state) -or (Test-Within $source $state) -or (Test-Within $runs $state)) {
         throw 'State root must not contain the source payload or managed releases.'
     }
     $agentsPath = Get-CanonicalPath ([IO.Path]::Combine($homePath, '.agents')) $caller
     foreach ($target in @($codexPath, $agentsPath)) {
-        foreach ($protected in @($source, $releases)) {
+        foreach ($protected in @($source, $releases, $runs)) {
             if ((Test-Within $target $protected) -or (Test-Within $protected $target)) {
                 throw 'Output targets must not overlap the source payload or managed releases.'
             }
@@ -170,6 +295,7 @@ try {
     }
     Assert-NoLinks $homePath
     Assert-NoLinks $codexPath
+    Assert-NoLinks $runs
     Assert-NoLinks $releases
     Assert-NoLinks ([IO.Path]::Combine($manager, 'active.json'))
     $overrides = @{}
@@ -177,55 +303,9 @@ try {
     if ($options.ContainsKey('codex')) {
         $overrides.Codex = if ($options.codex -match '[/\\:]') { Get-CanonicalPath $options.codex $caller } else { $options.codex }
     }
-    $manifest = [IO.File]::ReadAllText((Get-IOPath ([IO.Path]::Combine($source, 'package.json')))) | ConvertFrom-Json
-    $required = @('package.json', 'README.md', 'requirements.txt', 'registry.toml', 'bin/personal-harness.mjs',
-        'scripts/bootstrap.ps1', 'scripts/update-dependencies.ps1', 'scripts/install-dependencies.ps1',
-        'scripts/harness.ps1', 'scripts/install_dependencies.py', 'scripts/harness.py',
-        'scripts/registry.py', 'scripts/mcp_packages.py', 'scripts/windows_paths.py',
-        'common/AGENTS.md', 'common/config.toml', 'skills/create-readme/SKILL.md',
-        'skills/agent-desktop/SKILL.md', 'skills/agent-desktop-windows/SKILL.md',
-        'sources/agent-desktop-LICENSE', 'sources/dependencies.lock.json', "hosts/$hostName.toml")
-    $paths = @('package.json', 'README.md')
-    $exclusions = @()
-    foreach ($entry in $manifest.files) {
-        if (-not $entry.StartsWith('!')) { continue }
-        $pattern = $entry.Substring(1)
-        if ($pattern -notmatch '^[a-zA-Z0-9._*/-]+$' -or $pattern.Split('/') -contains '..') {
-            throw "Invalid payload exclusion: $entry"
-        }
-        $exclusions += $pattern
-    }
-    foreach ($entry in $manifest.files) {
-        if ($entry.StartsWith('!')) { continue }
-        if ($entry -notin @('bin', 'scripts', 'common', 'hosts', 'skills', 'sources', 'docs', 'requirements.txt', 'registry.toml')) {
-            throw "Invalid payload allowlist entry: $entry"
-        }
-        $paths += @(Get-PayloadFiles $source $entry $exclusions)
-    }
-    $paths = [string[]]$paths
-    [Array]::Sort($paths, [StringComparer]::Ordinal)
-    $payload = [ordered]@{}
-    $identity = [Text.StringBuilder]::new()
-    foreach ($relative in $paths) {
-        if (@($relative.Split('/') | Where-Object { $_ -in @('.', '..', '') }).Count -gt 0 -or
-            $relative -match '[\\:*?\x00-\x1f]' -or $payload.Contains($relative)) {
-            throw "Invalid payload allowlist entry: $relative"
-        }
-        $file = [IO.Path]::Combine($source, $relative)
-        $item = Get-Item -LiteralPath (Get-IOPath $file) -Force
-        while ($item.FullName.Length -gt $source.Length) {
-            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Payload links are not supported: $file" }
-            $item = Get-Item -LiteralPath ([IO.Path]::GetDirectoryName($item.FullName)) -Force
-        }
-        $bytes = [IO.File]::ReadAllBytes((Get-IOPath $file))
-        $digest = Get-Sha256 $bytes
-        $payload.Add($relative, @{ Bytes = $bytes; Hash = $digest })
-        [void]$identity.Append($relative).Append("`n").Append($digest).Append("`n")
-    }
-    foreach ($relative in $required) {
-        if (-not $payload.Contains($relative)) { throw "Required source is missing from the payload allowlist: $relative" }
-    }
-    $payloadHash = Get-Sha256 ([Text.Encoding]::UTF8.GetBytes($identity.ToString()))
+    $capture = Get-CapturedPayload $source $hostName
+    $payload = $capture.Files
+    $payloadHash = $capture.Hash
 
     $pythonRequest = if ($options.ContainsKey('python')) { [string]$options.python } else { '' }
     $requirementsHash = $payload['requirements.txt'].Hash
@@ -240,8 +320,30 @@ try {
         }
     }
     if (-not $python) { $python = Find-Python $pythonRequest $caller }
-    if ((Test-Within $python $source) -or (Test-Within $python $releases)) {
+    if ((Test-Within $python $source) -or (Test-Within $python $releases) -or (Test-Within $python $runs)) {
         throw 'The base Python executable must be outside the source payload and managed releases.'
+    }
+    $baseOutput = @(& $python -c "import sys; print(getattr(sys, '_base_executable', sys.executable))" 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $baseOutput.Count -ne 1) { throw 'Unable to verify the real Python base executable.' }
+    $basePython = Get-CanonicalPath ([string]$baseOutput[0]) $caller
+    foreach ($temporary in @($source, $releases, $runs)) {
+        Assert-NoLinks $basePython
+        if (Test-Within $basePython $temporary) { throw 'The real Python base must be outside executable source.' }
+    }
+    $localConfig = if ($overrides.ContainsKey('LocalConfig')) { $overrides.LocalConfig }
+        else { [IO.Path]::Combine($state, "$hostName.toml") }
+    $runtimePaths = @($localConfig)
+    if ($overrides.ContainsKey('Codex') -and [IO.Path]::IsPathRooted($overrides.Codex)) {
+        $runtimePaths += $overrides.Codex
+    }
+    foreach ($persistent in $runtimePaths) {
+        if (Test-Within $persistent $source) { throw 'Local runtime paths must be outside executable source.' }
+    }
+    $protectedPaths = @($state, $codexPath, $agentsPath, $source, $python, $basePython) + $runtimePaths
+    foreach ($persistent in $protectedPaths) {
+        if ((Test-Within $persistent $runs) -or (Test-Within $persistent $releases)) {
+            throw 'Persistent paths must be outside executable source.'
+        }
     }
 
     $resources = [string[]]@($manager, $state, $homePath, $codexPath | ForEach-Object { $_.ToUpperInvariant() } | Sort-Object -Unique)
@@ -258,24 +360,17 @@ try {
         finally { if (-not $acquired) { $mutex.Dispose() } }
     }
 
-    $release = Get-CanonicalPath ([IO.Path]::Combine($releases, $payloadHash)) $caller
-    if (-not [IO.Directory]::Exists((Get-IOPath $release))) {
-        $staging = "$release.partial-$([Guid]::NewGuid().ToString('N'))"
-        [void][IO.Directory]::CreateDirectory((Get-IOPath $staging))
-        foreach ($entry in $payload.GetEnumerator()) {
-            $target = [IO.Path]::Combine($staging, $entry.Key)
-            [void][IO.Directory]::CreateDirectory((Get-IOPath ([IO.Path]::GetDirectoryName($target))))
-            [IO.File]::WriteAllBytes((Get-IOPath $target), $entry.Value.Bytes)
-        }
-        Assert-Payload $staging $payload
-        $staging = Get-CanonicalPath $staging $caller
-        if (-not (Test-Within $staging $releases) -or -not (Test-Within $release $releases) -or
-            $staging -eq $releases -or $release -eq $releases) {
-            throw 'Source move escaped the selected manager/releases directory.'
-        }
-        Assert-NoLinks $staging
-        Assert-NoLinks $release
-        [IO.Directory]::Move((Get-IOPath $staging), (Get-IOPath $release))
+    $nonce = [Guid]::NewGuid().ToString('N')
+    $runRoot = Get-CanonicalPath ([IO.Path]::Combine($runs, $nonce)) $caller
+    $runSource = @{ Root = $runRoot; Nonce = $nonce; Hash = $payloadHash }
+    Assert-NoLinks $runRoot
+    [void][IO.Directory]::CreateDirectory((Get-IOPath $runRoot))
+    Write-Json ([IO.Path]::Combine($runRoot, 'owner.json')) @{ nonce = $nonce; payload_sha256 = $payloadHash }
+    $release = [IO.Path]::Combine($runRoot, 'source')
+    foreach ($entry in $payload.GetEnumerator()) {
+        $target = [IO.Path]::Combine($release, $entry.Key)
+        [void][IO.Directory]::CreateDirectory((Get-IOPath ([IO.Path]::GetDirectoryName($target))))
+        [IO.File]::WriteAllBytes((Get-IOPath $target), $entry.Value.Bytes)
     }
     Assert-Payload $release $payload
     $readyPath = [IO.Path]::Combine($venv, 'ready.json')
@@ -313,6 +408,11 @@ try {
         if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE; throw 'Python requirements import check failed. Retry with a working Python 3.11+ installation.' }
         Write-Json $readyPath @{ requirements_sha256 = $requirementsHash; python = $python }
     }
+    $auditFiles = @([IO.Path]::Combine($release, 'common/config.toml'),
+        [IO.Path]::Combine($release, "hosts/$hostName.toml"), [IO.Path]::Combine($release, 'registry.toml'),
+        $localConfig, [IO.Path]::Combine($codexPath, 'config.toml'))
+    Assert-RuntimeReferences $venvPython $auditFiles @($source, $runs, $releases)
+    Assert-Payload $release $payload
     $arguments = @{
         Install = $true; StateRoot = $state; HomeDirectory = $homePath; CodexHome = $codexPath
         HostName = $hostName; Python = $venvPython; Locked = ($options.ContainsKey('locked') -and [bool]$options.locked)
@@ -322,8 +422,28 @@ try {
     & ([IO.Path]::Combine($release, 'scripts/update-dependencies.ps1')) @arguments
     if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE; throw 'Harness install/apply/check failed. The previous active receipt has been retained.' }
     Assert-Payload $release $payload
+    Assert-RuntimeReferences $venvPython $auditFiles @($source, $runs, $releases)
+    $legacy = @()
+    if ([IO.Directory]::Exists((Get-IOPath $releases))) {
+        Assert-NoLinks $releases
+        foreach ($item in (Get-Item -LiteralPath (Get-IOPath $releases) -Force).GetFileSystemInfos()) {
+            if ($item -isnot [IO.DirectoryInfo] -or $item.Name -cnotmatch '^[a-f0-9]{64}$') {
+                throw 'Legacy source cleanup is incomplete; an unknown entry was retained.'
+            }
+            $oldRoot = Get-CanonicalPath $item.FullName $caller
+            Assert-NoLinks $oldRoot
+            $old = Get-CapturedPayload $oldRoot $hostName
+            Assert-Payload $oldRoot $old.Files
+            if ($old.Hash -cne $item.Name) { throw 'Legacy source cleanup is incomplete; a modified release was retained.' }
+            $legacy += $oldRoot
+        }
+    }
+    foreach ($oldRoot in $legacy) {
+        Remove-OwnedSource $oldRoot $releases ([IO.Path]::GetFileName($oldRoot)) $protectedPaths
+    }
+    Remove-RunSource $runSource $runs $protectedPaths
     $receipt = @{
-        schema_version = 1; payload_sha256 = $payloadHash; source_root = $release
+        schema_version = 2; payload_sha256 = $payloadHash
         state_root = $state; home = $homePath; codex_home = $codexPath; host_name = $hostName
         python = $venvPython; command = $request.command; checked_at = [DateTime]::UtcNow.ToString('o')
     }
@@ -338,6 +458,13 @@ try {
 }
 catch { Write-Error -Message $_.Exception.Message -ErrorAction Continue }
 finally {
+    if ($null -ne $runSource) {
+        try { Remove-RunSource $runSource $runs $protectedPaths }
+        catch {
+            Write-Error -Message ("Source cleanup failed: " + $_.Exception.Message) -ErrorAction Continue
+            if ($exitCode -eq 0) { $exitCode = 1 }
+        }
+    }
     for ($index = $heldMutexes.Count - 1; $index -ge 0; $index--) {
         $heldMutexes[$index].ReleaseMutex()
         $heldMutexes[$index].Dispose()

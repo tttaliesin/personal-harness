@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 from tempfile import TemporaryDirectory
 import time
@@ -37,7 +38,17 @@ class FixturePython {
         var args = new List<string>(arguments);
         if (args.Count > 0 && args[0] == "-3") args.RemoveAt(0);
         if (args.Count > 1 && args[0] == "-c") {
-            if (args[1].Contains("sys.executable")) Console.WriteLine(self);
+            if (args[1].Contains("import base64, json")) {
+                string script = Path.Combine(Path.GetDirectoryName(Environment.GetEnvironmentVariable("HARNESS_FIXTURE_PYTHON_LOG")), "audit-" + Guid.NewGuid().ToString("N") + ".py");
+                File.WriteAllText(script, args[1]);
+                try {
+                    var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                        Environment.GetEnvironmentVariable("HARNESS_FIXTURE_REAL_PYTHON"), "-B \"" + script + "\" " + args[2]) { UseShellExecute = false });
+                    process.WaitForExit(); return process.ExitCode;
+                } finally { File.Delete(script); }
+            }
+            if (args[1].Contains("_base_executable")) Console.WriteLine(Environment.GetEnvironmentVariable("HARNESS_FIXTURE_BASE_PYTHON") ?? self);
+            else if (args[1].Contains("sys.executable")) Console.WriteLine(self);
             if (args[1].Contains("version_info")) {
                 string state = Environment.GetEnvironmentVariable("HARNESS_FIXTURE_PROBE_STATE");
                 if (!String.IsNullOrEmpty(state)) {
@@ -76,10 +87,23 @@ class FixturePython {
 UPDATE_STUB = r'''
 param([switch]$Install,[switch]$Locked,[string]$HostName,[string]$CodexHome,[string]$Codex,
     [string]$LocalConfig,[string]$HomeDirectory,[string]$Python,[string]$StateRoot)
-$record = @{kind='wrapper';install=[bool]$Install;locked=[bool]$Locked;host_name=$HostName;
+$source = Split-Path $PSScriptRoot -Parent
+$hashes = @{}
+$hash = [Security.Cryptography.SHA256]::Create()
+try {
+    foreach ($file in (Get-ChildItem -LiteralPath ('\\?\' + $source) -Recurse -File -Force)) {
+        $relative = $file.FullName.Substring(('\\?\' + $source).Length + 1).Replace('\', '/')
+        $hashes[$relative] = [BitConverter]::ToString($hash.ComputeHash([IO.File]::ReadAllBytes($file.FullName))).Replace('-', '').ToLowerInvariant()
+    }
+}
+finally { $hash.Dispose() }
+$record = @{hashes=$hashes;kind='wrapper';install=[bool]$Install;locked=[bool]$Locked;host_name=$HostName;
     codex_home=$CodexHome;codex=$Codex;local_config=$LocalConfig;home=$HomeDirectory;
     python=$Python;state=$StateRoot;source=(Split-Path $PSScriptRoot -Parent)}
 [IO.File]::AppendAllText($env:HARNESS_FIXTURE_LOG, (($record | ConvertTo-Json -Compress) + "`n"))
+if ($env:HARNESS_FIXTURE_BAD_OWNER) {
+    [IO.File]::WriteAllText((Join-Path (Split-Path $source -Parent) 'owner.json'), '{}')
+}
 if ($env:HARNESS_FIXTURE_GATE) {
     [IO.File]::WriteAllText(($env:HARNESS_FIXTURE_GATE + '.entered'), 'held')
     while (-not [IO.File]::Exists($env:HARNESS_FIXTURE_GATE)) { Start-Sleep -Milliseconds 30 }
@@ -150,9 +174,10 @@ class RemoteCliTests(unittest.TestCase):
         self.environment = dict(os.environ, USERPROFILE=str(self.root / "default-home"),
                                 LOCALAPPDATA=str(self.root / "local-appdata"),
                                 CODEX_HOME=str(self.root / "default-codex"), COMPUTERNAME="ROYLABS-DESKTOP",
-                                HARNESS_FIXTURE_LOG=str(self.log), HARNESS_FIXTURE_PYTHON_LOG=str(self.python_log))
+                                HARNESS_FIXTURE_LOG=str(self.log), HARNESS_FIXTURE_PYTHON_LOG=str(self.python_log),
+                                HARNESS_FIXTURE_REAL_PYTHON=sys.executable, PSExecutionPolicyPreference="Bypass")
         for key in list(self.environment):
-            if key.startswith("HARNESS_FIXTURE_") and key not in ("HARNESS_FIXTURE_LOG", "HARNESS_FIXTURE_PYTHON_LOG"):
+            if key.startswith("HARNESS_FIXTURE_") and key not in ("HARNESS_FIXTURE_LOG", "HARNESS_FIXTURE_PYTHON_LOG", "HARNESS_FIXTURE_REAL_PYTHON"):
                 del self.environment[key]
 
     def arguments(self, command="install", extra=(), home=True, python=True):
@@ -163,10 +188,18 @@ class RemoteCliTests(unittest.TestCase):
             args += ["--python", str(self.python)]
         return args + list(extra)
 
-    def run_cli(self, command="install", extra=(), home=True, python=True, expected=0, environment=None):
+    def run_cli(self, command="install", extra=(), home=True, python=True, expected=0, environment=None, clean=True):
+        before = len(self.calls()) if self.log.exists() else 0
+        existing_runs = set((self.manager / "runs").glob("*"))
         result = subprocess.run(self.arguments(command, extra, home, python), cwd=self.caller,
                                 env=environment or self.environment, capture_output=True, timeout=30)
         self.assertEqual(result.returncode, expected, (result.stdout + result.stderr).decode("utf-8", errors="replace"))
+        if clean and self.log.exists():
+            for call in self.calls()[before:]:
+                if call["kind"] == "wrapper":
+                    self.assertFalse(Path(call["source"]).exists())
+        if clean:
+            self.assertEqual(set((self.manager / "runs").glob("*")), existing_runs)
         return result
 
     def calls(self):
@@ -177,6 +210,27 @@ class RemoteCliTests(unittest.TestCase):
 
     def receipt(self, manager=None):
         return json.loads(((manager or self.manager) / "active.json").read_text(encoding="utf-8"))
+
+    def legacy_source(self, change=None):
+        hashes = dict([call for call in self.calls() if call["kind"] == "wrapper"][-1]["hashes"])
+        content = {name: (self.payload / name).read_bytes() for name in hashes}
+        if change:
+            content["README.md"] += change
+        hashes = {name: hashlib.sha256(data).hexdigest() for name, data in content.items()}
+        identity = "".join(f"{name}\n{hashes[name]}\n" for name in sorted(hashes))
+        release = self.manager / "releases" / hashlib.sha256(identity.encode()).hexdigest()
+        for name, data in content.items():
+            target = Path("\\\\?\\" + str(release / name))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        return release
+
+    def legacy_receipt(self, release):
+        receipt = self.receipt()
+        receipt.update(schema_version=1, source_root=str(release))
+        active = self.manager / "active.json"
+        active.write_text(json.dumps(receipt), encoding="utf-8")
+        return active.read_bytes()
 
     def test_literal_paths_wrapper_order_and_success_receipt(self):
         self.caller = self.root / "caller's [cwd] & $() 한글"
@@ -199,15 +253,17 @@ class RemoteCliTests(unittest.TestCase):
         receipt = self.receipt()
         self.assertEqual(Path(receipt["state_root"]), self.state)
         self.assertEqual(Path(receipt["python"]).parent.parent.parent, self.state / "python")
-        release = Path(receipt["source_root"])
-        self.assertEqual(release.parent, self.manager / "releases")
-        self.assertEqual(release.name, receipt["payload_sha256"])
-        self.assertTrue((release / "skills/agent-desktop/references/commands-system.md").is_file())
-        self.assertTrue((release / "sources/agent-desktop-LICENSE").is_file())
-        self.assertFalse((release / "scripts/test.ps1").exists())
-        self.assertFalse((release / "AGENTS.md").exists())
-        self.assertFalse((release / "Taskfile.yml").exists())
-        self.assertFalse((release / "__pycache__").exists())
+        self.assertEqual(receipt["schema_version"], 2)
+        self.assertNotIn("source_root", receipt)
+        run_source = Path(wrapper["source"])
+        self.assertEqual(run_source.name, "source")
+        self.assertEqual(run_source.parent.parent, self.manager / "runs")
+        self.assertFalse(run_source.parent.exists())
+        self.assertFalse((self.manager / "releases").exists())
+        for name in ("skills/agent-desktop/references/commands-system.md", "sources/agent-desktop-LICENSE"):
+            self.assertIn(name, wrapper["hashes"])
+        for name in ("scripts/test.ps1", "AGENTS.md", "Taskfile.yml", "__pycache__"):
+            self.assertNotIn(name, wrapper["hashes"])
 
     def test_default_targets_and_explicit_manager_state_and_codex_home(self):
         self.run_cli(home=False)
@@ -229,15 +285,17 @@ class RemoteCliTests(unittest.TestCase):
         for relative in ("sources/dependencies.lock.json", "skills/agent-desktop/SKILL.md", "tools/agent.exe", "roylabs-desktop.toml"):
             target = self.state / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(b"core-owned content\x00\xff")
+            target.write_bytes(b"# persistent local choices\n" if target.suffix == ".toml" else b"core-owned content\x00\xff")
             preserved[target] = target.read_bytes()
         (self.payload / "docs/coordinator-added.md").write_text("new payload\n", encoding="utf-8")
         self.run_cli("update")
         second = self.receipt()
         self.assertNotEqual(first["payload_sha256"], second["payload_sha256"])
         self.assertEqual(first["python"], second["python"])
-        self.assertTrue(Path(first["source_root"]).is_dir())
-        self.assertTrue((Path(second["source_root"]) / "docs/coordinator-added.md").is_file())
+        wrappers = [call for call in self.calls() if call["kind"] == "wrapper"]
+        self.assertNotEqual(wrappers[0]["source"], wrappers[1]["source"])
+        self.assertTrue(all(not Path(call["source"]).exists() for call in wrappers))
+        self.assertIn("docs/coordinator-added.md", wrappers[-1]["hashes"])
         self.assertEqual({path: path.read_bytes() for path in preserved}, preserved)
         pip = [call for call in self.python_calls() if call[1:4] == ["-m", "pip", "install"]]
         self.assertEqual(len(pip), 1)
@@ -317,21 +375,23 @@ class RemoteCliTests(unittest.TestCase):
             if pip_count == 2:
                 self.run_cli("update")
             receipt = self.receipt()
-            release = Path(receipt["source_root"])
-            captured = (release / "requirements.txt").read_bytes()
-            digest = hashlib.sha256(captured).hexdigest()
+            wrapper = [call for call in self.calls() if call["kind"] == "wrapper"][-1]
+            digest = wrapper["hashes"]["requirements.txt"]
             venv = Path(receipt["python"]).parent.parent
             ready = json.loads((venv / "ready.json").read_text(encoding="utf-8"))
             with self.subTest(pip_count=pip_count, identity="release"):
-                self.assertEqual(captured, expected)
+                self.assertEqual(digest, hashlib.sha256(expected).hexdigest())
             with self.subTest(pip_count=pip_count, identity="python"):
                 self.assertEqual(venv.name, digest)
             with self.subTest(pip_count=pip_count, identity="ready"):
                 self.assertEqual(ready["requirements_sha256"], digest)
             with self.subTest(pip_count=pip_count, identity="pip"):
                 pip = [call for call in self.python_calls() if call[1:4] == ["-m", "pip", "install"]]
-                self.assertEqual(len(pip), 1 if captured == original else 2)
-                self.assertEqual(Path(pip[-1][-1]).read_bytes(), captured)
+                self.assertEqual(len(pip), pip_count)
+                pip_source = Path(pip[-1][-1]).parent
+                pip_wrapper = next(call for call in self.calls() if call["kind"] == "wrapper" and Path(call["source"]) == pip_source)
+                self.assertEqual(pip_wrapper["hashes"]["requirements.txt"], digest)
+                self.assertFalse(Path(pip[-1][-1]).exists())
 
     def test_registry_is_required_and_part_of_release_identity(self):
         self.run_cli()
@@ -342,7 +402,8 @@ class RemoteCliTests(unittest.TestCase):
         current = self.receipt()
         self.assertNotEqual(current['payload_sha256'], previous['payload_sha256'])
         self.assertEqual(Path(current['python']), Path(previous['python']))
-        self.assertEqual((Path(current['source_root']) / 'registry.toml').read_bytes(), registry.read_bytes())
+        wrapper = [call for call in self.calls() if call['kind'] == 'wrapper'][-1]
+        self.assertEqual(wrapper['hashes']['registry.toml'], hashlib.sha256(registry.read_bytes()).hexdigest())
         before = (self.manager / 'active.json').read_bytes()
         calls = len(self.calls())
         registry.unlink()
@@ -403,21 +464,152 @@ class RemoteCliTests(unittest.TestCase):
         self.run_cli(environment=environment)
         self.assertTrue(list(self.state.glob("python/*/fixture-attempt")))
 
-    def test_bad_release_is_rejected_before_any_child_install(self):
-        self.run_cli()
-        previous = (self.manager / "active.json").read_bytes()
-        release = Path(self.receipt()["source_root"])
-        before = len(self.calls())
-        (release / "common/config.toml").unlink()
-        self.run_cli("update", expected=1)
-        self.assertEqual(len(self.calls()), before)
-        self.assertEqual((self.manager / "active.json").read_bytes(), previous)
-
     def test_source_mutation_after_check_cannot_advance_receipt(self):
         self.run_cli()
         previous = (self.manager / "active.json").read_bytes()
         self.run_cli("update", expected=1, environment=dict(self.environment, HARNESS_FIXTURE_MUTATE_SOURCE="1"))
         self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+
+    def test_verified_legacy_migration_waits_for_success_and_preserves_persistent_files(self):
+        self.run_cli()
+        first = self.legacy_source()
+        second = self.legacy_source(b"\nolder revision\n")
+        previous = self.legacy_receipt(first)
+        sentinels = {}
+        for target in (self.state / "tools/unrelated.exe", self.state / "sources/lock.json",
+                       self.state / "skills/kept.md", self.state / "private.toml",
+                       self.home / ".codex/auth.json", self.home / ".codex/plugins/cache/kept"):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"persistent sentinel\x00\xff")
+            sentinels[target] = target.read_bytes()
+        self.run_cli("update", expected=43, environment=dict(self.environment, HARNESS_FIXTURE_FAIL_STAGE="check"))
+        self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+        self.assertTrue(first.exists())
+        self.assertTrue(second.exists())
+        self.run_cli("update")
+        self.assertFalse(first.exists())
+        self.assertFalse(second.exists())
+        self.assertEqual(self.receipt()["schema_version"], 2)
+        self.assertNotIn("source_root", self.receipt())
+        self.assertEqual({target: target.read_bytes() for target in sentinels}, sentinels)
+        managed = self.receipt()["python"]
+        probe = subprocess.run([managed, "-c", "import tomlkit"], env=self.environment, capture_output=True)
+        self.assertEqual(probe.returncode, 0, probe.stderr)
+
+    def test_unknown_and_modified_legacy_sources_are_retained_without_success_receipt(self):
+        self.run_cli()
+        verified = self.legacy_source()
+        previous = self.legacy_receipt(verified)
+        unknown = self.manager / "releases/unknown"
+        unknown.mkdir()
+        sentinel = unknown / "kept"
+        sentinel.write_bytes(b"unowned")
+        result = self.run_cli("update", expected=1)
+        self.assertIn(b"unknown entry was retained", result.stderr)
+        self.assertEqual(sentinel.read_bytes(), b"unowned")
+        self.assertTrue(verified.exists())
+        self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+        sentinel.unlink()
+        unknown.rmdir()
+        readme = verified / "README.md"
+        readme.write_bytes(readme.read_bytes() + b"mutation")
+        result = self.run_cli("update", expected=1)
+        self.assertIn(b"modified release was retained", result.stderr)
+        self.assertTrue(verified.exists())
+        self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+
+    def test_linked_legacy_source_is_retained_without_traversal(self):
+        self.run_cli()
+        verified = self.legacy_source()
+        previous = self.legacy_receipt(verified)
+        outside = self.root / "outside"
+        outside.mkdir()
+        sentinel = outside / "kept"
+        sentinel.write_bytes(b"unrelated")
+        self.junction(verified / "unexpected-link", outside)
+        self.run_cli("update", expected=1)
+        self.assertEqual(sentinel.read_bytes(), b"unrelated")
+        self.assertTrue(verified.exists())
+        self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+
+    def test_runtime_references_are_rejected_without_disclosing_values(self):
+        self.run_cli()
+        verified = self.legacy_source()
+        previous = self.legacy_receipt(verified)
+        config = self.state / "roylabs-desktop.toml"
+        for content in (
+            {'config': {'mcp_servers': {'custom': {'command': str(verified / 'tool.exe')}}}},
+            {'config': {'mcp_servers': {'custom': {'args': [str(self.payload / 'tool.exe')]}}}},
+            {'config': {'mcp_servers': {'custom': {'cwd': str(self.manager / 'runs/another/source')}}}},
+            {'paths': {'tool': '${REPO_ROOT}/tool.exe'}},
+            {'paths': {'tool': 'relative/tool.exe'}},
+            {'config': {'hooks': {'start': {'command': str(verified / 'hook.ps1')}}}},
+            {'config': {'model_providers': {'custom': {'base_url': str(verified / 'provider')}}}},
+            {'config': {'skills': {'config': [{'path': str(verified / 'skill')}]}}},
+            {'config': {'mcp_servers': {'custom': {'env': {'PYTHONPATH': '${REPO_ROOT}/lib'}}}}},
+            {'config': {'mcp_servers': {'custom': {'env': {'NODE_PATH': f'D:/persistent;{self.payload};E:/persistent'}}}}},
+            {'config': {'mcp_servers': {'custom': {'env': {'PYTHONPATH': f'{self.payload}:D:/persistent'}}}}},
+        ):
+            import tomlkit
+            config.write_text(tomlkit.dumps(content), encoding="utf-8")
+            before = len(self.calls())
+            with self.subTest(field=next(iter(content))):
+                result = self.run_cli("update", expected=1)
+                self.assertIn(b"Runtime reference audit failed", result.stderr)
+                self.assertNotIn(str(verified).encode(), result.stderr)
+                self.assertEqual(len(self.calls()), before)
+                self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+                self.assertTrue(verified.exists())
+                self.assertEqual(config.read_text(encoding="utf-8"), tomlkit.dumps(content))
+
+    def test_persistent_repo_root_names_and_env_var_names_are_preserved(self):
+        self.run_cli()
+        import tomlkit
+        content = {'config': {'mcp_servers': {'custom': {
+            'command': 'D:/tools/my_repo_root_helper.exe',
+            'env': {'PYTHONPATH': 'D:/tools/my_repo_root_library;E:/persistent',
+                    'NODE_PATH': str(self.payload) + '_persistent'},
+            'env_vars': ['REPO_ROOT', '${REPO_ROOT}', str(self.payload)],
+        }}, 'model_providers': {'custom': {'env_vars': ['${REPO_ROOT}']}}}}
+        config = self.state / "roylabs-desktop.toml"
+        config.write_text(tomlkit.dumps(content), encoding="utf-8")
+        before = config.read_bytes()
+        self.run_cli("update")
+        self.assertEqual(config.read_bytes(), before)
+
+    def test_cleanup_refusal_retains_receipt_and_preserves_child_failure_code(self):
+        self.run_cli()
+        previous = (self.manager / "active.json").read_bytes()
+        for stage, expected in ((None, 1), ("check", 43)):
+            environment = dict(self.environment, HARNESS_FIXTURE_BAD_OWNER="1")
+            if stage:
+                environment["HARNESS_FIXTURE_FAIL_STAGE"] = stage
+            result = self.run_cli("update", expected=expected, environment=environment, clean=False)
+            self.assertIn(b"Source cleanup failed", result.stderr)
+            self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+            source = Path([call for call in self.calls() if call["kind"] == "wrapper"][-1]["source"])
+            self.assertTrue(source.exists())
+
+    def test_real_python_base_inside_source_is_rejected(self):
+        base = self.payload / "hidden-base.exe"
+        shutil.copy2(self.python, base)
+        result = self.run_cli(expected=1, environment=dict(self.environment, HARNESS_FIXTURE_BASE_PYTHON=str(base)))
+        self.assertIn(b"real Python base", result.stderr)
+        self.assertFalse(self.manager.exists())
+
+    def test_real_managed_python_survives_source_cleanup_and_repeat_update(self):
+        digest = hashlib.sha256((self.payload / "requirements.txt").read_bytes()).hexdigest()
+        venv = self.state / "python" / digest
+        created = subprocess.run([sys.executable, "-B", "-m", "venv", "--without-pip", str(venv)], capture_output=True)
+        self.assertEqual(created.returncode, 0, created.stderr)
+        (venv / "Lib/site-packages/tomlkit.py").write_text("fixture = True\n", encoding="utf-8")
+        (venv / "ready.json").write_text(json.dumps({"requirements_sha256": digest}), encoding="utf-8")
+        self.run_cli(extra=["--python", sys.executable], python=False)
+        first = self.receipt()
+        self.run_cli("update", python=False, environment=dict(self.environment, PATH=str(self.root / "missing")))
+        self.assertEqual(self.receipt()["python"], first["python"])
+        probe = subprocess.run([first["python"], "-B", "-c", "import tomlkit; import sys; sys.exit(0)"], capture_output=True)
+        self.assertEqual(probe.returncode, 0, probe.stderr)
 
     def test_invalid_python_is_not_silently_replaced(self):
         result = self.run_cli(extra=["--python", "missing.exe"], python=False, expected=1)
@@ -519,16 +711,6 @@ class RemoteCliTests(unittest.TestCase):
         self.run_cli(extra=["--install-root", str(managed)], expected=1)
         self.assertFalse(list(outside.iterdir()))
 
-    def test_existing_release_junction_is_rejected_without_traversal(self):
-        self.run_cli()
-        release = Path(self.receipt()["source_root"])
-        outside = self.root / "outside"
-        outside.mkdir()
-        self.junction(release / "unexpected-link", outside)
-        before = len(self.calls())
-        self.run_cli("update", expected=1)
-        self.assertEqual(len(self.calls()), before)
-
     def test_normal_concurrency_locks_manager_state_and_both_targets(self):
         gate = self.root / "gate"
         environment = dict(self.environment, HARNESS_FIXTURE_GATE=str(gate))
@@ -587,13 +769,12 @@ class RemoteCliTests(unittest.TestCase):
             archive.extractall(unpacked, filter="data")
         self.payload = unpacked / "package"
         self.run_cli()
-        release = Path(self.receipt()["source_root"])
-        long_release = Path("\\\\?\\" + str(release))
-        actual = {path.relative_to(long_release).as_posix() for path in long_release.rglob("*") if path.is_file()}
-        self.assertEqual(actual, files)
-        for name in actual:
-            self.assertEqual((long_release / name).read_bytes(), (self.payload / name).read_bytes())
-        manifest = json.loads((release / "package.json").read_text())
+        wrapper = self.calls()[0]
+        self.assertFalse(Path(wrapper["source"]).exists())
+        self.assertEqual(set(wrapper["hashes"]), files)
+        for name, digest in wrapper["hashes"].items():
+            self.assertEqual(hashlib.sha256((self.payload / name).read_bytes()).hexdigest(), digest)
+        manifest = json.loads((self.payload / "package.json").read_text())
         self.assertTrue(manifest["private"])
         self.assertEqual(manifest["engines"]["node"], ">=22")
         self.assertNotIn("scripts", manifest)
