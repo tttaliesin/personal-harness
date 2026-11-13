@@ -1,0 +1,5 @@
+name = "roylabs-desktop"
+platform = "windows"
+
+[config.windows]
+sandbox = "elevated"

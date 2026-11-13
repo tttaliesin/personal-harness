@@ -1,0 +1,5 @@
+# Store text sources as UTF-8 with LF line endings.
+* text=auto eol=lf
+
+# Keep PowerShell sources ASCII-only for BOM-free Windows PowerShell 5.1 support.
+*.ps1 text eol=lf working-tree-encoding=UTF-8

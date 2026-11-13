@@ -1,0 +1,62 @@
+{
+  "baseline_host": "roylabs-desktop",
+  "captured_on": "2026-11-12",
+  "transport": "Codex remote host thread read-only export",
+  "agents": {
+    "path": "common/AGENTS.md",
+    "original_sha256": "4c73276517d9224797c2805cab33a63f9bc2dfa50ff950c665822111182a6988",
+    "portable_change": "Original Codex home -> ${CODEX_HOME}"
+  },
+  "skills": [
+    {
+      "path": "skills/create-readme/SKILL.md",
+      "sha256": "c4feeead19c281e158b6d66f2028b65abf93faf0c3fdde6a79b309e806011208"
+    },
+    {
+      "path": "skills/agent-desktop/SKILL.md",
+      "sha256": "359140fc5ede5ba29c54c24b4bb4eae374f65ecc883a83404cb7f96dc5edc3b9"
+    },
+    {
+      "path": "skills/agent-desktop/references/commands-interaction.md",
+      "sha256": "43bf29f80af740f71234a74f274d41646a213a5fda5088e9e072bd844f395a11"
+    },
+    {
+      "path": "skills/agent-desktop/references/commands-observation.md",
+      "sha256": "983291f1f8272fe3bea0a099d3faaf1aa6694c4e1f1a36c83362d9a1cd58e2f7"
+    },
+    {
+      "path": "skills/agent-desktop/references/commands-system.md",
+      "sha256": "a99042f2cecf66f315f3bc38e4cf265bf36441ff08a4a4e847c718e1b6f2deb4"
+    },
+    {
+      "path": "skills/agent-desktop/references/workflows.md",
+      "sha256": "e78194d24d3963d10a8069833c90a1bdb932f0ab8f6b645df79149d95471645c"
+    },
+    {
+      "path": "skills/agent-desktop-windows/SKILL.md",
+      "sha256": "e5de7258fa63ce082d7c4b822e7330f7a07d5d53ee368e76c87038e96ca694dd"
+    },
+    {
+      "path": "skills/agent-desktop-windows/references/chromium-and-electron.md",
+      "sha256": "a636cf25a52bd25abe287f714137dfb6e77b6604ca4101965e67e71a2b5d4718"
+    },
+    {
+      "path": "skills/agent-desktop-windows/references/permissions-and-elevation.md",
+      "sha256": "1ae422d682a4ed48025b5f17c2ce8a37e830b8d86b0a18f3f4d725fc74ada733"
+    },
+    {
+      "path": "skills/agent-desktop-windows/references/shell-and-overlay.md",
+      "sha256": "d53fc399a168165b09fb930b9f525228c0d46bcad0aa9cc8af775cc01d18898f"
+    },
+    {
+      "path": "skills/agent-desktop-windows/references/troubleshooting.md",
+      "sha256": "8f6115c920495f84f7ef866750d50e789c3a9efac84ed7b4c337f1e116ecc923"
+    }
+  ],
+  "agent_desktop": {
+    "version": "v1.0.2",
+    "source_commit": "a47ed664e0db00d1d4df364eb3fe8a5599882f3c",
+    "source": "https://github.com/vercel-labs/agent-desktop",
+    "executable_sha256": "409e58cbdd6aed47e29771ffa60bc122a9843505a227af488cded85215943988"
+  }
+}

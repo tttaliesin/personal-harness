@@ -1,0 +1,23 @@
+# Local machine configuration and Python environments.
+.local/
+.venv/
+.audit/
+.task/
+
+# Python caches.
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# IDE settings and editor temporary files.
+.idea/
+.vscode/
+.vs/
+*.swp
+*.swo
+*~
+
+# OS metadata.
+.DS_Store
+Thumbs.db
+Desktop.ini

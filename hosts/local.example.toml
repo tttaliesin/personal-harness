@@ -1,0 +1,12 @@
+# Copy to .local/<hostname>.toml; this file is never applied by itself.
+# Relative paths are resolved from the repository root.
+# Only USERPROFILE, CODEX_HOME and REPO_ROOT placeholders are accepted.
+
+[paths]
+# agent_desktop = "D:/tools/agent-desktop.exe"
+# codegraph = "D:/tools/codegraph.cmd"
+
+# Optional local preferences override common values.
+# App-generated runtime keys remain in the existing ~/.codex/config.toml.
+# [config.desktop]
+# autoArchiveAfterDays = 7

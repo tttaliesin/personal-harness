@@ -1,0 +1,86 @@
+version: '3'
+
+silent: true
+
+vars:
+  HOST: '{{.COMPUTERNAME}}'
+  PYTHON: ''
+  RUNTIME_PYTHON: '{{.PYTHON | default (joinPath .ROOT_DIR ".venv" "Scripts" "python.exe")}}'
+
+tasks:
+  default:
+    dir: '{{.ROOT_DIR}}'
+    desc: 사용 가능한 명령 표시
+    aliases: [help]
+    cmds:
+      - '{{.TASK_EXE | shellQuote}} --taskfile {{.ROOT_TASKFILE | shellQuote}} --list'
+
+  setup:
+    dir: '{{.ROOT_DIR}}'
+    desc: Python 가상환경과 저장소 패키지 준비
+    cmds:
+      - '{{.PYTHON | default "python" | shellQuote}} -m venv .venv'
+      - './.venv/Scripts/python.exe -m pip install --requirement requirements.txt'
+
+  plan:
+    dir: '{{.ROOT_DIR}}'
+    desc: Harness 변경 계획 확인
+    cmds:
+      - >-
+        powershell.exe -NoLogo -NoProfile -NonInteractive
+        -File ./scripts/harness.ps1 plan
+        -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
+        {{.CLI_ARGS}}
+
+  check:
+    dir: '{{.ROOT_DIR}}'
+    desc: Harness 적용 상태와 의존성 확인
+    cmds:
+      - >-
+        powershell.exe -NoLogo -NoProfile -NonInteractive
+        -File ./scripts/harness.ps1 check
+        -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
+        {{.CLI_ARGS}}
+
+  apply:
+    dir: '{{.ROOT_DIR}}'
+    desc: 백업 후 공통 Harness 적용
+    cmds:
+      - >-
+        powershell.exe -NoLogo -NoProfile -NonInteractive
+        -File ./scripts/harness.ps1 apply
+        -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
+        {{.CLI_ARGS}}
+
+  update:
+    dir: '{{.ROOT_DIR}}'
+    desc: 최신 의존성 설치와 Harness 적용·검증
+    aliases: [install]
+    cmds:
+      - >-
+        powershell.exe -NoLogo -NoProfile -NonInteractive
+        -File ./scripts/update-dependencies.ps1 -Install
+        -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
+        {{.CLI_ARGS}}
+
+  update:plan:
+    dir: '{{.ROOT_DIR}}'
+    desc: 의존성 최신 버전과 설치 계획만 조회
+    aliases: [install:plan]
+    cmds:
+      - >-
+        powershell.exe -NoLogo -NoProfile -NonInteractive
+        -File ./scripts/update-dependencies.ps1
+        -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
+        {{.CLI_ARGS}}
+
+  test:
+    dir: '{{.ROOT_DIR}}'
+    desc: 임시 프로필에서 전체 테스트 실행
+    aliases: [tests]
+    cmds:
+      - >-
+        powershell.exe -NoLogo -NoProfile -NonInteractive
+        -File ./scripts/test.ps1
+        -Python {{.RUNTIME_PYTHON | shellQuote}}
+        {{.CLI_ARGS}}
