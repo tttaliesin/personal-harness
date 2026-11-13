@@ -1,0 +1,34 @@
+{
+  "name": "@tttaliesin/personal-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Private Windows Codex harness installer",
+  "type": "module",
+  "bin": {
+    "personal-harness": "bin/personal-harness.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "requirements.txt",
+    "bin",
+    "scripts",
+    "common",
+    "hosts",
+    "skills",
+    "sources",
+    "docs",
+    "!scripts/test.ps1",
+    "!**/.git/**",
+    "!**/.local/**",
+    "!**/.audit/**",
+    "!**/.venv/**",
+    "!**/node_modules/**",
+    "!**/__pycache__/**",
+    "!**/.pytest_cache/**",
+    "!**/.cache/**",
+    "!**/*.pyc",
+    "!**/*.pyo"
+  ]
+}
