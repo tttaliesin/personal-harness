@@ -429,6 +429,7 @@ class RemoteCliTests(unittest.TestCase):
 
     @unittest.skipUnless(NPM, "npm is required")
     def test_actual_npm_pack_has_complete_allowlisted_payload_and_runs_offline(self):
+        self.assertTrue((ROOT / "docs/history/deployment-2026-11-12-13.md").is_file())
         for relative in ("AGENTS.md", ".local/private.txt", ".audit/private.txt", "tests/private.py",
                          "scripts/__pycache__/private.pyc", "skills/agent-desktop/.local/private.txt"):
             path = self.payload / relative
@@ -446,6 +447,7 @@ class RemoteCliTests(unittest.TestCase):
         for name in ("skills/agent-desktop/references/commands-system.md", "skills/agent-desktop-windows/references/troubleshooting.md",
                      "sources/agent-desktop-LICENSE", "docs/deployment.md", "scripts/bootstrap.ps1"):
             self.assertIn(name, files)
+        self.assertFalse(any(name.startswith("docs/history/") for name in files))
         self.assertNotIn("scripts/test.ps1", files)
         self.assertNotIn("Taskfile.yml", files)
         self.assertNotIn("AGENTS.md", files)

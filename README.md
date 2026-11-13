@@ -107,7 +107,7 @@ task install -- -Locked
 
 | 위치 | 역할 |
 |---|---|
-| [Taskfile.yml](Taskfile.yml) | 루트에서 사용하는 준비, 설치, 갱신, 적용과 검증 명령 |
+| `Taskfile.yml` | 저장소 루트에서 사용하는 준비, 설치, 갱신, 적용과 검증 명령 |
 | [common/AGENTS.md](common/AGENTS.md) | 전역 사용자 지침. `${CODEX_HOME}`은 적용 대상 PC에서 치환 |
 | [common/config.toml](common/config.toml) | 모델, 추론 수준, 사용자 정책, Desktop 설정, 플러그인 선택, CodeGraph MCP |
 | [skills](skills) | `create-readme`, `agent-desktop`, `agent-desktop-windows` 원본과 참조 문서 |
@@ -141,4 +141,5 @@ task test
 ```
 
 테스트는 임시 사용자 홈에서 설정 보존, 반복 적용, 백업과 실패 시 복구, 경로 보호를 확인한다.
-실제 Homelab 적용 결과와 실행 검증은 [적용 문서](docs/deployment.md)에 기록한다.
+과거 적용·검증 이력은 저장소의 `docs/history/`에 보관한다.
+이력 문서는 설치 패키지에 포함하지 않는다.

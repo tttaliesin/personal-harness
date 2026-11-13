@@ -19,6 +19,7 @@
     "skills",
     "sources",
     "docs",
+    "!docs/history/**",
     "!scripts/test.ps1",
     "!**/.git/**",
     "!**/.local/**",
