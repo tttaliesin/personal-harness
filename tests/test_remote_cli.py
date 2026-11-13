@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -37,6 +38,16 @@ class FixturePython {
         if (args.Count > 0 && args[0] == "-3") args.RemoveAt(0);
         if (args.Count > 1 && args[0] == "-c") {
             if (args[1].Contains("sys.executable")) Console.WriteLine(self);
+            if (args[1].Contains("version_info")) {
+                string state = Environment.GetEnvironmentVariable("HARNESS_FIXTURE_PROBE_STATE");
+                if (!String.IsNullOrEmpty(state)) {
+                    int count = File.Exists(state) ? Int32.Parse(File.ReadAllText(state)) + 1 : 1;
+                    File.WriteAllText(state, count.ToString());
+                    string requirements = Environment.GetEnvironmentVariable("HARNESS_FIXTURE_MUTATE_REQUIREMENTS");
+                    if (count == 1 && !String.IsNullOrEmpty(requirements)) File.AppendAllText(requirements, "\n# discovery mutation\n");
+                    if (count == 2 && Environment.GetEnvironmentVariable("HARNESS_FIXTURE_FAIL_SECOND_PROBE") == "1") return 17;
+                }
+            }
             if (args[1].Contains("version_info") && Environment.GetEnvironmentVariable("HARNESS_FIXTURE_OLD_PYTHON") == "1") return 17;
             if (args[1].Contains("import tomlkit")) return Code("HARNESS_FIXTURE_IMPORT_EXIT");
             return 0;
@@ -241,6 +252,107 @@ class RemoteCliTests(unittest.TestCase):
         second = self.receipt()
         self.assertNotEqual(first["python"], second["python"])
         self.assertTrue(Path(first["python"]).is_file())
+
+    def test_bare_update_reuses_managed_python_without_path_python(self):
+        self.run_cli()
+        first = self.receipt()
+        aliases = self.root / "Microsoft/WindowsApps"
+        aliases.mkdir(parents=True)
+        shutil.copy2(self.python, aliases / "python.exe")
+        for path in (str(aliases), str(self.root / "missing-python")):
+            with self.subTest(path=path):
+                before = len(self.python_calls())
+                self.run_cli("update", python=False, environment=dict(self.environment, PATH=path))
+                self.assertEqual(self.receipt()["python"], first["python"])
+                self.assertEqual(self.receipt()["command"], "update")
+                calls = self.python_calls()[before:]
+                self.assertTrue(calls)
+                self.assertTrue(all(Path(call[0]) == Path(first["python"]) for call in calls))
+                self.assertFalse(any(call[1:3] == ["-m", "venv"] for call in calls))
+        previous = (self.manager / "active.json").read_bytes()
+        result = self.run_cli("update", extra=["--python", "missing.exe"], python=False, expected=1,
+                              environment=dict(self.environment, PATH=str(aliases)))
+        self.assertIn(b"Invalid --python", result.stderr)
+        self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+
+    def test_broken_managed_python_falls_back_without_recreating_from_itself(self):
+        self.run_cli()
+        first = self.receipt()
+        managed = Path(first["python"])
+        commands = self.root / "commands"
+        commands.mkdir()
+        shutil.copy2(self.python, commands / "python.exe")
+        for damage in ("missing-config", "missing-executable", "invalid-executable"):
+            with self.subTest(damage=damage):
+                if damage == "missing-config":
+                    (managed.parent.parent / "pyvenv.cfg").unlink()
+                elif damage == "missing-executable":
+                    managed.unlink()
+                else:
+                    managed.write_bytes(b"invalid executable")
+                previous = (self.manager / "active.json").read_bytes()
+                before = len(self.python_calls())
+                result = self.run_cli("update", python=False, expected=1,
+                                      environment=dict(self.environment, PATH=str(self.root / "missing-python")))
+                self.assertIn(b"Python 3.11+", result.stderr)
+                self.assertIn(b"--python", result.stderr)
+                self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+                self.run_cli("update", python=False, environment=dict(self.environment, PATH=str(commands)))
+                self.assertEqual(self.receipt()["python"], first["python"])
+                creates = [call for call in self.python_calls()[before:] if call[1:3] == ["-m", "venv"]]
+                self.assertEqual(len(creates), 1)
+                self.assertEqual(Path(creates[0][0]), commands / "python.exe")
+
+    def test_requirements_mutation_during_discovery_keeps_captured_identity(self):
+        self.run_cli()
+        requirements = self.payload / "requirements.txt"
+        original = requirements.read_bytes()
+        environment = dict(self.environment, PATH=str(self.root / "missing-python"),
+                           HARNESS_FIXTURE_PROBE_STATE=str(self.root / "probes"),
+                           HARNESS_FIXTURE_MUTATE_REQUIREMENTS=str(requirements))
+        self.run_cli("update", python=False, environment=environment)
+        mutated = requirements.read_bytes()
+        self.assertEqual(mutated, original + b"\n# discovery mutation\n")
+        for expected, pip_count in ((original, 1), (mutated, 2)):
+            if pip_count == 2:
+                self.run_cli("update")
+            receipt = self.receipt()
+            release = Path(receipt["source_root"])
+            captured = (release / "requirements.txt").read_bytes()
+            digest = hashlib.sha256(captured).hexdigest()
+            venv = Path(receipt["python"]).parent.parent
+            ready = json.loads((venv / "ready.json").read_text(encoding="utf-8"))
+            with self.subTest(pip_count=pip_count, identity="release"):
+                self.assertEqual(captured, expected)
+            with self.subTest(pip_count=pip_count, identity="python"):
+                self.assertEqual(venv.name, digest)
+            with self.subTest(pip_count=pip_count, identity="ready"):
+                self.assertEqual(ready["requirements_sha256"], digest)
+            with self.subTest(pip_count=pip_count, identity="pip"):
+                pip = [call for call in self.python_calls() if call[1:4] == ["-m", "pip", "install"]]
+                self.assertEqual(len(pip), 1 if captured == original else 2)
+                self.assertEqual(Path(pip[-1][-1]).read_bytes(), captured)
+
+    def test_managed_python_failing_second_probe_never_recreates_itself(self):
+        self.run_cli()
+        managed = Path(self.receipt()["python"])
+        previous = (self.manager / "active.json").read_bytes()
+        before = len(self.python_calls())
+        wrapper_calls = len(self.calls())
+        probes = self.root / "probes"
+        environment = dict(self.environment, PATH=str(self.root / "missing-python"),
+                           HARNESS_FIXTURE_PROBE_STATE=str(probes), HARNESS_FIXTURE_FAIL_SECOND_PROBE="1")
+        result = subprocess.run(self.arguments("update", python=False), cwd=self.caller,
+                                env=environment, capture_output=True, timeout=30)
+        calls = self.python_calls()[before:]
+        self.assertEqual(probes.read_text(), "2")
+        self.assertTrue(all(Path(call[0]) == managed for call in calls))
+        self.assertFalse(any(call[1:3] == ["-m", "venv"] for call in calls), calls)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(b"selected managed Python is unusable", result.stderr)
+        self.assertIn(b"--python", result.stderr)
+        self.assertEqual((self.manager / "active.json").read_bytes(), previous)
+        self.assertEqual(len(self.calls()), wrapper_calls)
 
     def test_failures_propagate_and_retain_previous_receipt(self):
         self.run_cli()
