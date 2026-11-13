@@ -21,6 +21,8 @@ import urllib.request
 
 import tomlkit
 from harness import REPO, HarnessError, atomic_write, read_toml, safe_file, select_layout, official_source_files
+import mcp_packages
+from registry import Registry, declaration_hash, load_registry, lock_issues
 
 
 def digest(data: bytes) -> str:
@@ -95,30 +97,116 @@ def extract_agent(data: bytes, expected: str) -> bytes:
             return stream.read()
 
 
-def resolve(lock: dict, locked: bool = False) -> Resolution:
+def plugin_prefix(manifest: str) -> str:
+    parent = Path(manifest).parent
+    if parent.name == ".codex-plugin":
+        parent = parent.parent
+    return "" if parent.as_posix() == "." else parent.as_posix() + "/"
+
+
+def git_output(arguments: list[str], *, cwd: Path | None = None) -> bytes:
+    environment = os.environ.copy()
+    environment["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        return subprocess.run(["git", *arguments], cwd=cwd, env=environment, check=True,
+                              capture_output=True).stdout
+    except subprocess.CalledProcessError:
+        raise HarnessError("Plugin Git source resolution failed") from None
+
+
+def resolve_plugins(declarations: tuple[dict, ...]) -> list[dict]:
+    records = []
+    groups = {}
+    for spec in declarations:
+        groups.setdefault(spec["marketplace"], []).append(spec)
+    for group in groups.values():
+        selection = group[0]
+        if selection["channel"] == "latest-release":
+            repo = urllib.parse.urlsplit(selection["source"]).path.strip("/").removesuffix(".git")
+            metadata, commit = release(repo)
+            version = stable_version(metadata["tag_name"])
+            tree = source_tree(repo, commit)
+            for spec in group:
+                manifest = fetch(f"https://raw.githubusercontent.com/{repo}/{commit}/{spec['manifest']}")
+                records.append(plugin_record(spec, commit, manifest, tree, version=version,
+                                             basis=f"Official stable release {metadata['tag_name']}"))
+        else:
+            with tempfile.TemporaryDirectory(prefix="harness-plugin-") as directory:
+                checkout = Path(directory)
+                git_output(["init", "--quiet", str(checkout)])
+                git_output(["remote", "add", "origin", selection["source"]], cwd=checkout)
+                git_output(["fetch", "--quiet", "--depth=1", "origin", selection["ref"]], cwd=checkout)
+                commit = git_output(["rev-parse", "FETCH_HEAD^{commit}"], cwd=checkout).decode().strip()
+                if not re.fullmatch(r"[0-9a-f]{40}", commit):
+                    raise HarnessError("Plugin Git source did not resolve to an exact commit")
+                if re.fullmatch(r"[0-9a-f]{40}", selection["ref"]) and commit != selection["ref"]:
+                    raise HarnessError("Plugin Git source resolved to a different commit")
+                tree = []
+                for entry in git_output(["ls-tree", "-rz", "--full-tree", commit], cwd=checkout).split(b"\0"):
+                    if entry:
+                        metadata, path = entry.split(b"\t", 1)
+                        mode, kind, sha = metadata.decode("ascii").split()
+                        tree.append({"path": path.decode("utf-8"), "mode": mode, "type": kind, "sha": sha})
+                for spec in group:
+                    manifest = git_output(["show", f"{commit}:{spec['manifest']}"], cwd=checkout)
+                    records.append(plugin_record(spec, commit, manifest, tree, basis="Registry Git ref"))
+    return records
+
+
+def plugin_record(spec: dict, commit: str, data: bytes, tree: list[dict], *,
+                  basis: str, version: str | None = None) -> dict:
+    manifest = json.loads(data)
+    if not isinstance(manifest, dict):
+        raise HarnessError(f"Invalid plugin manifest for {spec['name']}")
+    actual = manifest.get("version")
+    if (manifest.get("name") != spec["name"] or not isinstance(actual, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]*", actual)
+            or actual.endswith(".")
+            or (version is not None and actual != version)):
+        raise HarnessError(f"Release/manifest disagreement for plugin {spec['name']}")
+    prefix = plugin_prefix(spec["manifest"])
+    files = {}
+    for item in tree:
+        path = item["path"]
+        if path.startswith(prefix) and item["type"] != "tree":
+            relative = path[len(prefix):]
+            if (item["type"] != "blob" or item["mode"] not in ("100644", "100755")
+                    or "\\" in relative or ":" in relative or relative.startswith("/")
+                    or any(part in ("", ".", "..", ".git") for part in relative.split("/"))
+                    or not re.fullmatch(r"[0-9a-f]{40}", item["sha"])):
+                raise HarnessError(f"Unsupported plugin source entry for {spec['name']}")
+            files[relative] = item["sha"]
+    relative_manifest = spec["manifest"][len(prefix):]
+    if relative_manifest not in files:
+        raise HarnessError(f"Plugin manifest is absent from selected source tree for {spec['name']}")
+    if files[relative_manifest] != blob_digest(data):
+        raise HarnessError(f"Plugin manifest source digest mismatch for {spec['name']}")
+    return {"name": spec["name"], "marketplace": spec["marketplace"], "manifest": spec["manifest"],
+            "source": spec["source"], "ref": commit, "version": actual, "ref_basis": basis,
+            "content_sha256": content_digest(files), "declaration": copy.deepcopy(spec),
+            "declaration_sha256": declaration_hash(spec)}
+
+
+def resolve(lock: dict, locked: bool = False, registry: Registry | None = None) -> Resolution:
+    registry = registry if registry is not None else load_registry(REPO / "registry.toml")
     result = Resolution(copy.deepcopy(lock))
     candidate = result.lock
     candidate.pop("ego_lite", None)
     if locked:
+        issues = lock_issues(registry, candidate)
+        if issues:
+            raise HarnessError("; ".join(issues))
+        for group in ("plugins", "mcp"):
+            specs = getattr(registry, group)
+            for record in candidate.get(group, []):
+                spec = next(item for item in specs if item["name"] == record["name"]
+                            and (group != "plugins" or item["marketplace"] == record["marketplace"]))
+                record.update(declaration=copy.deepcopy(spec), declaration_sha256=declaration_hash(spec))
+        stamp_registry(candidate, registry)
         return result
-    repositories = {"pstack": "michael-denyer/pstack-claude", "egm": "google/elephant-goldfish-model"}
-    for plugin in candidate["plugins"]:
-        repo = repositories[plugin["name"]]
-        metadata, commit = release(repo)
-        manifest = plugin["manifest"]
-        content = json.loads(fetch(f"https://raw.githubusercontent.com/{repo}/{commit}/{manifest}"))
-        version = stable_version(metadata["tag_name"])
-        if content.get("version") != version or content.get("name") != plugin["name"]:
-            raise HarnessError(f"Release/manifest disagreement: {repo}")
-        prefix = manifest.removesuffix(".codex-plugin/plugin.json")
-        files = {}
-        for item in source_tree(repo, commit):
-            if item["path"].startswith(prefix) and item["type"] != "tree":
-                if item["type"] != "blob" or item["mode"] not in ("100644", "100755"):
-                    raise HarnessError(f"Unsupported plugin source entry: {item['path']}")
-                files[item["path"][len(prefix):]] = item["sha"]
-        plugin.update(version=version, source=f"https://github.com/{repo}.git", ref=commit,
-                      ref_basis=f"Official stable release {metadata['tag_name']}", content_sha256=content_digest(files))
+    candidate["plugins"] = resolve_plugins(registry.plugins)
+    candidate["mcp"] = [mcp_packages.resolve(spec) for spec in registry.mcp]
+    stamp_registry(candidate, registry)
     graph = json.loads(fetch("https://registry.npmjs.org/@colbymchenry%2fcodegraph/latest"))
     integrity = graph["dist"]["integrity"]
     if graph.get("name") != "@colbymchenry/codegraph" or not integrity.startswith("sha512-"):
@@ -155,6 +243,13 @@ def resolve(lock: dict, locked: bool = False) -> Resolution:
         url=asset["browser_download_url"], sha256=sha256, executable_sha256=digest(executable),
         files_sha256={path: digest(data) for path, data in sorted(result.files.items())})
     return result
+
+
+def stamp_registry(lock: dict, registry: Registry):
+    lock.update(schema_version=2, registry_sha256=registry.fingerprint,
+                registrations={"plugins": copy.deepcopy(list(registry.plugins)), "mcp": copy.deepcopy(list(registry.mcp))})
+    lock.setdefault("plugins", [])
+    lock.setdefault("mcp", [])
 
 
 def find_codex(explicit: str | None, codex_home: Path) -> str | None:
@@ -215,40 +310,64 @@ def install_codegraph(lock: dict, local: Path, npm: str) -> Path:
 
 def plugin_cache_digest(plugin: dict, codex_home: Path) -> str | None:
     root = codex_home / "plugins/cache" / plugin["marketplace"] / plugin["name"] / plugin["version"]
+    safe_file(root, codex_home)
     if not root.is_dir():
         return None
-    files = {path.relative_to(root).as_posix(): blob_digest(path.read_bytes())
-             for path in root.rglob("*") if path.is_file() and ".git" not in path.relative_to(root).parts}
+    files = {}
+    for path in root.rglob("*"):
+        safe_file(path, codex_home)
+        if path.is_file() and ".git" not in path.relative_to(root).parts:
+            files[path.relative_to(root).as_posix()] = blob_digest(path.read_bytes())
     return content_digest(files)
 
 
-def register_marketplace(plugin: dict, codex: str, codex_home: Path, environment: dict):
+def register_marketplace(plugin: dict, codex: str, codex_home: Path, environment: dict, *, plugins: list | None = None):
     config = codex_home / "config.toml"
-    previous = read_toml(config).get("marketplaces", {}).get(plugin["marketplace"]) if config.exists() else None
+    safe_file(config, codex_home)
+    old = read_toml(config) if config.exists() else {}
+    previous = old.get("marketplaces", {}).get(plugin["marketplace"])
+    selections = {key: copy.deepcopy(value) for key, value in old.get("plugins", {}).items()
+                  if key.endswith("@" + plugin["marketplace"])}
     base = [codex, "plugin", "marketplace"]
     changed = previous and (previous.get("source") != plugin["source"] or previous.get("ref") != plugin["ref"]
-                            or ("content_sha256" in plugin
-                                and plugin_cache_digest(plugin, codex_home) != plugin["content_sha256"]))
+                            or any("content_sha256" in item and plugin_cache_digest(item, codex_home) != item["content_sha256"]
+                                   for item in (plugins or [plugin])))
     if changed:
-        subprocess.run([*base, "remove", plugin["marketplace"], "--json"], check=True, env=environment)
+        subprocess.run([*base, "remove", plugin["marketplace"], "--json"], check=True, env=environment, capture_output=True)
     try:
-        response = subprocess.run([*base, "add", plugin["source"], "--ref", plugin["ref"], "--json"],
-                                  check=True, env=environment, capture_output=True, text=True, encoding="utf-8")
-    except subprocess.CalledProcessError:
+        try:
+            response = subprocess.run([*base, "add", plugin["source"], "--ref", plugin["ref"], "--json"],
+                                      check=True, env=environment, capture_output=True, text=True, encoding="utf-8")
+        except subprocess.CalledProcessError:
+            if changed:
+                restore = [*base, "add", previous["source"]]
+                if previous.get("ref"):
+                    restore.extend(["--ref", previous["ref"]])
+                subprocess.run([*restore, "--json"], check=True, env=environment, capture_output=True)
+                for selector in selections:
+                    subprocess.run([codex, "plugin", "add", selector, "--json"], check=True,
+                                   env=environment, capture_output=True)
+            raise
+        configured = read_toml(config).get("marketplaces", {}).get(plugin["marketplace"], {})
+        if configured.get("source") != plugin["source"] or configured.get("ref") != plugin["ref"]:
+            raise HarnessError(f"Marketplace did not register the requested ref: {plugin['marketplace']}")
+        root = json.loads(response.stdout)["installedRoot"]
+        head = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"], check=True,
+                              capture_output=True, text=True, encoding="utf-8", env=environment).stdout.strip()
+        if head != plugin["ref"]:
+            raise HarnessError(f"Marketplace checkout has the wrong commit: {plugin['marketplace']}")
         if changed:
-            restore = [*base, "add", previous["source"]]
-            if previous.get("ref"):
-                restore.extend(["--ref", previous["ref"]])
-            subprocess.run([*restore, "--json"], check=True, env=environment)
-        raise
-    configured = read_toml(config).get("marketplaces", {}).get(plugin["marketplace"], {})
-    if configured.get("source") != plugin["source"] or configured.get("ref") != plugin["ref"]:
-        raise HarnessError(f"Marketplace did not register the requested ref: {plugin['marketplace']}")
-    root = json.loads(response.stdout)["installedRoot"]
-    head = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"], check=True,
-                          capture_output=True, text=True, encoding="utf-8", env=environment).stdout.strip()
-    if head != plugin["ref"]:
-        raise HarnessError(f"Marketplace checkout has the wrong commit: {root}")
+            managed = {f"{item['name']}@{item['marketplace']}" for item in (plugins or [plugin])}
+            for selector in selections.keys() - managed:
+                subprocess.run([codex, "plugin", "add", selector, "--json"], check=True, env=environment, capture_output=True)
+    finally:
+        if changed and selections:
+            current = read_toml(config) if config.exists() else tomlkit.document()
+            if "plugins" not in current:
+                current["plugins"] = tomlkit.table()
+            for selector, settings in selections.items():
+                current["plugins"][selector] = settings
+            atomic_write(config, tomlkit.dumps(current).encode("utf-8"))
 
 
 def install_plugins(plugins: list, codex: str, codex_home: Path):
@@ -260,16 +379,29 @@ def install_plugins(plugins: list, codex: str, codex_home: Path):
         environment[f"GIT_CONFIG_VALUE_{count}"] = value
         count += 1
     environment["GIT_CONFIG_COUNT"] = str(count)
+    groups = {}
     for plugin in plugins:
-        register_marketplace(plugin, codex, codex_home, environment)
-        selector = f"{plugin['name']}@{plugin['marketplace']}"
-        subprocess.run([codex, "plugin", "add", selector, "--json"], check=True, env=environment)
-        manifest = codex_home / "plugins/cache" / plugin["marketplace"] / plugin["name"] / plugin["version"] / ".codex-plugin/plugin.json"
-        metadata = json.loads(manifest.read_text(encoding="utf-8"))
-        if metadata.get("name") != plugin["name"] or metadata.get("version") != plugin["version"]:
-            raise HarnessError(f"Installed plugin does not match the lock: {selector}")
-        if "content_sha256" in plugin:
-            if plugin_cache_digest(plugin, codex_home) != plugin["content_sha256"]:
+        group = groups.setdefault(plugin["marketplace"], [])
+        if group and (group[0]["source"], group[0]["ref"]) != (plugin["source"], plugin["ref"]):
+            raise HarnessError(f"Incoherent marketplace lock for {plugin['marketplace']}")
+        group.append(plugin)
+    for group in groups.values():
+        if len(group) == 1:
+            register_marketplace(group[0], codex, codex_home, environment)
+        else:
+            register_marketplace(group[0], codex, codex_home, environment, plugins=group)
+        for plugin in group:
+            selector = f"{plugin['name']}@{plugin['marketplace']}"
+            subprocess.run([codex, "plugin", "add", selector, "--json"], check=True, env=environment, capture_output=True)
+        for plugin in group:
+            selector = f"{plugin['name']}@{plugin['marketplace']}"
+            relative = plugin["manifest"][len(plugin_prefix(plugin["manifest"])):]
+            manifest = codex_home / "plugins/cache" / plugin["marketplace"] / plugin["name"] / plugin["version"] / relative
+            safe_file(manifest, codex_home)
+            metadata = json.loads(manifest.read_text(encoding="utf-8"))
+            if metadata.get("name") != plugin["name"] or metadata.get("version") != plugin["version"]:
+                raise HarnessError(f"Installed plugin does not match the lock: {selector}")
+            if "content_sha256" in plugin and plugin_cache_digest(plugin, codex_home) != plugin["content_sha256"]:
                 raise HarnessError(f"Installed plugin source content does not match the resolved commit: {selector}")
 
 
@@ -336,7 +468,7 @@ def save_paths(path: Path, agent: Path, codegraph: Path):
         if key not in local["paths"]:
             local["paths"][key] = executable.as_posix()
         elif local["paths"][key] != executable.as_posix():
-            print(f"Keeping existing local paths.{key}: {local['paths'][key]}")
+            print(f"Keeping existing local paths.{key}")
     rendered = tomlkit.dumps(local).encode("utf-8")
     if not path.exists() or path.read_bytes() != rendered:
         atomic_write(path, rendered)
@@ -365,6 +497,8 @@ def main(argv=None) -> int:
         seed = lock_path if lock_path.exists() else layout.seed_lock
         result = resolve(json.loads(seed.read_text(encoding="utf-8")), locked=args.locked)
         lock = result.lock
+        for record in lock.get("mcp", []):
+            mcp_packages.configuration(record, local)
         if layout.persistent:
             official_source_files(lock)
         codex_home = args.codex_home.resolve()
@@ -373,6 +507,8 @@ def main(argv=None) -> int:
         print(f"{lock['codegraph']['package']}@{lock['codegraph']['version']} -> {local / 'tools/codegraph'}")
         for item in lock["plugins"]:
             print(f"{item['name']}@{item['marketplace']} version {item['version']}: {item['source']} ref {item['ref']}")
+        for item in lock.get("mcp", []):
+            print(f"MCP {item['name']} ({item['kind']})")
         print(f"Codex CLI: {codex or '(specify --codex)'}\nCodex home: {codex_home}\nLocal paths: {config}")
         if not args.install:
             print("Preview only. Pass -Install to install dependencies. No files were written.")
@@ -387,6 +523,8 @@ def main(argv=None) -> int:
         agent = install_agent(lock["agent_desktop"], local, result.archive)
         codegraph = install_codegraph(lock["codegraph"], local, npm)
         install_plugins(lock["plugins"], codex, codex_home)
+        for record in lock.get("mcp", []):
+            mcp_packages.install(record, local, guard=safe_file)
         if layout.persistent:
             sync_sources(result, layout.sources, layout.source_backups)
         else:
@@ -396,7 +534,9 @@ def main(argv=None) -> int:
         print(f"Dependencies installed and lock saved. Run harness.ps1 apply/check -HostName {host}.")
         return 0
     except (HarnessError, OSError, ValueError, KeyError, tarfile.TarError, subprocess.CalledProcessError, tomlkit.exceptions.TOMLKitError) as exc:
-        print(f"ERROR {exc}", file=sys.stderr)
+        message = ("Dependency operation failed" if isinstance(exc, (OSError, subprocess.CalledProcessError,
+                                                                    tomlkit.exceptions.TOMLKitError)) else str(exc))
+        print(f"ERROR {message}", file=sys.stderr)
         return 2
 
 

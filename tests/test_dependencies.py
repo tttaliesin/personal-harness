@@ -58,6 +58,7 @@ class DependencyTests(unittest.TestCase):
             sources.mkdir()
             sources.joinpath("dependencies.lock.json").write_bytes(
                 installer.REPO.joinpath("sources/dependencies.lock.json").read_bytes())
+            repo.joinpath("registry.toml").write_bytes(installer.REPO.joinpath("registry.toml").read_bytes())
             before = set(repo.rglob("*"))
             with patch.object(installer, "REPO", repo), patch.object(installer, "find_codex", return_value=None), \
                     patch.object(installer, "install_agent") as agent, \

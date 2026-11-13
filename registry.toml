@@ -1,0 +1,17 @@
+schema_version = 1
+
+[[plugins]]
+name = "pstack"
+marketplace = "pstack-claude"
+source = "https://github.com/michael-denyer/pstack-claude.git"
+channel = "latest-release"
+manifest = "plugins/pstack/.codex-plugin/plugin.json"
+enabled = true
+
+[[plugins]]
+name = "egm"
+marketplace = "egm"
+source = "https://github.com/google/elephant-goldfish-model.git"
+channel = "latest-release"
+manifest = ".codex-plugin/plugin.json"
+enabled = true

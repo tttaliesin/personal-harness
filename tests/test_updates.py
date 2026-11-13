@@ -13,6 +13,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import install_dependencies as installer
+from registry import load_registry, declaration_hash, lock_issues
+import tomlkit
 
 
 def archive(executable=b"official exe"):
@@ -62,7 +64,9 @@ class UpdateTests(unittest.TestCase):
         if url.endswith("agent.tar.gz"):
             return self.package
         if "/git/trees/" in url:
-            files = self.skill_files if "agent-desktop" in url else {".codex-plugin/plugin.json": b"{}"}
+            name, version = ("pstack", "2.0.0") if "pstack" in url else ("egm", "3.0.0")
+            files = self.skill_files if "agent-desktop" in url else {
+                ".codex-plugin/plugin.json": json.dumps({"name": name, "version": version}).encode()}
             if "pstack" in url:
                 files = {"plugins/pstack/" + path: data for path, data in files.items()}
             return json.dumps({"tree": [{"path": path, "mode": "100644", "type": "blob",
@@ -79,13 +83,134 @@ class UpdateTests(unittest.TestCase):
         with patch.object(installer, "fetch", side_effect=self.fetch):
             return installer.resolve(self.lock)
 
+    def desired(self, directory, *, plugins=None, mcp=None):
+        path = Path(directory) / "registry.toml"
+        path.write_text(tomlkit.dumps({"schema_version": 1, "plugins": plugins or [], "mcp": mcp or []}), encoding="utf-8")
+        return load_registry(path)
+
+    def test_new_registry_membership_replaces_old_lock_membership_on_default_update(self):
+        with TemporaryDirectory() as directory:
+            plugins = [{"name": "third-party", "marketplace": "third-market", "source": "https://github.com/third/market.git",
+                        "manifest": "extensions/third-party/plugin.json", "channel": "latest-release", "enabled": False}]
+            mcp = [{"name": "remote", "kind": "http", "url": "https://example.test/mcp", "bearer_token_env_var": "EXAMPLE_TOKEN"}]
+            desired = self.desired(directory, plugins=plugins, mcp=mcp)
+            data = json.dumps({"name": "third-party", "version": "6.0.0"}).encode()
+
+            def fetch(url):
+                if "/third/market/" in url:
+                    if url.endswith("/releases/latest"):
+                        return b'{"tag_name":"v6.0.0"}'
+                    if "/git/ref/tags/" in url:
+                        return json.dumps({"object": {"type": "commit", "sha": self.commit}}).encode()
+                    if "/git/trees/" in url:
+                        return json.dumps({"tree": [{"path": "extensions/third-party/plugin.json", "type": "blob",
+                                                     "mode": "100644", "sha": installer.blob_digest(data)}]}).encode()
+                    if url.endswith("plugin.json"):
+                        return data
+                return self.fetch(url)
+
+            record = {"name": "remote", "kind": "http", "declaration": desired.mcp[0],
+                      "declaration_sha256": declaration_hash(desired.mcp[0])}
+            with patch.object(installer, "fetch", side_effect=fetch), \
+                    patch.object(installer.mcp_packages, "resolve", return_value=record) as resolve_mcp:
+                result = installer.resolve(self.lock, registry=desired)
+            resolve_mcp.assert_called_once_with(desired.mcp[0])
+            self.assertEqual([p["name"] for p in result.lock["plugins"]], ["third-party"])
+            self.assertEqual(result.lock["plugins"][0]["ref"], self.commit)
+            self.assertEqual(result.lock["mcp"], [record])
+            self.assertEqual(result.lock["registrations"], {"plugins": list(desired.plugins), "mcp": list(desired.mcp)})
+            self.assertEqual(lock_issues(desired, result.lock), [])
+            with patch.object(installer, "fetch", side_effect=AssertionError("locked metadata")), \
+                    patch.object(installer.mcp_packages, "resolve", side_effect=AssertionError("locked package resolution")):
+                replay = installer.resolve(result.lock, locked=True, registry=desired)
+            self.assertEqual(replay.lock, result.lock)
+
+    def test_locked_changed_declaration_rejects_before_resolution_or_installation(self):
+        resolved = self.resolve()
+        original = load_registry(installer.REPO / "registry.toml")
+        for changes in ({"source": "https://github.com/changed/repo.git"}, {"enabled": False},
+                        {"manifest": "changed/plugin.json"}, {"channel": "git-ref", "ref": "main"}):
+            with self.subTest(changes=changes), TemporaryDirectory() as directory:
+                plugins = [dict(spec) for spec in original.plugins]
+                plugins[0].update(changes)
+                desired = self.desired(directory, plugins=plugins)
+                with patch.object(installer, "fetch", side_effect=AssertionError("locked metadata")), \
+                        patch.object(installer.mcp_packages, "resolve", side_effect=AssertionError("package resolution")):
+                    with self.assertRaisesRegex(installer.HarnessError, "ordinary update"):
+                        installer.resolve(resolved.lock, locked=True, registry=desired)
+
+    def test_git_ref_uses_arbitrary_https_repository_and_portable_manifest_boundary(self):
+        with TemporaryDirectory() as directory:
+            desired = self.desired(directory, plugins=[{"name": "portable", "marketplace": "custom",
+                "source": "https://git.example.test/group/plugins.git", "channel": "git-ref", "ref": "refs/heads/main",
+                "manifest": "plugins/portable/plugin.json"}])
+            data = b'{"name":"portable","version":"1.0.0-dev"}'
+            other = b"portable skill\n"
+            tree = (f"100644 blob {installer.blob_digest(data)}\tplugins/portable/plugin.json\0"
+                    f"100755 blob {installer.blob_digest(other)}\tplugins/portable/run.py\0"
+                    f"100644 blob {'c' * 40}\tplugins/other/unrelated.txt\0").encode()
+            calls = []
+
+            def run(command, **kwargs):
+                calls.append(command)
+                if command[1] == "rev-parse":
+                    output = (self.commit + "\n").encode()
+                elif command[1] == "ls-tree":
+                    output = tree
+                elif command[1] == "show":
+                    output = data
+                else:
+                    output = b""
+                return subprocess.CompletedProcess(command, 0, output)
+
+            with patch.object(installer.subprocess, "run", side_effect=run):
+                record = installer.resolve_plugins(desired.plugins)[0]
+            self.assertEqual(record["source"], desired.plugins[0]["source"])
+            self.assertEqual(record["ref"], self.commit)
+            self.assertEqual(record["version"], "1.0.0-dev")
+            self.assertEqual(record["content_sha256"], installer.content_digest({
+                "plugin.json": installer.blob_digest(data), "run.py": installer.blob_digest(other)}))
+            self.assertIn(["git", "fetch", "--quiet", "--depth=1", "origin", "refs/heads/main"], calls)
+
+    @unittest.skipUnless(installer.shutil.which("git"), "Git is required")
+    def test_git_ref_reads_real_git_objects_and_hashes_from_isolated_repository(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            source.mkdir()
+            real_git = installer.git_output
+            real_git(["init", "--quiet", str(source)])
+            real_git(["config", "user.email", "fixture@example.invalid"], cwd=source)
+            real_git(["config", "user.name", "Fixture"], cwd=source)
+            manifest = source / "plugins/portable/plugin.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_bytes(b'{"name":"portable","version":"1.0.0"}')
+            (manifest.parent / "SKILL.md").write_bytes(b"real git bytes\n")
+            real_git(["add", "."], cwd=source)
+            real_git(["-c", "core.hooksPath=NUL", "commit", "--quiet", "--no-gpg-sign", "-m", "fixture"], cwd=source)
+            commit = real_git(["rev-parse", "HEAD"], cwd=source).decode().strip()
+            desired = self.desired(directory, plugins=[{"name": "portable", "marketplace": "portable",
+                "source": "https://git.example.test/group/plugins.git", "channel": "git-ref", "ref": commit,
+                "manifest": "plugins/portable/plugin.json"}])
+
+            def git(arguments, **kwargs):
+                if arguments[:3] == ["remote", "add", "origin"]:
+                    arguments = [*arguments[:3], str(source)]
+                return real_git(arguments, **kwargs)
+
+            with patch.object(installer, "git_output", side_effect=git):
+                record = installer.resolve_plugins(desired.plugins)[0]
+            self.assertEqual(record["ref"], commit)
+            self.assertEqual(record["content_sha256"], installer.content_digest({
+                "plugin.json": installer.blob_digest(manifest.read_bytes()),
+                "SKILL.md": installer.blob_digest((manifest.parent / "SKILL.md").read_bytes())}))
+
     def test_latest_resolves_exact_commits_versions_digests_and_complete_skill_bytes(self):
         old = copy.deepcopy(self.lock)
         result = self.resolve()
         self.assertEqual(self.lock, old)
         self.assertNotIn("ego_lite", result.lock)
         self.assertEqual(result.lock["update_policy"], self.lock["update_policy"])
-        self.assertEqual([p["version"] for p in result.lock["plugins"]], ["2.0.0", "3.0.0"])
+        self.assertEqual({p["name"]: p["version"] for p in result.lock["plugins"]}, {"pstack": "2.0.0", "egm": "3.0.0"})
         self.assertEqual(result.lock["plugins"][1]["ref"], self.commit)
         self.assertTrue(any(f"/git/tags/{self.tag}" in url for url in self.urls))
         self.assertEqual(result.lock["codegraph"]["version"], "5.0.0")
@@ -144,6 +269,7 @@ class UpdateTests(unittest.TestCase):
         repo = Path(directory)
         (repo / "sources").mkdir(parents=True)
         (repo / "sources/dependencies.lock.json").write_text(json.dumps(self.lock))
+        (repo / "registry.toml").write_bytes((installer.REPO / "registry.toml").read_bytes())
         return repo
 
     def run_main(self, repo, *args):
@@ -167,7 +293,10 @@ class UpdateTests(unittest.TestCase):
     def test_locked_resolution_performs_no_http(self):
         with patch.object(installer, "fetch", side_effect=AssertionError("locked HTTP")):
             result = installer.resolve(self.lock, locked=True)
-        self.assertEqual(result.lock["plugins"], self.lock["plugins"])
+        for old, adopted in zip(self.lock["plugins"], result.lock["plugins"]):
+            self.assertEqual(old, {key: value for key, value in adopted.items()
+                                   if key not in ("declaration", "declaration_sha256")})
+        self.assertEqual(result.lock["schema_version"], 2)
         self.assertIsNone(result.archive)
 
     def test_latest_query_failure_preserves_old_lock_without_fallback(self):
@@ -314,7 +443,7 @@ class UpdateTests(unittest.TestCase):
                 ["codex", "plugin", "marketplace", "add", plugin["source"], "--ref", plugin["ref"], "--json"],
                 ["codex", "plugin", "marketplace", "add", previous_source, "--json"],
             ])
-            self.assertEqual(run.call_args_list[-1].kwargs, {"check": True, "env": environment})
+            self.assertEqual(run.call_args_list[-1].kwargs, {"check": True, "env": environment, "capture_output": True})
 
     def test_same_version_plugin_cache_content_must_match_the_selected_source(self):
         with TemporaryDirectory() as directory:
@@ -567,6 +696,130 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual((repo / "sources/dependencies.lock.json").read_bytes(), old)
             self.assertEqual(execute.call_args_list[0].args[0],
                              ["codex", "plugin", "marketplace", "remove", plugin["marketplace"], "--json"])
+
+    def test_shared_marketplace_refreshes_once_preserves_other_selections_and_verifies_all_caches(self):
+        with TemporaryDirectory() as directory:
+            home = Path(directory)
+            first, first_root = self.make_plugin_cache(home)
+            second = {**first, "name": "sibling", "manifest": "plugins/sibling/plugin.json"}
+            second_root = first_root.parent.parent / second["name"] / second["version"]
+            second_root.mkdir(parents=True)
+            data = json.dumps({"name": second["name"], "version": second["version"]}).encode()
+            (second_root / "plugin.json").write_bytes(data)
+            second["content_sha256"] = installer.content_digest({"plugin.json": installer.blob_digest(data)})
+            (second_root / "plugin.json").write_bytes(b"corrupt sibling cache")
+            config = home / "config.toml"
+            unrelated = f"unrelated@{first['marketplace']}"
+            settings = {"enabled": False, "private_token": "credential-sentinel"}
+            original = {"marketplaces": {first["marketplace"]: {"source": first["source"], "ref": first["ref"]}},
+                        "plugins": {unrelated: settings}, "mcp_servers": {"local": {"url": "http://127.0.0.1/private"}}}
+            config.write_text(tomlkit.dumps(original), encoding="utf-8")
+            calls = []
+
+            def run(command, **kwargs):
+                calls.append(command)
+                current = tomlkit.parse(config.read_text(encoding="utf-8"))
+                if command[1:4] == ["plugin", "marketplace", "remove"]:
+                    current.pop("marketplaces")
+                    current.pop("plugins")
+                    config.write_text(tomlkit.dumps(current), encoding="utf-8")
+                elif command[1:4] == ["plugin", "marketplace", "add"]:
+                    current["marketplaces"] = original["marketplaces"]
+                    config.write_text(tomlkit.dumps(current), encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 0, json.dumps({"installedRoot": str(home / "source")}))
+                elif command[1:4] == ["plugin", "add", "sibling@egm"]:
+                    (second_root / "plugin.json").write_bytes(data)
+                return subprocess.CompletedProcess(command, 0, first["ref"] + "\n")
+
+            with patch.object(installer.subprocess, "run", side_effect=run):
+                installer.install_plugins([first, second], "codex", home)
+            self.assertEqual(len([call for call in calls if call[1:4] == ["plugin", "marketplace", "remove"]]), 1)
+            self.assertEqual(len([call for call in calls if call[1:4] == ["plugin", "marketplace", "add"]]), 1)
+            self.assertIn(["codex", "plugin", "add", unrelated, "--json"], calls)
+            final = tomlkit.parse(config.read_text(encoding="utf-8"))
+            self.assertEqual(final["plugins"][unrelated], settings)
+            self.assertEqual(final["mcp_servers"], original["mcp_servers"])
+            self.assertEqual(installer.plugin_cache_digest(second, home), second["content_sha256"])
+            (first_root / "skill.txt").write_bytes(b"changed after refresh")
+            with patch.object(installer, "register_marketplace"), patch.object(installer.subprocess, "run"):
+                with self.assertRaisesRegex(installer.HarnessError, "source content"):
+                    installer.install_plugins([first, second], "codex", home)
+
+    def test_shared_marketplace_resolves_one_selection_and_ref(self):
+        with TemporaryDirectory() as directory:
+            desired = self.desired(directory, plugins=[{"name": name, "marketplace": "shared",
+                "source": "https://github.com/example/shared.git", "channel": "latest-release",
+                "manifest": f"plugins/{name}/plugin.json"} for name in ("one", "two")])
+            manifests = {f"plugins/{name}/plugin.json": json.dumps({"name": name, "version": "1.0.0"}).encode()
+                         for name in ("one", "two")}
+            tree = [{"path": path, "type": "blob", "mode": "100644", "sha": installer.blob_digest(data)}
+                    for path, data in manifests.items()]
+            with patch.object(installer, "release", return_value=({"tag_name": "v1.0.0"}, self.commit)) as release, \
+                    patch.object(installer, "source_tree", return_value=tree) as source_tree, \
+                    patch.object(installer, "fetch", side_effect=lambda url: next(data for path, data in manifests.items() if url.endswith(path))):
+                records = installer.resolve_plugins(desired.plugins)
+            release.assert_called_once_with("example/shared")
+            source_tree.assert_called_once_with("example/shared", self.commit)
+            self.assertEqual({record["ref"] for record in records}, {self.commit})
+
+    def test_incoherent_shared_marketplace_lock_fails_before_subprocess(self):
+        first = self.lock["plugins"][0]
+        second = {**first, "name": "second", "ref": "f" * 40}
+        with TemporaryDirectory() as directory, patch.object(installer.subprocess, "run") as run:
+            with self.assertRaisesRegex(installer.HarnessError, "Incoherent"):
+                installer.install_plugins([first, second], "codex", Path(directory))
+            run.assert_not_called()
+
+    def test_mcp_installation_uses_selected_state_guard_and_keeps_old_lock_on_failure(self):
+        with TemporaryDirectory() as directory:
+            repo = self.make_repo(Path(directory) / "repo")
+            state = Path(directory) / "state & 한글"
+            result = self.resolve()
+            result.lock["mcp"] = [{"name": "fixture", "kind": "npm", "recipe": {"version": "1.0.0"}}]
+            original = (repo / "sources/dependencies.lock.json").read_bytes()
+            with patch.object(installer, "resolve", return_value=result), \
+                    patch.object(installer.platform, "machine", return_value="AMD64"), \
+                    patch.object(installer.shutil, "which", return_value="fixture"), \
+                    patch.object(installer, "install_agent", return_value=state / "agent.exe"), \
+                    patch.object(installer, "install_codegraph", return_value=state / "graph.cmd"), \
+                    patch.object(installer, "install_plugins"), \
+                    patch.object(installer.mcp_packages, "configuration", return_value={}) as configuration, \
+                    patch.object(installer.mcp_packages, "install", side_effect=ValueError("fixture package failure")) as install, \
+                    patch.object(installer, "sync_sources") as sync, patch.object(installer, "save_paths") as save:
+                self.assertEqual(self.run_main(repo, "--install", "--state-root", str(state)), 2)
+            install.assert_called_once_with(result.lock["mcp"][0], state, guard=installer.safe_file)
+            configuration.assert_called_once_with(result.lock["mcp"][0], state)
+            sync.assert_not_called()
+            save.assert_not_called()
+            self.assertEqual((repo / "sources/dependencies.lock.json").read_bytes(), original)
+            self.assertFalse((state / "sources/dependencies.lock.json").exists())
+
+    def test_mcp_recipe_preflight_failure_precedes_all_install_side_effects(self):
+        with TemporaryDirectory() as directory:
+            repo = self.make_repo(directory)
+            result = installer.Resolution(copy.deepcopy(self.lock))
+            result.lock["mcp"] = [{"name": "fixture", "kind": "python"}]
+            original = (repo / "sources/dependencies.lock.json").read_bytes()
+            with patch.object(installer, "resolve", return_value=result), \
+                    patch.object(installer.mcp_packages, "configuration", side_effect=ValueError("Invalid package context")), \
+                    patch.object(installer, "install_agent") as agent, patch.object(installer, "install_codegraph") as graph, \
+                    patch.object(installer, "install_plugins") as plugins, patch.object(installer.mcp_packages, "install") as mcp:
+                self.assertEqual(self.run_main(repo, "--install", "--locked"), 2)
+            for operation in (agent, graph, plugins, mcp):
+                operation.assert_not_called()
+            self.assertEqual((repo / "sources/dependencies.lock.json").read_bytes(), original)
+
+    def test_failed_commands_do_not_print_auth_values(self):
+        with TemporaryDirectory() as directory:
+            repo = self.make_repo(directory)
+            secret = "credential-sentinel"
+            output = io.StringIO()
+            failure = subprocess.CalledProcessError(1, ["tool", f"https://user:{secret}@example.test"], stderr=secret)
+            with patch.object(installer, "REPO", repo), patch.object(installer, "resolve", side_effect=failure), \
+                    redirect_stdout(io.StringIO()), redirect_stderr(output):
+                self.assertEqual(installer.main(["--host", "homelab-desktop", "--codex-home", str(repo / "home")]), 2)
+            self.assertNotIn(secret, output.getvalue())
+            self.assertIn("Dependency operation failed", output.getvalue())
 
 
 if __name__ == "__main__":
