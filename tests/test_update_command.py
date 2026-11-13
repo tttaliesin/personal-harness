@@ -13,6 +13,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(os.name == "nt" and shutil.which("powershell.exe"), "Windows PowerShell is required")
 class UpdateCommandTests(unittest.TestCase):
+    def test_harness_wrapper_keeps_imported_source_free_of_bytecode(self):
+        with TemporaryDirectory() as directory:
+            scripts = Path(directory) / 'scripts'
+            scripts.mkdir()
+            shutil.copy2(ROOT / 'scripts/harness.ps1', scripts)
+            (scripts / 'fixture_module.py').write_text('VALUE = 1\n', encoding='utf-8')
+            (scripts / 'harness.py').write_text('import fixture_module\nprint(fixture_module.VALUE)\n', encoding='utf-8')
+            environment = os.environ.copy()
+            environment.pop('PYTHONDONTWRITEBYTECODE', None)
+            environment.pop('PYTHONPYCACHEPREFIX', None)
+            result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-File',
+                                     str(scripts / 'harness.ps1'), 'plan', '-HostName', 'homelab-desktop',
+                                     '-Python', sys.executable], env=environment,
+                                    capture_output=True, text=True, encoding='utf-8')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((scripts / '__pycache__').exists())
+
     def run_command(self, extra, install=True, failure=None, use_state=False):
         with TemporaryDirectory() as directory:
             root = Path(directory)

@@ -79,7 +79,7 @@ try {
         exit $versionExitCode
     }
 
-    $cliArguments = @($harnessPath, $Command.ToLowerInvariant(), '--host', $HostName.ToLowerInvariant())
+    $cliArguments = @('-B', $harnessPath, $Command.ToLowerInvariant(), '--host', $HostName.ToLowerInvariant())
     if ($PSBoundParameters.ContainsKey('HomeDirectory')) {
         $cliArguments += @('--home', $HomeDirectory)
     }
