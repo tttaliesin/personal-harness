@@ -162,6 +162,11 @@ function Assert-RuntimeReferences([string]$Python, [string[]]$Files, [string[]]$
 import base64, json, os, re, sys, tomllib
 request = json.loads(base64.b64decode(sys.argv[1]))
 def normalized(value):
+    lexical = value.replace('\\', '/').casefold()
+    if lexical.startswith(('//./pipe/', '//?/pipe/')):
+        suffix = lexical[9:]
+        if not suffix or all(part not in ('', '.', '..') for part in suffix.removesuffix('/').split('/')):
+            return lexical.rstrip('/')
     return os.path.realpath(os.path.normpath(value)).replace('\\', '/').removeprefix('//?/').casefold().rstrip('/')
 roots = [normalized(root) for root in request['roots']]
 def walk(value, local_paths=False):
