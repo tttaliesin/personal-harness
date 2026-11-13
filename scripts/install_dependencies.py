@@ -153,6 +153,25 @@ def resolve_plugins(declarations: tuple[dict, ...]) -> list[dict]:
     return records
 
 
+def validate_plugin_paths(tree: list[dict], name: str):
+    paths = {}
+    reserved = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+                *(f"{prefix}{number}" for prefix in ("COM", "LPT") for number in "123456789\u00b9\u00b2\u00b3")}
+    for item in tree:
+        parts = item["path"].split("/")
+        for index, part in enumerate(parts):
+            if (not part or part.casefold() == ".git" or part.endswith((".", " "))
+                    or re.search(r'[<>:"\\|?*\x00-\x1f]', part)
+                    or part.split(".", 1)[0].rstrip(" ").upper() in reserved
+                    or len(part.encode("utf-16-le")) > 510):
+                raise HarnessError(f"Unsupported plugin source entry for {name}")
+            path = "/".join(parts[:index + 1])
+            kind = "tree" if index < len(parts) - 1 or item["type"] == "tree" else "file"
+            identity = (path, kind)
+            if paths.setdefault(path.casefold(), identity) != identity:
+                raise HarnessError(f"Unsupported plugin source entry for {name}")
+
+
 def plugin_record(spec: dict, commit: str, data: bytes, tree: list[dict], *,
                   basis: str, version: str | None = None) -> dict:
     manifest = json.loads(data)
@@ -164,6 +183,7 @@ def plugin_record(spec: dict, commit: str, data: bytes, tree: list[dict], *,
             or actual.endswith(".")
             or (version is not None and actual != version)):
         raise HarnessError(f"Release/manifest disagreement for plugin {spec['name']}")
+    validate_plugin_paths(tree, spec["name"])
     prefix = plugin_prefix(spec["manifest"])
     files = {}
     for item in tree:
@@ -171,8 +191,6 @@ def plugin_record(spec: dict, commit: str, data: bytes, tree: list[dict], *,
         if path.startswith(prefix) and item["type"] != "tree":
             relative = path[len(prefix):]
             if (item["type"] != "blob" or item["mode"] not in ("100644", "100755")
-                    or "\\" in relative or ":" in relative or relative.startswith("/")
-                    or any(part in ("", ".", "..", ".git") for part in relative.split("/"))
                     or not re.fullmatch(r"[0-9a-f]{40}", item["sha"])):
                 raise HarnessError(f"Unsupported plugin source entry for {spec['name']}")
             files[relative] = item["sha"]
@@ -374,7 +392,7 @@ def install_plugins(plugins: list, codex: str, codex_home: Path):
     environment = os.environ.copy()
     environment["CODEX_HOME"] = str(codex_home)
     count = int(environment.get("GIT_CONFIG_COUNT", "0"))
-    for key, value in (("core.autocrlf", "false"), ("core.eol", "lf")):
+    for key, value in (("core.autocrlf", "false"), ("core.eol", "lf"), ("core.longpaths", "true")):
         environment[f"GIT_CONFIG_KEY_{count}"] = key
         environment[f"GIT_CONFIG_VALUE_{count}"] = value
         count += 1
@@ -498,7 +516,7 @@ def main(argv=None) -> int:
         result = resolve(json.loads(seed.read_text(encoding="utf-8")), locked=args.locked)
         lock = result.lock
         for record in lock.get("mcp", []):
-            mcp_packages.configuration(record, local)
+            mcp_packages.preflight(record)
         if layout.persistent:
             official_source_files(lock)
         codex_home = args.codex_home.resolve()

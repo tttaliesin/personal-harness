@@ -1,4 +1,3 @@
-"""Validate portable registrations and compare them with resolved dependency locks."""
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -143,9 +142,10 @@ def _mcp(spec: Mapping) -> dict:
     env_vars = spec.get("env_vars", [])
     if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
         raise ValueError("Invalid MCP args")
+    credentials = r"^(?:--?(?:access[-_]?token|token|secret|password|api[-_]?key|authorization|credential)(?:=|$)|bearer\s|authorization:|x-api-key:)"
     for arg in args:
         value = arg.split("=", 1)[1] if arg.startswith("-") and "=" in arg else arg
-        if (re.search(r"^(?:--?(?:access[-_]?token|token|secret|password|api[-_]?key|authorization|credential)(?:=|$)|bearer\s|authorization:|x-api-key:)", arg, re.I)
+        if (any(re.search(credentials, candidate, re.I) for candidate in (arg, value))
                 or re.search(r"(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]+", arg)
                 or any(ord(char) < 32 for char in arg)
                 or re.match(r"^(?:[A-Za-z]:[/\\]|/|\\\\|~[/\\]|file:)", value, re.I)):

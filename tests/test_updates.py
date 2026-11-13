@@ -204,6 +204,95 @@ class UpdateTests(unittest.TestCase):
                 "plugin.json": installer.blob_digest(manifest.read_bytes()),
                 "SKILL.md": installer.blob_digest((manifest.parent / "SKILL.md").read_bytes())}))
 
+    def test_plugin_tree_rejects_windows_aliases_and_unrepresentable_components(self):
+        spec = {"name": "portable", "marketplace": "custom", "source": "https://git.example.test/group/plugins.git",
+                "channel": "git-ref", "ref": "main", "manifest": "plugins/portable/plugin.json"}
+        data = b'{"name":"portable","version":"1.0.0"}'
+
+        def entry(path, *, kind="blob", content=b"fixture"):
+            return {"path": path, "type": kind, "mode": "040000" if kind == "tree" else "100644",
+                    "sha": installer.blob_digest(content)}
+
+        manifest = entry(spec["manifest"], content=data)
+        invalid = [
+            [entry("plugins/portable/Readme.txt"), entry("plugins/portable/README.txt", content=b"other")],
+            [entry("plugins/portable/Docs/a.txt"), entry("plugins/portable/docs/b.txt")],
+            [entry("plugins/portable/Docs", kind="tree"), entry("plugins/portable/docs/b.txt")],
+            [entry("plugins/portable/docs"), entry("plugins/portable/docs/b.txt")],
+            [entry("Plugins/other.txt")],
+            [entry("plugins/other/NUL")],
+            *([entry("plugins/portable/" + path)] for path in (
+                "CON", "nul.txt", "COM1.log", "lpt9", "COM\u00b9.txt", "LPT\u00b2", "CONIN$", "CONOUT$.log",
+                "CON .txt", "trailing.", "trailing ", "bad<name", "bad>name", 'bad"name', "bad|name",
+                "bad?name", "bad*name", "bad\x00name", "bad\x1fname", "folder./file.txt", ".GIT/config",
+                "x" * 256, "\U0001f600" * 128)),
+        ]
+        for entries in invalid:
+            with self.subTest(paths=[item["path"] for item in entries]):
+                with self.assertRaisesRegex(installer.HarnessError, "Unsupported plugin source entry"):
+                    installer.plugin_record(spec, self.commit, data, [manifest, *entries], basis="Registry Git ref")
+        valid = [manifest, entry("plugins/portable/docs", kind="tree"),
+                 entry("plugins/portable/docs/a.txt"), entry("plugins/portable/docs/b.txt"),
+                 entry("plugins/portable/CONSOLE.txt"), entry("plugins/portable/COM10"),
+                 entry("plugins/portable/\ud55c\uae00.txt")]
+        record = installer.plugin_record(spec, self.commit, data, valid, basis="Registry Git ref")
+        self.assertEqual(record["content_sha256"], installer.content_digest({
+            item["path"].removeprefix("plugins/portable/"): item["sha"]
+            for item in valid if item["type"] == "blob"}))
+
+    @unittest.skipUnless(installer.shutil.which("git"), "Git is required")
+    def test_real_git_case_aliases_fail_before_installation_or_profile_mutation(self):
+        for files in ({"Readme.txt": b"first", "README.txt": b"second"},
+                      {"Docs": {"a.txt": b"first"}, "docs": {"b.txt": b"second"}}):
+            with self.subTest(files=files), TemporaryDirectory() as directory:
+                repo = self.make_repo(Path(directory) / "repo")
+                source = Path(directory) / "source"
+                real_git = installer.git_output
+                real_git(["init", "--quiet", str(source)])
+                real_git(["config", "user.email", "fixture@example.invalid"], cwd=source)
+                real_git(["config", "user.name", "Fixture"], cwd=source)
+
+                def object_id(command, data):
+                    return subprocess.run(["git", *command], input=data, cwd=source, check=True,
+                                          capture_output=True).stdout.decode().strip()
+
+                def tree(entries):
+                    rows = []
+                    for name, value in sorted(entries.items()):
+                        if isinstance(value, dict):
+                            mode, kind, sha = "040000", "tree", tree(value)
+                        else:
+                            mode, kind, sha = "100644", "blob", object_id(["hash-object", "-w", "--stdin"], value)
+                        rows.append(f"{mode} {kind} {sha}\t{name}\0".encode())
+                    return object_id(["mktree", "-z"], b"".join(rows))
+
+                root = tree({"plugin.json": b'{"name":"portable","version":"1.0.0"}', **files})
+                commit = object_id(["-c", "core.hooksPath=NUL", "commit-tree", root], b"fixture\n")
+                desired = self.desired(repo, plugins=[{"name": "portable", "marketplace": "portable",
+                    "source": "https://git.example.test/group/plugins.git", "channel": "git-ref", "ref": commit,
+                    "manifest": "plugin.json"}])
+                before = {p.relative_to(repo): p.read_bytes() for p in repo.rglob("*") if p.is_file()}
+
+                def git(arguments, **kwargs):
+                    if arguments[:3] == ["remote", "add", "origin"]:
+                        arguments = [*arguments[:3], str(source)]
+                    return real_git(arguments, **kwargs)
+
+                with ExitStack() as stack:
+                    stack.enter_context(patch.object(installer, "git_output", side_effect=git))
+                    stack.enter_context(patch.object(installer, "fetch", side_effect=AssertionError("network")))
+                    operations = [stack.enter_context(patch.object(installer, name)) for name in (
+                        "install_agent", "install_codegraph", "install_plugins", "sync_sources", "save_paths")]
+                    operations.append(stack.enter_context(patch.object(installer.mcp_packages, "install")))
+                    with self.assertRaisesRegex(installer.HarnessError, "Unsupported plugin source entry"):
+                        installer.resolve_plugins(desired.plugins)
+                    self.assertEqual(self.run_main(repo, "--install"), 2)
+                for operation in operations:
+                    operation.assert_not_called()
+                self.assertEqual({p.relative_to(repo): p.read_bytes() for p in repo.rglob("*") if p.is_file()}, before)
+                self.assertFalse((repo / "fake home").exists())
+                self.assertFalse((repo / ".local").exists())
+
     def test_latest_resolves_exact_commits_versions_digests_and_complete_skill_bytes(self):
         old = copy.deepcopy(self.lock)
         result = self.resolve()
@@ -608,7 +697,7 @@ class UpdateTests(unittest.TestCase):
         return plugin, root
 
     def test_plugin_git_overrides_append_without_mutating_inherited_environment(self):
-        for count in (0, 2):
+        for count in (0, 2, 3):
             with self.subTest(count=count), TemporaryDirectory() as directory:
                 home = Path(directory)
                 plugin, _ = self.make_plugin_cache(home)
@@ -616,14 +705,17 @@ class UpdateTests(unittest.TestCase):
                 if count:
                     inherited.update(GIT_CONFIG_KEY_0="core.autocrlf", GIT_CONFIG_VALUE_0="true",
                                      GIT_CONFIG_KEY_1="core.eol", GIT_CONFIG_VALUE_1="crlf")
+                if count == 3:
+                    inherited.update(GIT_CONFIG_KEY_2="core.longpaths", GIT_CONFIG_VALUE_2="false")
                 with patch.dict(installer.os.environ, inherited), \
                         patch.object(installer, "register_marketplace") as register, \
                         patch.object(installer.subprocess, "run") as run:
                     before = dict(installer.os.environ)
                     installer.install_plugins([plugin], "codex", home)
                     environment = run.call_args.kwargs["env"]
-                    self.assertEqual(environment["GIT_CONFIG_COUNT"], str(count + 2))
-                    for index, (key, value) in enumerate((("core.autocrlf", "false"), ("core.eol", "lf")), count):
+                    self.assertEqual(environment["GIT_CONFIG_COUNT"], str(count + 3))
+                    for index, (key, value) in enumerate((("core.autocrlf", "false"), ("core.eol", "lf"),
+                                                         ("core.longpaths", "true")), count):
                         self.assertEqual(environment[f"GIT_CONFIG_KEY_{index}"], key)
                         self.assertEqual(environment[f"GIT_CONFIG_VALUE_{index}"], value)
                     for index in range(count):
@@ -783,12 +875,14 @@ class UpdateTests(unittest.TestCase):
                     patch.object(installer, "install_agent", return_value=state / "agent.exe"), \
                     patch.object(installer, "install_codegraph", return_value=state / "graph.cmd"), \
                     patch.object(installer, "install_plugins"), \
-                    patch.object(installer.mcp_packages, "configuration", return_value={}) as configuration, \
+                    patch.object(installer.mcp_packages, "preflight", create=True) as preflight, \
+                    patch.object(installer.mcp_packages, "configuration") as configuration, \
                     patch.object(installer.mcp_packages, "install", side_effect=ValueError("fixture package failure")) as install, \
                     patch.object(installer, "sync_sources") as sync, patch.object(installer, "save_paths") as save:
                 self.assertEqual(self.run_main(repo, "--install", "--state-root", str(state)), 2)
             install.assert_called_once_with(result.lock["mcp"][0], state, guard=installer.safe_file)
-            configuration.assert_called_once_with(result.lock["mcp"][0], state)
+            preflight.assert_called_once_with(result.lock["mcp"][0])
+            configuration.assert_not_called()
             sync.assert_not_called()
             save.assert_not_called()
             self.assertEqual((repo / "sources/dependencies.lock.json").read_bytes(), original)
@@ -801,13 +895,50 @@ class UpdateTests(unittest.TestCase):
             result.lock["mcp"] = [{"name": "fixture", "kind": "python"}]
             original = (repo / "sources/dependencies.lock.json").read_bytes()
             with patch.object(installer, "resolve", return_value=result), \
-                    patch.object(installer.mcp_packages, "configuration", side_effect=ValueError("Invalid package context")), \
+                    patch.object(installer.mcp_packages, "preflight", create=True,
+                                 side_effect=ValueError("Invalid package context")) as preflight, \
                     patch.object(installer, "install_agent") as agent, patch.object(installer, "install_codegraph") as graph, \
                     patch.object(installer, "install_plugins") as plugins, patch.object(installer.mcp_packages, "install") as mcp:
                 self.assertEqual(self.run_main(repo, "--install", "--locked"), 2)
+            preflight.assert_called_once_with(result.lock["mcp"][0])
             for operation in (agent, graph, plugins, mcp):
                 operation.assert_not_called()
             self.assertEqual((repo / "sources/dependencies.lock.json").read_bytes(), original)
+
+    def test_malformed_npm_recipe_fails_preflight_before_installation_or_writes(self):
+        with TemporaryDirectory() as directory:
+            repo = self.make_repo(directory)
+            desired = self.desired(repo, mcp=[{"name": "fixture", "kind": "npm", "package": "example",
+                                               "entrypoint": "example"}])
+            declaration = desired.mcp[0]
+            record = {"name": declaration["name"], "kind": "npm", "declaration": declaration,
+                      "declaration_sha256": declaration_hash(declaration),
+                      "recipe": {"version": "1.0.0", "bin": "node_modules/example/cli.js",
+                                 "package_lock": {"lockfileVersion": 3, "packages": {}}}}
+            result = installer.Resolution(copy.deepcopy(self.lock))
+            result.lock["mcp"] = [record]
+            before = {p.relative_to(repo): p.read_bytes() for p in repo.rglob("*") if p.is_file()}
+            self.assertEqual(installer.mcp_packages.configuration(record, repo)["command"], "node")
+
+            def fixture_preflight(record):
+                installer.mcp_packages._npm_lock(record["recipe"]["package_lock"], record["declaration"]["package"])
+
+            preflight = getattr(installer.mcp_packages, "preflight", fixture_preflight)
+            with ExitStack() as stack:
+                stack.enter_context(patch.object(installer, "resolve", return_value=result))
+                validate = stack.enter_context(patch.object(installer.mcp_packages, "preflight", create=True,
+                                                           side_effect=preflight))
+                stack.enter_context(patch.object(installer, "fetch", side_effect=AssertionError("network")))
+                operations = [stack.enter_context(patch.object(installer, name)) for name in (
+                    "install_agent", "install_codegraph", "install_plugins", "sync_sources", "save_paths", "atomic_write")]
+                operations.append(stack.enter_context(patch.object(installer.mcp_packages, "install")))
+                self.assertEqual(self.run_main(repo, "--install", "--locked"), 2)
+            validate.assert_called_once_with(record)
+            for operation in operations:
+                operation.assert_not_called()
+            self.assertEqual({p.relative_to(repo): p.read_bytes() for p in repo.rglob("*") if p.is_file()}, before)
+            self.assertFalse((repo / "fake home").exists())
+            self.assertFalse((repo / ".local").exists())
 
     def test_failed_commands_do_not_print_auth_values(self):
         with TemporaryDirectory() as directory:

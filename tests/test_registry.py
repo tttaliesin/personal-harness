@@ -1,4 +1,3 @@
-"""Portable registry validation and offline desired-lock reconciliation."""
 import copy
 from pathlib import Path
 import sys
@@ -146,6 +145,20 @@ class RegistryTests(unittest.TestCase):
         for url in ("http://example.test/mcp", "https://localhost/mcp", "https://127.0.0.1/mcp", "https://10.1.0.1/mcp"):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 self.load(mcp=[{"name": "remote", "kind": "http", "url": url}])
+
+    def test_header_credentials_reject_split_and_inline_values_without_echoing_them(self):
+        secret = "DUMMY-credential-sentinel"
+        for kind in ("npm", "python"):
+            for header in (f"Authorization: Bearer {secret}", f"Bearer {secret}", f"X-Api-Key: {secret}"):
+                for args in (["--header", header], [f"--header={header}"]):
+                    with self.subTest(kind=kind, header=header, inline=len(args) == 1):
+                        with self.assertRaisesRegex(ValueError, "MCP args contain credentials") as raised:
+                            self.load(mcp=[{"name": "example", "kind": kind, "package": "example",
+                                            "entrypoint": "example", "args": args}])
+                        self.assertNotIn(secret, str(raised.exception))
+        args = ["--header=Accept: application/json"]
+        self.assertEqual(self.load(mcp=[{"name": "example", "kind": "npm", "package": "example",
+                                        "entrypoint": "example", "args": args}]).mcp[0]["args"], args)
 
     def test_v2_membership_fingerprints_and_declarations_are_checked_without_effects(self):
         desired = self.load(plugins=[self.plugin()], mcp=[{"name": "remote", "kind": "http", "url": "https://example.test/mcp"}])
