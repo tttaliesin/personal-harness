@@ -14,14 +14,15 @@ param(
     [string]$Codex,
     [string]$LocalConfig,
     [string]$HomeDirectory,
-    [string]$Python
+    [string]$Python,
+    [string]$StateRoot
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 try {
     $dependencyArguments = @{ HostName = $HostName; Install = $Install; Locked = $Locked }
-    foreach ($name in @('CodexHome', 'Codex', 'LocalConfig', 'Python')) {
+    foreach ($name in @('CodexHome', 'Codex', 'LocalConfig', 'StateRoot', 'Python')) {
         if ($PSBoundParameters.ContainsKey($name)) { $dependencyArguments[$name] = $PSBoundParameters[$name] }
     }
     if ($PSBoundParameters.ContainsKey('HomeDirectory') -and -not $PSBoundParameters.ContainsKey('CodexHome')) {
@@ -31,7 +32,7 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     if (-not $Install) { exit 0 }
     $harnessArguments = @{ HostName = $HostName }
-    foreach ($name in @('CodexHome', 'LocalConfig', 'HomeDirectory', 'Python')) {
+    foreach ($name in @('CodexHome', 'LocalConfig', 'StateRoot', 'HomeDirectory', 'Python')) {
         if ($PSBoundParameters.ContainsKey($name)) { $harnessArguments[$name] = $PSBoundParameters[$name] }
     }
     if ($dependencyArguments.ContainsKey('CodexHome')) {

@@ -31,6 +31,64 @@ class HarnessError(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class Layout:
+    local: Path
+    lock: Path
+    seed_lock: Path
+    sources: Path
+    source_backups: Path
+    persistent: bool
+
+
+def select_layout(repo: Path, state_root: Path | None = None) -> Layout:
+    repo = repo.resolve()
+    local = state_root.resolve() if state_root is not None else repo / ".local"
+    persistent = state_root is not None
+    seed = repo / "sources/dependencies.lock.json"
+    if persistent and local.name == ".local":
+        adjacent = local.parent / "sources/dependencies.lock.json"
+        if adjacent.is_file():
+            seed = adjacent
+    return Layout(local, local / "sources/dependencies.lock.json" if persistent else seed,
+                  seed, local if persistent else repo, local / "source-backups", persistent)
+
+
+def official_source_files(lock: Mapping) -> Mapping:
+    expected = lock.get("agent_desktop", {}).get("files_sha256", {})
+    required = {"sources/agent-desktop-LICENSE", "skills/agent-desktop/SKILL.md",
+                "skills/agent-desktop-windows/SKILL.md"}
+    if not required.issubset(expected):
+        raise HarnessError("Locked agent-desktop source set is incomplete")
+    for path in expected:
+        if (".." in Path(path).parts or Path(path).is_absolute() or "\\" in path
+                or (path != "sources/agent-desktop-LICENSE" and not path.startswith(
+                    ("skills/agent-desktop/", "skills/agent-desktop-windows/")))):
+            raise HarnessError(f"Unsafe managed source path: {path}")
+    return expected
+
+
+def validate_official_sources(root: Path, lock: Mapping) -> None:
+    expected = official_source_files(lock)
+    actual = set()
+    for prefix in ("skills/agent-desktop", "skills/agent-desktop-windows"):
+        directory = root / prefix
+        safe_file(directory, root)
+        for path in directory.rglob("*"):
+            safe_file(path, root)
+            if path.is_file():
+                actual.add(path.relative_to(root).as_posix())
+    license_path = root / "sources/agent-desktop-LICENSE"
+    safe_file(license_path, root)
+    if license_path.is_file():
+        actual.add("sources/agent-desktop-LICENSE")
+    if actual != set(expected):
+        raise HarnessError("Official source cache file set does not match the selected lock; run scripts/install-dependencies.ps1")
+    for path, sha256 in expected.items():
+        if hashlib.sha256((root / path).read_bytes()).hexdigest() != sha256:
+            raise HarnessError(f"Official source cache digest mismatch: {path}; run scripts/install-dependencies.ps1")
+
+
 def read_toml(path: Path) -> dict:
     return tomlkit.parse(path.read_text(encoding="utf-8-sig"))
 
@@ -203,21 +261,25 @@ def previously_applied_files(codex_home: Path) -> dict[str, str]:
 
 
 def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None = None,
-               local_config: Path | None = None) -> Plan:
+               local_config: Path | None = None, state_root: Path | None = None) -> Plan:
     if host not in ("roylabs-desktop", "homelab-desktop"):
         raise HarnessError(f"Unknown host: {host}")
     repo = repo.resolve()
+    layout = select_layout(repo, state_root)
     user_home = user_home.resolve()
     codex_home = (codex_home or user_home / ".codex").resolve()
     profile = read_toml(repo / "hosts" / f"{host}.toml")
     if profile.get("name") != host:
         raise HarnessError("Host profile name does not match its filename")
-    local_config = local_config or repo / ".local" / f"{host}.toml"
+    local_config = (local_config or layout.local / f"{host}.toml").resolve()
+    if layout.persistent and not local_config.is_relative_to(layout.local):
+        raise HarnessError("local-config must be inside the selected state root")
     local = read_toml(local_config) if local_config.exists() else {}
     for source in (profile, local):
         if set(source) - {"name", "platform", "paths", "config"}:
             raise HarnessError("Host overrides support only name, platform, paths and config")
-    variables = {"USERPROFILE": user_home.as_posix(), "CODEX_HOME": codex_home.as_posix(), "REPO_ROOT": repo.as_posix()}
+    variables = {"USERPROFILE": user_home.as_posix(), "CODEX_HOME": codex_home.as_posix(),
+                 "REPO_ROOT": repo.as_posix(), "STATE_ROOT": layout.local.as_posix()}
     profile = expand(profile, variables)
     local = expand(local, variables)
     paths = {**profile.get("paths", {}), **local.get("paths", {})}
@@ -253,13 +315,22 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     agent_desktop = tool_path("agent_desktop", paths)
     if not agent_desktop:
         plan.missing.append("agent-desktop CLI: run scripts/install-dependencies.ps1 or set [paths].agent_desktop locally")
-    lock_path = repo / "sources" / "dependencies.lock.json"
+    lock_path = layout.lock
+    official_ready = not layout.persistent
     if lock_path.exists():
         lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        if layout.persistent:
+            try:
+                validate_official_sources(layout.sources, lock)
+                official_ready = True
+            except HarnessError as exc:
+                plan.missing.append(str(exc))
         for item in lock["plugins"]:
             cache = codex_home / "plugins" / "cache" / item["marketplace"] / item["name"] / item["version"]
             if not ((cache / ".codex-plugin" / "plugin.json").is_file() or (cache / "plugin.json").is_file()):
                 plan.missing.append(f"Pinned plugin version is missing: {item['name']}@{item['version']}; run scripts/install-dependencies.ps1")
+    elif layout.persistent:
+        plan.missing.append(f"Persistent dependency lock is missing: {lock_path}; run scripts/install-dependencies.ps1")
     else:
         for selector in ("pstack@pstack-claude", "egm@egm"):
             plugin, marketplace = selector.split("@")
@@ -287,8 +358,10 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
         plan.missing.append("AGENTS.override.md shadows the shared AGENTS.md; reconcile the local override before applying")
     applied_files = previously_applied_files(codex_home)
     for skill, scope in SKILLS.items():
+        if skill != "create-readme" and not official_ready:
+            continue
         root = codex_home if scope == "codex" else user_home / ".agents"
-        source = repo / "skills" / skill
+        source = (repo if skill == "create-readme" else layout.sources) / "skills" / skill
         if not (source / "SKILL.md").is_file():
             raise HarnessError(f"Missing source skill: {skill}")
         destination_root = root / "skills" / skill
@@ -380,12 +453,13 @@ def main(argv=None) -> int:
     parser.add_argument("--home", type=Path)
     parser.add_argument("--codex-home", type=Path)
     parser.add_argument("--local-config", type=Path)
+    parser.add_argument("--state-root", type=Path)
     args = parser.parse_args(argv)
     try:
         codex_home = args.codex_home
         if codex_home is None and args.home is None and os.environ.get("CODEX_HOME"):
             codex_home = Path(os.environ["CODEX_HOME"])
-        plan = build_plan(REPO, args.host.lower(), args.home or Path.home(), codex_home, args.local_config)
+        plan = build_plan(REPO, args.host.lower(), args.home or Path.home(), codex_home, args.local_config, args.state_root)
         print(f"Host: {plan.host}\nCodex home: {plan.codex_home}")
         for setting in plan.settings:
             print(f"SET {setting}")

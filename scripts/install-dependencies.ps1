@@ -13,7 +13,8 @@ param(
     [string]$CodexHome,
     [string]$Codex,
     [string]$LocalConfig,
-    [string]$Python
+    [string]$Python,
+    [string]$StateRoot
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -36,6 +37,7 @@ try {
     if ($CodexHome) { $cliArguments += @('--codex-home', $CodexHome) }
     if ($Codex) { $cliArguments += @('--codex', $Codex) }
     if ($LocalConfig) { $cliArguments += @('--local-config', $LocalConfig) }
+    if ($PSBoundParameters.ContainsKey('StateRoot')) { $cliArguments += @('--state-root', $StateRoot) }
     & $pythonExecutable @cliArguments
     exit $LASTEXITCODE
 }

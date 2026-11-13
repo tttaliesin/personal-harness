@@ -41,6 +41,8 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$LocalConfig,
 
+    [string]$StateRoot,
+
     [ValidateNotNullOrEmpty()]
     [string]$Python = 'python'
 )
@@ -86,6 +88,10 @@ try {
     }
     if ($PSBoundParameters.ContainsKey('LocalConfig')) {
         $cliArguments += @('--local-config', $LocalConfig)
+    }
+
+    if ($PSBoundParameters.ContainsKey('StateRoot')) {
+        $cliArguments += @('--state-root', $StateRoot)
     }
 
     & $pythonExecutable @cliArguments

@@ -142,7 +142,7 @@ class UpdateTests(unittest.TestCase):
 
     def make_repo(self, directory):
         repo = Path(directory)
-        (repo / "sources").mkdir()
+        (repo / "sources").mkdir(parents=True)
         (repo / "sources/dependencies.lock.json").write_text(json.dumps(self.lock))
         return repo
 
@@ -332,6 +332,128 @@ class UpdateTests(unittest.TestCase):
                 (root / "skill.txt").write_bytes(b"stale same-version cache")
                 with self.assertRaisesRegex(installer.HarnessError, "source content"):
                     installer.install_plugins([plugin], "codex", home)
+
+    def test_persistent_lock_precedence_and_old_local_adoption_preview_are_read_only(self):
+        for mode in ("seed", "persistent", "adopt"):
+            with self.subTest(mode=mode), TemporaryDirectory() as directory:
+                payload = self.make_repo(Path(directory) / "payload")
+                old_repo = self.make_repo(Path(directory) / "old repo")
+                state = old_repo / ".local" if mode == "adopt" else Path(directory) / "state"
+                selected = copy.deepcopy(self.lock)
+                selected["codegraph"]["version"] = "99.0.0"
+                selected_path = (old_repo / "sources/dependencies.lock.json" if mode == "adopt"
+                                 else state / "sources/dependencies.lock.json")
+                if mode != "seed":
+                    selected_path.parent.mkdir(parents=True, exist_ok=True)
+                    selected_path.write_text(json.dumps(selected))
+                before = {p: p.read_bytes() for p in Path(directory).rglob("*") if p.is_file()}
+                with patch.object(installer, "resolve", wraps=installer.resolve) as resolve, \
+                        patch.object(installer, "fetch", side_effect=AssertionError("locked preview network")):
+                    self.assertEqual(self.run_main(payload, "--locked", "--state-root", str(state)), 0)
+                expected = self.lock if mode == "seed" else selected
+                self.assertEqual(resolve.call_args.args[0], expected)
+                self.assertEqual(before, {p: p.read_bytes() for p in Path(directory).rglob("*") if p.is_file()})
+                if mode != "persistent":
+                    self.assertFalse(state.exists())
+
+    def test_persistent_install_writes_only_state_and_keeps_lock_on_each_failure(self):
+        result = self.resolve()
+        operations = ("install_agent", "install_codegraph", "install_plugins", "sync_sources", "save_paths")
+        for failing in (*operations, None):
+            with self.subTest(failing=failing), TemporaryDirectory() as directory:
+                payload = self.make_repo(Path(directory) / "payload")
+                state = Path(directory) / "state [cache] 한글"
+                lock_path = state / "sources/dependencies.lock.json"
+                lock_path.parent.mkdir(parents=True)
+                old = json.dumps(self.lock).encode()
+                lock_path.write_bytes(old)
+                stale = state / "skills/agent-desktop/stale.txt"
+                stale.parent.mkdir(parents=True)
+                stale.write_bytes(b"old source")
+                before = {p: p.read_bytes() for p in payload.rglob("*") if p.is_file()}
+                real_write = installer.atomic_write
+
+                def write(path, data):
+                    self.assertTrue(path.is_relative_to(state), path)
+                    real_write(path, data)
+
+                with ExitStack() as stack:
+                    stack.enter_context(patch.object(installer, "resolve", return_value=result))
+                    stack.enter_context(patch.object(installer.platform, "machine", return_value="AMD64"))
+                    stack.enter_context(patch.object(installer.shutil, "which", return_value="fixture"))
+                    stack.enter_context(patch.object(installer, "atomic_write", side_effect=write))
+                    for name in operations:
+                        original = getattr(installer, name)
+
+                        def operation(*args, name=name, original=original):
+                            self.assertEqual(lock_path.read_bytes(), old)
+                            if name == failing:
+                                raise installer.HarnessError("fixture failure")
+                            if name in ("sync_sources", "save_paths"):
+                                return original(*args)
+                            if name in ("install_agent", "install_codegraph"):
+                                self.assertEqual(args[1], state)
+                                return state / "tools" / name
+
+                        stack.enter_context(patch.object(installer, name, side_effect=operation))
+                    self.assertEqual(self.run_main(payload, "--install", "--state-root", str(state)),
+                                     2 if failing else 0)
+                self.assertEqual(before, {p: p.read_bytes() for p in payload.rglob("*") if p.is_file()})
+                if failing:
+                    self.assertEqual(lock_path.read_bytes(), old)
+                else:
+                    self.assertEqual(json.loads(lock_path.read_bytes()), result.lock)
+                    self.assertEqual(next((state / "source-backups").rglob("stale.txt")).read_bytes(), b"old source")
+                    for path, data in result.files.items():
+                        self.assertEqual((state / path).read_bytes(), data)
+                    self.assertIn(state.as_posix(), (state / "homelab-desktop.toml").read_text(encoding="utf-8"))
+
+    def test_adopted_local_survives_new_payload_seed_without_writing_old_repository(self):
+        result = self.resolve()
+        with TemporaryDirectory() as directory:
+            old_repo = self.make_repo(Path(directory) / "old repo")
+            state = old_repo / ".local"
+            first = self.make_repo(Path(directory) / "release one")
+            second = self.make_repo(Path(directory) / "release two")
+            new_seed = copy.deepcopy(self.lock)
+            new_seed["codegraph"]["version"] = "99.0.0"
+            (second / "sources/dependencies.lock.json").write_text(json.dumps(new_seed))
+            before = {p: p.read_bytes() for root in (old_repo, first, second)
+                      for p in root.rglob("*") if p.is_file()}
+            with patch.object(installer.platform, "machine", return_value="AMD64"), \
+                    patch.object(installer.shutil, "which", return_value="fixture"), \
+                    patch.object(installer, "install_agent", return_value=state / "tools/agent.exe"), \
+                    patch.object(installer, "install_codegraph", return_value=state / "tools/graph.cmd"), \
+                    patch.object(installer, "install_plugins"), \
+                    patch.object(installer, "resolve", return_value=result) as resolve:
+                self.assertEqual(self.run_main(first, "--install", "--state-root", str(state)), 0)
+                self.assertEqual(resolve.call_args.args[0], self.lock)
+            saved = (state / "sources/dependencies.lock.json").read_bytes()
+            with patch.object(installer, "resolve", wraps=installer.resolve) as resolve, \
+                    patch.object(installer, "fetch", side_effect=AssertionError("locked preview network")):
+                self.assertEqual(self.run_main(second, "--locked", "--state-root", str(state)), 0)
+                self.assertEqual(resolve.call_args.args[0], result.lock)
+            self.assertEqual((state / "sources/dependencies.lock.json").read_bytes(), saved)
+            for path, data in before.items():
+                self.assertEqual(path.read_bytes(), data)
+            for root in (first, second):
+                self.assertFalse((root / ".local").exists())
+            self.assertEqual({p: p.read_bytes() for p in old_repo.rglob("*")
+                              if p.is_file() and not p.is_relative_to(state)},
+                             {p: data for p, data in before.items() if p.is_relative_to(old_repo)})
+
+    def test_locked_state_cache_reuses_verified_bytes_without_network(self):
+        result = self.resolve()
+        with TemporaryDirectory() as directory:
+            state = Path(directory)
+            installer.sync_sources(result, state, state / "source-backups")
+            result.files.clear()
+            with patch.object(installer, "fetch", side_effect=AssertionError("verified cache downloads")):
+                installer.sync_sources(result, state, state / "source-backups")
+            (state / "skills/agent-desktop/SKILL.md").write_bytes(b"corrupt cache")
+            with patch.object(installer, "fetch", return_value=b"wrong source"):
+                with self.assertRaisesRegex(installer.HarnessError, "digest mismatch"):
+                    installer.sync_sources(result, state, state / "source-backups")
 
     def make_plugin_cache(self, home, content=b"official\n"):
         plugin = copy.deepcopy(self.lock["plugins"][1])

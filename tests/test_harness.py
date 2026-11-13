@@ -228,6 +228,83 @@ class FakeRepository:
         return result
 
 
+class PersistentStateTests(unittest.TestCase):
+    def prepare(self, directory):
+        fixture = FakeRepository(Path(directory))
+        state = Path(directory) / "state [cache] 한글"
+        files = {"sources/agent-desktop-LICENSE": b"state license"}
+        for (skill, relative), data in fixture.skill_files.items():
+            if skill != "create-readme":
+                files[f"skills/{skill}/{relative}"] = b"state:" + data
+        for path, data in files.items():
+            write_file(state / path, data)
+        lock = {"plugins": [], "agent_desktop": {"files_sha256": {
+            path: hashlib.sha256(data).hexdigest() for path, data in files.items()}}}
+        write_file(state / "sources/dependencies.lock.json", json.dumps(lock))
+        return fixture, state, files
+
+    def build(self, fixture, state, **kwargs):
+        with mock.patch.object(harness.shutil, "which", side_effect=fixture.which):
+            return harness.build_plan(fixture.repo, "roylabs-desktop", fixture.home,
+                                      state_root=state, **kwargs)
+
+    def test_state_sources_apply_without_writing_payload_and_preserve_runtime(self):
+        with TemporaryDirectory() as directory:
+            fixture, state, files = self.prepare(directory)
+            graph = write_file(state / "tools/codegraph.cmd", b"fixture")
+            write_file(state / "roylabs-desktop.toml",
+                       '[paths]\ncodegraph = "${STATE_ROOT}/tools/codegraph.cmd"\n'
+                       '[config.desktop]\nstate_path = "${STATE_ROOT}"\n'
+                       'source_path = "${REPO_ROOT}"\nhome_path = "${USERPROFILE}"\n')
+            before = tree_snapshot(fixture.repo)
+            state_before = tree_snapshot(state)
+            plan = self.build(fixture, state)
+            self.assertEqual(plan.missing, [])
+            harness.apply_plan(plan)
+            self.assertEqual(tree_snapshot(fixture.repo), before)
+            self.assertEqual(tree_snapshot(state), state_before)
+            self.assertEqual((fixture.codex / "skills/agent-desktop/SKILL.md").read_bytes(),
+                             files["skills/agent-desktop/SKILL.md"])
+            config = tomllib.loads((fixture.codex / "config.toml").read_text(encoding="utf-8"))
+            self.assertEqual(Path(config["mcp_servers"]["codegraph"]["command"]), graph)
+            self.assertEqual(config["mcp_servers"]["node_repl"], tomllib.loads(CURRENT_CONFIG)["mcp_servers"]["node_repl"])
+            self.assertEqual(Path(config["desktop"]["state_path"]), state)
+            self.assertEqual(Path(config["desktop"]["source_path"]), fixture.repo)
+            self.assertEqual(Path(config["desktop"]["home_path"]), fixture.home)
+            self.assertEqual(self.build(fixture, state).changes, [])
+
+    def test_missing_or_mismatched_state_never_falls_back_to_bundled_sources(self):
+        for failure in ("lock", "skill", "digest", "extra", "license"):
+            with self.subTest(failure=failure), TemporaryDirectory() as directory:
+                fixture, state, _ = self.prepare(directory)
+                if failure == "lock":
+                    (state / "sources/dependencies.lock.json").unlink()
+                elif failure in ("skill", "license"):
+                    (state / ("skills/agent-desktop/SKILL.md" if failure == "skill"
+                              else "sources/agent-desktop-LICENSE")).unlink()
+                elif failure == "digest":
+                    write_file(state / "skills/agent-desktop/SKILL.md", b"tampered")
+                else:
+                    write_file(state / "skills/agent-desktop/unlocked.txt", b"extra")
+                before = tree_snapshot(Path(directory))
+                plan = self.build(fixture, state)
+                self.assertTrue(plan.missing)
+                self.assertFalse(any(c.path.is_relative_to(fixture.codex / "skills/agent-desktop")
+                                     for c in plan.changes))
+                with self.assertRaises(harness.HarnessError):
+                    harness.apply_plan(plan)
+                self.assertEqual(tree_snapshot(Path(directory)), before)
+
+    def test_unprepared_state_plan_creates_nothing_and_rejects_external_config(self):
+        with TemporaryDirectory() as directory:
+            fixture = FakeRepository(Path(directory))
+            state = Path(directory) / "absent state"
+            self.assertTrue(self.build(fixture, state).missing)
+            self.assertFalse(state.exists())
+            with self.assertRaisesRegex(harness.HarnessError, "inside the selected state root"):
+                self.build(fixture, state, local_config=fixture.repo / ".local/local.toml")
+
+
 class ConfigPreservationTests(unittest.TestCase):
     def assert_preserved(self, rendered):
         before, after = tomllib.loads(CURRENT_CONFIG), tomllib.loads(rendered)

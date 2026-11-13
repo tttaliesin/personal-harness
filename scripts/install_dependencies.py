@@ -20,7 +20,7 @@ import urllib.parse
 import urllib.request
 
 import tomlkit
-from harness import REPO, HarnessError, atomic_write, read_toml, safe_file
+from harness import REPO, HarnessError, atomic_write, read_toml, safe_file, select_layout, official_source_files
 
 
 def digest(data: bytes) -> str:
@@ -267,19 +267,22 @@ def install_plugins(plugins: list, codex: str, codex_home: Path):
                 raise HarnessError(f"Installed plugin source content does not match the resolved commit: {selector}")
 
 
-def sync_sources(result: Resolution, repo: Path):
+def sync_sources(result: Resolution, repo: Path, backup_root: Path | None = None):
     record = result.lock["agent_desktop"]
     expected = record.get("files_sha256", {})
     if not expected:
         return
-    required = {"sources/agent-desktop-LICENSE", "skills/agent-desktop/SKILL.md", "skills/agent-desktop-windows/SKILL.md"}
-    if not required.issubset(expected):
-        raise HarnessError("Locked agent-desktop source set is incomplete")
+    official_source_files(result.lock)
     files = dict(result.files)
     for path, sha256 in expected.items():
         if path not in files:
-            source = "LICENSE" if path == "sources/agent-desktop-LICENSE" else path
-            files[path] = fetch(f"https://raw.githubusercontent.com/vercel-labs/agent-desktop/{record['source_commit']}/{source}")
+            cached = repo / path
+            safe_file(cached, repo)
+            if backup_root is not None and cached.is_file() and digest(cached.read_bytes()) == sha256:
+                files[path] = cached.read_bytes()
+            else:
+                source = "LICENSE" if path == "sources/agent-desktop-LICENSE" else path
+                files[path] = fetch(f"https://raw.githubusercontent.com/vercel-labs/agent-desktop/{record['source_commit']}/{source}")
         if digest(files[path]) != sha256:
             raise HarnessError(f"Locked source digest mismatch: {path}")
     managed = ("skills/agent-desktop", "skills/agent-desktop-windows")
@@ -306,7 +309,7 @@ def sync_sources(result: Resolution, repo: Path):
     if set(files) == {path.relative_to(repo).as_posix() for path in existing} and all(
             (repo / path).read_bytes() == data for path, data in files.items()):
         return
-    backup_root = repo / ".local/source-backups"
+    backup_root = backup_root or repo / ".local/source-backups"
     safe_file(backup_root, repo)
     backup_root.mkdir(parents=True, exist_ok=True)
     backup = Path(tempfile.mkdtemp(prefix="agent-desktop-", dir=backup_root))
@@ -341,18 +344,23 @@ def main(argv=None) -> int:
     parser.add_argument("--codex-home", type=Path, default=Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))))
     parser.add_argument("--codex")
     parser.add_argument("--local-config", type=Path)
+    parser.add_argument("--state-root", type=Path)
     args = parser.parse_args(argv)
     try:
         host = args.host.lower()
         if host not in ("homelab-desktop", "roylabs-desktop"):
             raise HarnessError("Select homelab-desktop or roylabs-desktop")
-        lock_path = REPO / "sources/dependencies.lock.json"
-        result = resolve(json.loads(lock_path.read_text(encoding="utf-8")), locked=args.locked)
-        lock = result.lock
-        local = REPO / ".local"
+        layout = select_layout(REPO, args.state_root)
+        lock_path = layout.lock
+        local = layout.local
         config = (args.local_config or local / f"{host}.toml").resolve()
-        if not config.is_relative_to(local.resolve()):
-            raise HarnessError("Dependency installer local-config must be inside this repository's .local directory")
+        if not config.is_relative_to(local):
+            raise HarnessError("Dependency installer local-config must be inside the selected state root (.local by default)")
+        seed = lock_path if lock_path.exists() else layout.seed_lock
+        result = resolve(json.loads(seed.read_text(encoding="utf-8")), locked=args.locked)
+        lock = result.lock
+        if layout.persistent:
+            official_source_files(lock)
         codex_home = args.codex_home.resolve()
         codex = find_codex(args.codex, codex_home)
         print(f"Agent desktop {lock['agent_desktop']['version']} -> {local / 'tools/agent-desktop'} (SHA256 verified on install)")
@@ -369,11 +377,14 @@ def main(argv=None) -> int:
         if not npm or not shutil.which("git") or not codex:
             raise HarnessError("Install Node/npm, Git and Codex first; specify --codex when it is not on PATH")
         safe_file(config, local)
-        safe_file(lock_path, REPO)
+        safe_file(lock_path, local if layout.persistent else REPO)
         agent = install_agent(lock["agent_desktop"], local, result.archive)
         codegraph = install_codegraph(lock["codegraph"], local, npm)
         install_plugins(lock["plugins"], codex, codex_home)
-        sync_sources(result, REPO)
+        if layout.persistent:
+            sync_sources(result, layout.sources, layout.source_backups)
+        else:
+            sync_sources(result, REPO)
         save_paths(config, agent, codegraph)
         atomic_write(lock_path, (json.dumps(lock, indent=2) + "\n").encode("utf-8"))
         print(f"Dependencies installed and lock saved. Run harness.ps1 apply/check -HostName {host}.")
