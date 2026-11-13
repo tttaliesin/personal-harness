@@ -442,6 +442,16 @@ class UpdateTests(unittest.TestCase):
                               if p.is_file() and not p.is_relative_to(state)},
                              {p: data for p, data in before.items() if p.is_relative_to(old_repo)})
 
+    def test_source_state_overlap_is_rejected_before_dependency_resolution(self):
+        with TemporaryDirectory() as directory:
+            repo = self.make_repo(directory)
+            before = {p.relative_to(repo): p.read_bytes() for p in repo.rglob("*") if p.is_file()}
+            for state in (repo, repo / "skills", repo / "sources", repo / "common", repo.parent):
+                with self.subTest(state=state), patch.object(installer, "resolve") as resolve:
+                    self.assertEqual(self.run_main(repo, "--install", "--state-root", str(state)), 2)
+                    resolve.assert_not_called()
+                    self.assertEqual({p.relative_to(repo): p.read_bytes() for p in repo.rglob("*") if p.is_file()}, before)
+
     def test_locked_state_cache_reuses_verified_bytes_without_network(self):
         result = self.resolve()
         with TemporaryDirectory() as directory:

@@ -45,6 +45,9 @@ def select_layout(repo: Path, state_root: Path | None = None) -> Layout:
     repo = repo.resolve()
     local = state_root.resolve() if state_root is not None else repo / ".local"
     persistent = state_root is not None
+    if persistent and (repo.is_relative_to(local) or
+                       (local.is_relative_to(repo) and not local.is_relative_to(repo / ".local"))):
+        raise HarnessError("State root must not overlap the source payload; a checkout's .local is supported")
     seed = repo / "sources/dependencies.lock.json"
     if persistent and local.name == ".local":
         adjacent = local.parent / "sources/dependencies.lock.json"
