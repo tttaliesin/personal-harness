@@ -185,6 +185,7 @@ class McpPackagesTests(unittest.TestCase):
             expected = hashlib.sha256(json.dumps(declaration, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
             self.assertEqual(record["declaration_sha256"], expected)
             self.assertEqual(mcp.configuration(record, state), {"url": declaration["url"], "bearer_token_env_var": "FIXTURE_TOKEN"})
+            self.assertIsNone(mcp.preflight(record))
             mcp.install(record, state, guard=safe_file)
             self.assertEqual(mcp.missing(record, state, guard=safe_file), [])
             self.assertFalse(state.exists())
@@ -286,6 +287,192 @@ class McpPackagesTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "compatible wheels and matching Requires-Python"):
                 mcp.resolve(spec("python"))
 
+    def test_real_pip_replay_ignores_ambient_destinations_and_preserves_environment(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with python_fixture(root):
+                record = mcp.resolve(spec("python"))
+                config_file = root / "pip.ini"
+                cases = ["PIP_TARGET", "PIP_PREFIX", "PIP_ROOT", "PIP_USER", "PIP_CONFIG_FILE",
+                         "PYTHONUSERBASE", "PYTHONHOME"]
+                for index, variable in enumerate(cases):
+                    outside = root / f"outside-{index}"
+                    config_file.write_text(f"[global]\ntarget = {outside}\n[install]\nuser = true\n")
+                    environment = {variable: str(outside)}
+                    if variable == "PIP_USER":
+                        environment[variable] = "true"
+                    elif variable == "PIP_CONFIG_FILE":
+                        environment[variable] = str(config_file)
+                    elif variable == "PYTHONUSERBASE":
+                        environment["PYTHONPATH"] = str(outside)
+                    with self.subTest(destination=variable), patch.dict(os.environ, environment):
+                        state = root / f"state-{index}"
+                        before = os.environ.copy()
+                        error = None
+                        try:
+                            mcp.install(record, state, guard=safe_file)
+                        except ValueError as caught:
+                            error = caught
+                        self.assertFalse(outside.exists(), "pip wrote outside the selected state")
+                        self.assertIsNone(error, str(error))
+                        self.assertTrue(dict(os.environ) == before, "MCP install mutated the process environment")
+                        with patch.dict(os.environ, {}, clear=True):
+                            self.assertEqual(initialize(mcp.configuration(record, state))["result"]["serverInfo"]["name"],
+                                             "wheel-closure")
+
+    def test_preflight_and_configuration_reject_incomplete_recipe_before_mutation(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "not-created"
+            with python_fixture(root):
+                record = mcp.resolve(spec("python"))
+            bad_records = []
+            bad = copy.deepcopy(record)
+            bad["recipe"].pop("wheels")
+            bad_records.append(bad)
+            bad = copy.deepcopy(record)
+            bad["recipe"]["wheels"] = [item for item in bad["recipe"]["wheels"] if item["name"] == "fixture-mcp"]
+            bad_records.append(bad)
+            bad = copy.deepcopy(record)
+            bad["recipe"].pop("target")
+            bad_records.append(bad)
+            for field, value in (("wheels", []), ("entrypoint", "invalid"), ("console_script", "../outside")):
+                bad = copy.deepcopy(record)
+                bad["recipe"][field] = value
+                bad_records.append(bad)
+            for field, value in (("filename", "../outside.whl"), ("sha256", "broken"),
+                                 ("url", "https://user:private-value@wheels.invalid/file.whl"),
+                                 ("requires_python", ">=999"), ("tags", ["cp999-none-any"]),
+                                 ("requires_dist", ["fixture-absent==1.0.0"]), ("version", "2.0.0")):
+                bad = copy.deepcopy(record)
+                bad["recipe"]["wheels"][-1][field] = value
+                bad_records.append(bad)
+            bad = copy.deepcopy(record)
+            bad["recipe"]["wheels"].append(copy.deepcopy(bad["recipe"]["wheels"][0]))
+            bad_records.append(bad)
+            for field, value in (("declaration_sha256", "broken"), ("name", "different"), ("kind", "other")):
+                bad = copy.deepcopy(record)
+                bad[field] = value
+                bad_records.append(bad)
+            for bad in bad_records:
+                with self.subTest(recipe=list(bad["recipe"])), patch.object(mcp, "_fetch") as fetch, \
+                        patch.object(mcp, "_run") as execute:
+                    with self.assertRaises(ValueError) as caught:
+                        mcp.configuration(bad, state)
+                    self.assertNotIn("private-value", str(caught.exception))
+                    with self.assertRaises(ValueError):
+                        mcp.preflight(bad)
+                    execute.assert_not_called()
+                    fetch.assert_not_called()
+                    self.assertFalse(state.exists())
+
+    def test_python_preflight_is_read_only_and_configuration_does_not_probe_runtime(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "not-created"
+            with python_fixture(root):
+                record = mcp.resolve(spec("python"))
+            before = copy.deepcopy(record)
+            with patch.object(mcp, "_fetch") as fetch, patch.object(mcp, "venv") as environments, \
+                    patch.object(mcp.Path, "write_bytes", side_effect=AssertionError("preflight wrote a file")), \
+                    patch.object(mcp.Path, "mkdir", side_effect=AssertionError("preflight created a directory")):
+                self.assertIsNone(mcp.preflight(record))
+                fetch.assert_not_called()
+                environments.EnvBuilder.assert_not_called()
+                with patch.object(mcp, "_run") as execute:
+                    mcp.configuration(record, state)
+                    execute.assert_not_called()
+            self.assertEqual(record, before)
+            self.assertFalse(state.exists())
+
+    def test_real_pip_replay_ignores_target_site_configuration(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            outside = root / "outside"
+            state = root / "state"
+            create = mcp.venv.EnvBuilder.create
+
+            def configured_environment(builder, path):
+                create(builder, path)
+                config = Path(path) / ("pip.ini" if os.name == "nt" else "pip.conf")
+                config.write_text(f"[install]\ntarget = {outside}\n")
+
+            with python_fixture(root):
+                record = mcp.resolve(spec("python"))
+                with patch.object(mcp.venv.EnvBuilder, "create", new=configured_environment):
+                    mcp.install(record, state, guard=safe_file)
+                self.assertFalse(outside.exists())
+                self.assertEqual(initialize(mcp.configuration(record, state))["result"]["serverInfo"]["name"], "wheel-closure")
+
+    def test_real_pip_resolution_still_reads_local_package_manager_configuration(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            constraints = root / "constraints.txt"
+            constraints.write_text("fixture-dep==999.0.0\n")
+            config = root / "pip.ini"
+            config.write_text(f"[install]\nconstraint = {constraints}\n")
+            with python_fixture(root), patch.dict(os.environ, {"PIP_CONFIG_FILE": str(config)}):
+                with self.assertRaisesRegex(ValueError, "compatible wheels and matching Requires-Python"):
+                    mcp.resolve(spec("python"))
+
+    @unittest.skipUnless(shutil.which("node") and shutil.which("npm"), "Node and npm are required")
+    def test_real_npm_preflight_rejects_broken_closure_and_current_runtime_mismatch(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "not-created"
+            with npm_fixture(root):
+                record = mcp.resolve(spec("npm"))
+            with patch.object(mcp, "_npm") as npm, patch.object(mcp, "_fetch") as fetch:
+                self.assertIsNone(mcp.preflight(record))
+                npm.assert_not_called()
+                fetch.assert_not_called()
+            bad_records = []
+            for path, field, value in (("", "dependencies", {}),
+                                       ("node_modules/fixture-dep", "integrity", "sha512-YWJj"),
+                                       ("node_modules/fixture-dep", "resolved", "file:local.tgz")):
+                bad = copy.deepcopy(record)
+                bad["recipe"]["package_lock"]["packages"][path][field] = value
+                bad_records.append(bad)
+            bad = copy.deepcopy(record)
+            del bad["recipe"]["package_lock"]["packages"]["node_modules/fixture-dep"]
+            bad_records.append(bad)
+            for field, value in (("bin", "node_modules/other/cli.js"), ("bin_sha256", "broken"), ("target", {})):
+                bad = copy.deepcopy(record)
+                bad["recipe"][field] = value
+                bad_records.append(bad)
+            for bad in bad_records:
+                with self.subTest(recipe=list(bad["recipe"])), patch.object(mcp, "_run") as execute:
+                    with self.assertRaises(ValueError):
+                        mcp.configuration(bad, state)
+                    with self.assertRaises(ValueError):
+                        mcp.preflight(bad)
+                    execute.assert_not_called()
+            record["recipe"]["target"]["node"] = "0.0.0"
+            mcp.configuration(record, state)
+            with self.assertRaisesRegex(ValueError, "target context changed"):
+                mcp.preflight(record)
+            self.assertFalse(state.exists())
+
+    def test_corrupt_cached_wheel_is_refetched_verified_and_repaired(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "state"
+            with python_fixture(root) as artifacts:
+                record = mcp.resolve(spec("python"))
+                cached = mcp._root(record, state) / "wheels" / record["recipe"]["wheels"][0]["filename"]
+                cached.parent.mkdir(parents=True)
+                cached.write_bytes(b"corrupt cached wheel")
+                with patch.object(mcp, "_fetch", return_value=b"corrupt download"):
+                    with self.assertRaisesRegex(ValueError, "wheel SHA256 mismatch"):
+                        mcp.install(record, state, guard=safe_file)
+                self.assertEqual(cached.read_bytes(), b"corrupt cached wheel")
+                self.assertEqual(list(state.rglob("receipt.json")), [])
+                mcp.install(record, state, guard=safe_file)
+                self.assertEqual(cached.read_bytes(), artifacts[cached.name])
+                self.assertEqual(initialize(mcp.configuration(record, state))["result"]["serverInfo"]["name"], "wheel-closure")
+                self.assertEqual(mcp.missing(record, state, guard=safe_file), [])
+                self.assertEqual(list(cached.parent.glob(".wheel-*")), [])
+
     def test_wheel_hash_failure_does_not_publish_receipt_or_create_environment(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -349,22 +536,27 @@ class McpPackagesTests(unittest.TestCase):
         self.assertNotIn("secret-token", str(caught.exception))
 
     def test_context_mismatch_fails_before_state_mutation(self):
-        record = {"name": "fixture", "kind": "python", "declaration": spec("python"),
-                  "recipe": {"target": {"version": [0, 0, 0]}}}
         with TemporaryDirectory() as directory:
-            state = Path(directory) / "not-created"
+            root = Path(directory)
+            with python_fixture(root):
+                record = mcp.resolve(spec("python"))
+            record["recipe"]["target"]["platform"] = "different-platform"
+            state = root / "not-created"
+            mcp.configuration(record, state)
+            with self.assertRaisesRegex(ValueError, "target context changed"):
+                mcp.preflight(record)
             with self.assertRaisesRegex(ValueError, "target context changed"):
                 mcp.install(record, state, guard=safe_file)
             self.assertFalse(state.exists())
 
     def test_guard_is_used_before_managed_reads_and_writes(self):
-        declaration = spec("python")
-        record = {"name": "fixture", "kind": "python", "declaration": declaration,
-                  "recipe": {"target": {"fixture": True}, "console_script": "fixture-mcp"}}
         def reject(path, state):
             raise RuntimeError("fixture path guard refused")
-        with TemporaryDirectory() as directory, patch.object(mcp, "_python_context", return_value={"fixture": True}):
-            state = Path(directory) / "not-created"
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with python_fixture(root):
+                record = mcp.resolve(spec("python"))
+            state = root / "not-created"
             with self.assertRaisesRegex(RuntimeError, "path guard refused"):
                 mcp.install(record, state, guard=reject)
             with self.assertRaisesRegex(RuntimeError, "path guard refused"):

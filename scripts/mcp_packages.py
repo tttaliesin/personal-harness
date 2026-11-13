@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import configparser
 import copy
 import hashlib
@@ -16,6 +17,8 @@ import urllib.parse
 import urllib.request
 import venv
 import zipfile
+
+import registry
 
 
 def _json(value) -> bytes:
@@ -58,6 +61,8 @@ def _fetch(url: str) -> bytes:
 
 
 def _relative(value: str) -> str:
+    if not isinstance(value, str) or any(ord(char) < 32 for char in value):
+        raise ValueError("Unsafe package artifact path")
     path = PurePosixPath(value)
     if (not value or path.is_absolute() or "\\" in value or ":" in value
             or any(part in ("", ".", "..") for part in value.split("/"))):
@@ -153,9 +158,20 @@ def _resolve_npm(spec: dict) -> dict:
 
 def _python_context() -> dict:
     script = ("import json,sys,sysconfig; from pip._vendor.packaging.tags import sys_tags; "
+              "from pip._vendor.packaging.markers import default_environment; "
               "print(json.dumps({'implementation':sys.implementation.name,'version':list(sys.version_info[:3]),"
-              "'platform':sysconfig.get_platform(),'tags':[str(t) for t in sys_tags()]}))")
-    return json.loads(_run([sys.executable, "-c", script]))
+              "'platform':sysconfig.get_platform(),'tags':[str(t) for t in sys_tags()],"
+              "'markers':default_environment()}))")
+    return json.loads(_run([sys.executable, "-I", "-B", "-c", script], env=_replay_environment()))
+
+
+def _replay_environment() -> dict[str, str]:
+    environment = {key: value for key, value in os.environ.items()
+                   if not key.upper().startswith(("PIP_", "PYTHON", "_PYTHON"))
+                   and key.upper() not in {"__PYVENV_LAUNCHER__", "VIRTUAL_ENV"}}
+    environment["PIP_CONFIG_FILE"] = os.devnull
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    return environment
 
 
 def _distribution(value: str) -> str:
@@ -194,7 +210,9 @@ def _wheel(data: bytes, filename: str, target: dict) -> tuple[dict, dict]:
                     entries = dict(parser.items("console_scripts"))
             if not metadata["Name"] or not metadata["Version"]:
                 raise ValueError("Wheel distribution identity is missing")
-            return {"name": metadata["Name"], "version": metadata["Version"]}, entries
+            return {"name": metadata["Name"], "version": metadata["Version"],
+                    "requires_dist": metadata.get_all("Requires-Dist", []),
+                    "requires_python": metadata.get("Requires-Python", ""), "tags": sorted(set(tags))}, entries
     except (zipfile.BadZipFile, KeyError, TypeError, UnicodeError, configparser.Error):
         raise ValueError("Invalid Python wheel metadata") from None
 
@@ -261,7 +279,187 @@ def _launch(record: dict, root: Path) -> Path:
     return root / "venv" / ("Scripts" if os.name == "nt" else "bin") / (name + (".exe" if os.name == "nt" else ""))
 
 
+def _fields(value, fields: set[str]) -> None:
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("Invalid MCP package record fields")
+
+
+def _digest(value) -> None:
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ValueError("Invalid MCP artifact SHA256 integrity")
+
+
+def _npm_closure(lock: dict, package_json: dict) -> None:
+    packages = lock["packages"]
+    root = packages.get("")
+    if (not isinstance(root, dict) or root.get("dependencies") != package_json["dependencies"]
+            or root.get("name") != package_json["name"] or root.get("version") != package_json["version"]):
+        raise ValueError("npm lock root differs from its manifest")
+    for path, metadata in packages.items():
+        if not isinstance(metadata, dict):
+            raise ValueError("Invalid npm lock package metadata")
+        if path and not metadata.get("inBundle"):
+            if not isinstance(metadata.get("version"), str) or not metadata["version"]:
+                raise ValueError("npm dependency version is missing")
+            algorithm, encoded = metadata["integrity"].split("-", 1)
+            if len(base64.b64decode(encoded, validate=True)) != hashlib.new(algorithm).digest_size:
+                raise ValueError("Invalid npm artifact integrity")
+        required = {}
+        for field in ("dependencies", "optionalDependencies", "peerDependencies"):
+            dependencies = metadata.get(field, {})
+            if (not isinstance(dependencies, dict)
+                    or not all(isinstance(name, str) and isinstance(version, str) for name, version in dependencies.items())):
+                raise ValueError("Invalid npm dependency declarations")
+            if field != "optionalDependencies":
+                required.update(dependencies)
+        optional = metadata.get("optionalDependencies", {})
+        peers = metadata.get("peerDependenciesMeta", {})
+        if not isinstance(peers, dict) or not all(isinstance(value, dict) for value in peers.values()):
+            raise ValueError("Invalid npm peer dependency metadata")
+        for name in required:
+            if not re.fullmatch(r"(?:@[a-z0-9][a-z0-9_.-]*/)?[a-z0-9][a-z0-9_.-]*", name):
+                raise ValueError("Invalid npm dependency name")
+            if name in optional or peers.get(name, {}).get("optional") is True:
+                continue
+            parent = path
+            while True:
+                candidate = f"{parent}/node_modules/{name}" if parent else f"node_modules/{name}"
+                if candidate in packages:
+                    break
+                if not parent:
+                    raise ValueError("npm lock closure is missing a required dependency")
+                parent = parent.rpartition("/node_modules/")[0]
+
+
+def _python_recipe(recipe: dict, declaration: dict) -> None:
+    from pip._vendor.packaging.markers import default_environment
+    from pip._vendor.packaging.requirements import Requirement
+    from pip._vendor.packaging.specifiers import SpecifierSet
+    from pip._vendor.packaging.utils import parse_wheel_filename
+    from pip._vendor.packaging.version import Version
+
+    _fields(recipe, {"target", "version", "wheels", "console_script", "entrypoint"})
+    target = recipe["target"]
+    _fields(target, {"implementation", "version", "platform", "tags", "markers"})
+    if (not all(isinstance(target[key], str) and target[key] for key in ("implementation", "platform"))
+            or not isinstance(target["version"], list) or len(target["version"]) != 3
+            or not all(type(part) is int and part >= 0 for part in target["version"])
+            or not isinstance(target["tags"], list) or not target["tags"]
+            or not all(isinstance(tag, str) and re.fullmatch(r"[\w.]+-[\w.]+-[\w.]+", tag) for tag in target["tags"])):
+        raise ValueError("Invalid Python target context")
+    _fields(target["markers"], set(default_environment()))
+    if not all(isinstance(value, str) for value in target["markers"].values()):
+        raise ValueError("Invalid Python target markers")
+    version = ".".join(map(str, target["version"]))
+    if (target["markers"]["python_full_version"] != version
+            or target["markers"]["python_version"] != ".".join(map(str, target["version"][:2]))
+            or target["markers"]["implementation_name"] != target["implementation"]):
+        raise ValueError("Inconsistent Python target context")
+    if (recipe["console_script"] != declaration["entrypoint"]
+            or not isinstance(recipe["entrypoint"], str)
+            or not re.fullmatch(r"[\w.]+\s*:\s*[\w.]+(?:\s*\[[\w., -]+\])?", recipe["entrypoint"])):
+        raise ValueError("Invalid Python console script")
+    if not isinstance(recipe["wheels"], list) or not recipe["wheels"]:
+        raise ValueError("Python wheel closure is missing")
+    distributions = {}
+    filenames = set()
+    for artifact in recipe["wheels"]:
+        _fields(artifact, {"name", "version", "filename", "url", "sha256", "requires_dist", "requires_python", "tags"})
+        filename = _relative(artifact["filename"])
+        if "/" in filename or filename in filenames:
+            raise ValueError("Invalid or duplicate Python wheel filename")
+        filenames.add(filename)
+        name, wheel_version, _, filename_tags = parse_wheel_filename(filename)
+        if (not isinstance(artifact["name"], str) or not isinstance(artifact["version"], str)
+                or name != _distribution(artifact["name"]) or wheel_version != Version(artifact["version"])
+                or name in distributions):
+            raise ValueError("Invalid or duplicate Python wheel identity")
+        _url(artifact["url"])
+        _digest(artifact["sha256"])
+        if (not isinstance(artifact["tags"], list) or not artifact["tags"]
+                or not all(isinstance(tag, str) for tag in artifact["tags"])
+                or not set(artifact["tags"]).intersection(target["tags"])
+                or not {str(tag) for tag in filename_tags}.intersection(target["tags"])):
+            raise ValueError("Python wheel is incompatible with the recorded target")
+        if (not isinstance(artifact["requires_python"], str)
+                or not SpecifierSet(artifact["requires_python"]).contains(version, prereleases=True)):
+            raise ValueError("Python wheel Requires-Python is incompatible with the recorded target")
+        if not isinstance(artifact["requires_dist"], list) or not all(isinstance(item, str) for item in artifact["requires_dist"]):
+            raise ValueError("Invalid Python wheel requirements")
+        for requirement in artifact["requires_dist"]:
+            Requirement(requirement)
+        distributions[name] = artifact
+    package = _distribution(declaration["package"])
+    if package not in distributions or distributions[package]["version"] != recipe["version"]:
+        raise ValueError("Selected Python package is absent from its wheel closure")
+    pending = [(package, frozenset())]
+    visited = set()
+    while pending:
+        name, extras = pending.pop()
+        if (name, extras) in visited:
+            continue
+        visited.add((name, extras))
+        for text in distributions[name]["requires_dist"]:
+            requirement = Requirement(text)
+            if requirement.marker and not any(requirement.marker.evaluate({**target["markers"], "extra": extra})
+                                              for extra in {"", *extras}):
+                continue
+            dependency = distributions.get(_distribution(requirement.name))
+            if dependency is None or not requirement.specifier.contains(dependency["version"], prereleases=True):
+                raise ValueError("Python wheel closure is missing a required dependency or version")
+            if requirement.url and _url(requirement.url) != dependency["url"]:
+                raise ValueError("Python wheel dependency URL differs from its closure")
+            pending.append((_distribution(requirement.name), frozenset(requirement.extras)))
+
+
+def _validate_record(record: dict) -> None:
+    try:
+        _fields(record, {"name", "kind", "declaration", "declaration_sha256", "recipe"})
+        declaration = registry._mcp(record["declaration"])
+        if (declaration != record["declaration"] or record["name"] != declaration["name"]
+                or record["kind"] != declaration["kind"] or record["declaration_sha256"] != _sha(_json(declaration))):
+            raise ValueError("MCP package record does not match its declaration")
+        recipe = record["recipe"]
+        if record["kind"] == "http":
+            _fields(recipe, set())
+            return
+        if not isinstance(recipe, dict) or not isinstance(recipe.get("version"), str) or not recipe["version"]:
+            raise ValueError("MCP package recipe version is missing")
+        if declaration["version"] != "latest" and recipe["version"] != declaration["version"]:
+            raise ValueError("MCP package recipe version differs from its declaration")
+        if record["kind"] == "python":
+            _python_recipe(recipe, declaration)
+        else:
+            _fields(recipe, {"target", "package_json", "package_lock", "version", "bin", "bin_sha256"})
+            _fields(recipe["target"], {"node", "platform", "arch", "npm"})
+            if not all(isinstance(value, str) and value for value in recipe["target"].values()):
+                raise ValueError("Invalid npm target context")
+            expected = {"name": "personal-harness-mcp", "version": "1.0.0", "private": True,
+                        "dependencies": {declaration["package"]: declaration["version"]}}
+            if recipe["package_json"] != expected:
+                raise ValueError("npm manifest differs from its declaration")
+            selected = _npm_lock(recipe["package_lock"], declaration["package"])
+            _npm_closure(recipe["package_lock"], expected)
+            prefix = f"node_modules/{declaration['package']}/"
+            if selected["version"] != recipe["version"] or not _relative(recipe["bin"]).startswith(prefix):
+                raise ValueError("npm package identity or bin differs from its recipe")
+            _digest(recipe["bin_sha256"])
+    except (KeyError, TypeError, AttributeError):
+        raise ValueError("Invalid MCP package record") from None
+
+
+def preflight(record: dict) -> None:
+    """Validate the portable recipe and current runtime without installing or downloading."""
+    _validate_record(record)
+    if record["kind"] == "http":
+        return
+    context = _npm_tools()[1] if record["kind"] == "npm" else _python_context()
+    if context != record["recipe"]["target"]:
+        raise ValueError("MCP package target context changed; resolve an update for this runtime")
+
+
 def configuration(record: dict, state: Path, *, node: str = "node") -> dict:
+    _validate_record(record)
     declaration = record["declaration"]
     if record["kind"] == "http":
         result = {"url": declaration["url"]}
@@ -317,16 +515,13 @@ def missing(record: dict, state: Path, *, guard) -> list[str]:
 
 
 def install(record: dict, state: Path, *, guard) -> None:
+    preflight(record)
     if record["kind"] == "http":
         return
     recipe = record["recipe"]
     if record["kind"] == "npm":
-        command, context = _npm_tools()
-        _npm_lock(recipe["package_lock"], record["declaration"]["package"])
-    else:
-        context = _python_context()
-    if context != recipe["target"]:
-        raise ValueError("MCP package target context changed; resolve an update for this runtime")
+        command, _ = _npm_tools()
+    context = recipe["target"]
     root = _root(record, state)
     guard(root, state)
     if not missing(record, state, guard=guard):
@@ -363,16 +558,27 @@ def install(record: dict, state: Path, *, guard) -> None:
         for artifact in recipe["wheels"]:
             destination = wheelhouse / _relative(artifact["filename"])
             guard(destination, state)
-            data = destination.read_bytes() if destination.is_file() else _fetch(artifact["url"])
+            data = destination.read_bytes() if destination.is_file() else b""
+            if _sha(data) != artifact["sha256"]:
+                data = _fetch(artifact["url"])
             if _sha(data) != artifact["sha256"]:
                 raise ValueError("Python wheel SHA256 mismatch")
             identity, entries = _wheel(data, artifact["filename"], context)
-            if identity != {key: artifact[key] for key in ("name", "version")}:
+            if identity != {key: artifact[key] for key in identity}:
                 raise ValueError("Python wheel identity differs from the recipe")
             if _distribution(identity["name"]) == _distribution(record["declaration"]["package"]):
                 if entries.get(recipe["console_script"]) != recipe["entrypoint"]:
                     raise ValueError("Python console script differs from the recipe")
-            destination.write_bytes(data)
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(dir=wheelhouse, prefix=".wheel-", delete=False) as stream:
+                    temporary = Path(stream.name)
+                    guard(temporary, state)
+                    stream.write(data)
+                temporary.replace(destination)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
             wheels.append(str(destination))
         environment = root / "venv"
         guard(environment, state)
@@ -382,9 +588,9 @@ def install(record: dict, state: Path, *, guard) -> None:
         cache = state / "tools/mcp-cache/pip"
         _tree(cache, state, guard)
         guard(cache, state)
-        _run([sys.executable, "-m", "pip", "--disable-pip-version-check", "--cache-dir", str(cache),
+        _run([sys.executable, "-I", "-B", "-m", "pip", "--disable-pip-version-check", "--cache-dir", str(cache),
               "--python", str(interpreter), "install", "--no-index", "--no-deps", "--no-compile",
-              "--force-reinstall", "--no-warn-script-location", *wheels])
+              "--force-reinstall", "--no-warn-script-location", *wheels], env=_replay_environment())
     files = _tree(root, state, guard)
     if _launch(record, root).relative_to(root).as_posix() not in files:
         raise ValueError("Installed package console script is missing")
