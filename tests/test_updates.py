@@ -918,15 +918,12 @@ class UpdateTests(unittest.TestCase):
             result = installer.Resolution(copy.deepcopy(self.lock))
             result.lock["mcp"] = [record]
             before = {p.relative_to(repo): p.read_bytes() for p in repo.rglob("*") if p.is_file()}
-            self.assertEqual(installer.mcp_packages.configuration(record, repo)["command"], "node")
-
-            def fixture_preflight(record):
-                installer.mcp_packages._npm_lock(record["recipe"]["package_lock"], record["declaration"]["package"])
-
-            preflight = getattr(installer.mcp_packages, "preflight", fixture_preflight)
+            with self.assertRaises(ValueError):
+                installer.mcp_packages.configuration(record, repo)
+            preflight = installer.mcp_packages.preflight
             with ExitStack() as stack:
                 stack.enter_context(patch.object(installer, "resolve", return_value=result))
-                validate = stack.enter_context(patch.object(installer.mcp_packages, "preflight", create=True,
+                validate = stack.enter_context(patch.object(installer.mcp_packages, "preflight",
                                                            side_effect=preflight))
                 stack.enter_context(patch.object(installer, "fetch", side_effect=AssertionError("network")))
                 operations = [stack.enter_context(patch.object(installer, name)) for name in (

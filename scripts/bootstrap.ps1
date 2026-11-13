@@ -181,7 +181,7 @@ try {
     $required = @('package.json', 'README.md', 'requirements.txt', 'registry.toml', 'bin/personal-harness.mjs',
         'scripts/bootstrap.ps1', 'scripts/update-dependencies.ps1', 'scripts/install-dependencies.ps1',
         'scripts/harness.ps1', 'scripts/install_dependencies.py', 'scripts/harness.py',
-        'scripts/registry.py', 'scripts/mcp_packages.py',
+        'scripts/registry.py', 'scripts/mcp_packages.py', 'scripts/windows_paths.py',
         'common/AGENTS.md', 'common/config.toml', 'skills/create-readme/SKILL.md',
         'skills/agent-desktop/SKILL.md', 'skills/agent-desktop-windows/SKILL.md',
         'sources/agent-desktop-LICENSE', 'sources/dependencies.lock.json', "hosts/$hostName.toml")

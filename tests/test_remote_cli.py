@@ -575,7 +575,7 @@ class RemoteCliTests(unittest.TestCase):
         files = {item["path"] for item in package["files"]}
         for name in ("skills/agent-desktop/references/commands-system.md", "skills/agent-desktop-windows/references/troubleshooting.md",
                      "sources/agent-desktop-LICENSE", "docs/deployment.md", "scripts/bootstrap.ps1",
-                     "registry.toml", "scripts/registry.py", "scripts/mcp_packages.py"):
+                     "registry.toml", "scripts/registry.py", "scripts/mcp_packages.py", "scripts/windows_paths.py"):
             self.assertIn(name, files)
         self.assertFalse(any(name.startswith("docs/history/") for name in files))
         self.assertNotIn("scripts/test.ps1", files)

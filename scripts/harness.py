@@ -23,6 +23,7 @@ except ImportError:
 
 from registry import load_registry, lock_issues
 import mcp_packages
+from windows_paths import io_path
 
 REPO = Path(__file__).resolve().parents[1]
 PROTECTED = {"notify", "model_catalog_json", "openai_base_url", "experimental_realtime_ws_base_url",
@@ -181,6 +182,7 @@ def expand(value, variables: Mapping):
 
 def safe_file(path: Path, root: Path) -> None:
     """Refuse managed files that would write through an existing link/junction."""
+    path, root = io_path(path), io_path(root)
     if not path.is_relative_to(root):
         raise HarnessError(f"Target outside managed root: {path}")
     for item in (path, *path.parents):
@@ -296,7 +298,7 @@ def registered_settings(registry, lock: Mapping, state: Path, plan: Plan,
             configured['env_vars'] = forwarded
         values = [previous.get('command', ''), *previous.get('args', [])]
         absolute = [Path(value) for value in values if isinstance(value, str) and Path(value).is_absolute()]
-        managed = any(path.resolve().is_relative_to((state / 'tools/mcp').resolve()) for path in absolute)
+        managed = any(io_path(path).resolve().is_relative_to(io_path(state / 'tools/mcp').resolve()) for path in absolute)
         if previous.get('command') and absolute and not managed and spec['kind'] != 'http':
             for key in ('command', 'args', 'cwd'):
                 if key in previous:
