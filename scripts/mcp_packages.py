@@ -90,11 +90,13 @@ def _npm_tools() -> tuple[list[str], dict]:
 
 
 def _npm(command, arguments, directory: Path, cache: Path):
+    directory = directory.absolute()
     environment = os.environ.copy()
     environment["NPM_CONFIG_CACHE"] = str(cache)
     _run([*command, *arguments, "--ignore-scripts", "--engine-strict", "--force=false", "--bin-links=false",
           "--include=optional", "--include=peer", "--include=prod",
-          "--no-audit", "--no-fund", "--cache", str(cache)], cwd=directory, env=environment)
+          "--no-audit", "--no-fund", "--cache", str(cache), "--prefix", str(directory)],
+         cwd=directory.anchor, env=environment)
 
 
 def _npm_lock(lock: dict, package: str) -> dict:

@@ -176,6 +176,51 @@ def initialize(config):
 
 
 class McpPackagesTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node") and shutil.which("npm"), "Node and npm are required")
+    def test_real_npm_replay_with_package_root_over_300_characters(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / ("state [client] & 한글 " + "x" * 100) / ("y" * 100)
+            try:
+                with npm_fixture(root, dependency_name="JSONStream"):
+                    record = mcp.resolve(spec("npm"))
+                    original = copy.deepcopy(record)
+                    package_root = mcp._root(record, state)
+                    self.assertGreater(len(str(package_root)), 300)
+                    io_path(package_root).mkdir(parents=True)
+                    io_path(package_root / ".npmrc").write_text("registry=https://target.invalid/\n")
+                    mcp.install(record, state, guard=safe_file)
+                    self.assertEqual(json.loads(io_path(package_root / "package.json").read_bytes()),
+                                     record["recipe"]["package_json"])
+                    self.assertEqual(json.loads(io_path(package_root / "package-lock.json").read_bytes()),
+                                     record["recipe"]["package_lock"])
+                    self.assertTrue(io_path(package_root / "node_modules/JSONStream/index.js").is_file())
+                    self.assertFalse((root / "node_modules").exists())
+                    command, _ = mcp._npm_tools()
+                    outputs = []
+                    execute = mcp._run
+
+                    def capture(command, **kwargs):
+                        result = execute(command, **kwargs)
+                        outputs.append(result)
+                        return result
+
+                    with patch.object(mcp, "_run", side_effect=capture):
+                        mcp._npm(command, ["config", "get", "registry"], package_root,
+                                 state / "tools/mcp-cache/npm")
+                    self.assertEqual(outputs[-1].strip(), "https://target.invalid/")
+                    config = mcp.configuration(record, state, node=shutil.which("node"))
+                    self.assertEqual(initialize(config)["result"]["serverInfo"]["name"], "npm-closure")
+                    self.assertEqual(mcp.missing(record, state, guard=safe_file), [])
+                    receipt = io_path(package_root / "receipt.json")
+                    before = (receipt.read_bytes(), receipt.stat().st_mtime_ns)
+                    with patch.object(mcp, "_npm", side_effect=AssertionError("healthy receipt reinstalled")):
+                        mcp.install(record, state, guard=safe_file)
+                    self.assertEqual((receipt.read_bytes(), receipt.stat().st_mtime_ns), before)
+                    self.assertEqual(record, original)
+            finally:
+                shutil.rmtree(io_path(root))
+
     @unittest.skipUnless(os.name == "nt", "Windows long-path I/O")
     def test_tree_reads_long_files_with_logical_guards_and_relative_inventory(self):
         with TemporaryDirectory() as directory:
