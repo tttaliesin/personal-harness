@@ -401,7 +401,7 @@ class RemoteCliTests(unittest.TestCase):
             with self.subTest(pip_count=pip_count, identity="pip"):
                 pip = [call for call in self.python_calls() if call[1:4] == ["-m", "pip", "install"]]
                 self.assertEqual(len(pip), pip_count)
-                pip_source = Path(pip[-1][-1]).parent
+                pip_source = Path(pip[-1][-1].removeprefix("\\\\?\\")).parent
                 pip_wrapper = next(call for call in self.calls() if call["kind"] == "wrapper" and Path(call["source"]) == pip_source)
                 self.assertEqual(pip_wrapper["hashes"]["requirements.txt"], digest)
                 self.assertFalse(Path(pip[-1][-1]).exists())
