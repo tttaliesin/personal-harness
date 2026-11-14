@@ -1,15 +1,18 @@
-"""Publish selected portable registrations through the user's authenticated gh CLI."""
 from __future__ import annotations
 
 import argparse
 import base64
 from dataclasses import dataclass
+import hashlib
+import ipaddress
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
+import socket
 import subprocess
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -28,6 +31,10 @@ class ShareError(Exception):
     pass
 
 
+class MissingPluginManifest(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class Ready:
     id: str
@@ -41,7 +48,14 @@ class Blocked:
     reason: str = UNSUPPORTED
 
 
-Candidate = Ready | Blocked
+@dataclass(frozen=True)
+class Resolvable:
+    id: str
+    source: str
+    ref: str
+
+
+Candidate = Ready | Blocked | Resolvable
 
 
 def read_json(path: Path) -> dict:
@@ -61,7 +75,7 @@ def github_source(source: str) -> str:
     return normalized + ".git"
 
 
-def plugin_candidate(name: str, market: str, config: dict, lock: dict, home: Path) -> dict:
+def plugin_source(market: str, config: dict) -> tuple[str, str]:
     metadata = config.get("marketplaces", {}).get(market, {})
     if metadata.get("source_type") != "git":
         raise ValueError("Unsupported source")
@@ -69,6 +83,28 @@ def plugin_candidate(name: str, market: str, config: dict, lock: dict, home: Pat
     ref = metadata.get("ref")
     if not isinstance(ref, str) or not re.fullmatch(r"[0-9a-f]{40}", ref):
         raise ValueError("Unpinned source")
+    return source, ref
+
+
+def marketplace_manifest(metadata: dict, name: str, market: str) -> str:
+    if metadata.get("name") != market:
+        raise ValueError("Marketplace identity differs")
+    entries = [entry for entry in metadata.get("plugins", []) if entry.get("name") == name]
+    if len(entries) != 1:
+        raise ValueError("Missing unique marketplace entry")
+    source = entries[0].get("source")
+    if isinstance(source, dict) and source.get("source") == "local":
+        source = source.get("path")
+    if not isinstance(source, str) or not (source.startswith("./") or source == "."):
+        raise ValueError("Unsupported marketplace entry source")
+    prefix = source.removeprefix("./").rstrip("/")
+    if prefix == ".":
+        prefix = ""
+    return f"{prefix}/.codex-plugin/plugin.json" if prefix else ".codex-plugin/plugin.json"
+
+
+def plugin_candidate(name: str, market: str, config: dict, lock: dict, home: Path) -> dict:
+    source, ref = plugin_source(market, config)
     records = [p for p in lock.get("plugins", []) if p.get("name") == name and p.get("marketplace") == market]
     roots = home / "plugins" / "cache" / market / name
     matches = []
@@ -102,22 +138,37 @@ def plugin_candidate(name: str, market: str, config: dict, lock: dict, home: Pat
                 path = manifest.parents[1] / file
                 if not path.is_file():
                     continue
-                marketplace = read_json(path)
-                if marketplace.get("name") != market:
+                try:
+                    relative = marketplace_manifest(read_json(path), name, market)
+                except ValueError:
                     continue
-                entries = [p for p in marketplace.get("plugins", []) if p.get("name") == name]
-                if len(entries) != 1 or not isinstance(entries[0].get("source"), str):
-                    continue
-                prefix = entries[0]["source"].removeprefix("./").rstrip("/")
-                if prefix == ".":
-                    prefix = ""
-                relative = str(PurePosixPath(prefix) / ".codex-plugin/plugin.json")
         if relative:
             matches.append(declaration or normalize_plugin(dict(name=name, marketplace=market, source=source,
                 channel="git-ref", ref=ref, manifest=relative, enabled=True)))
-    if not matches or any(item != matches[0] for item in matches):
+    if not matches:
+        raise MissingPluginManifest("Missing manifest evidence")
+    if any(item != matches[0] for item in matches):
         raise ValueError("Missing manifest evidence")
     return matches[0]
+
+
+def resolve_plugin(candidate: Resolvable) -> Ready:
+    name, market = candidate.id.removeprefix("plugin:").split("@")
+    coordinates = candidate.source.removeprefix("https://github.com/").removesuffix(".git")
+    for path in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json"):
+        endpoint = f"https://raw.githubusercontent.com/{coordinates}/{candidate.ref}/{path}"
+        try:
+            with urllib.request.urlopen(endpoint, timeout=20) as response:
+                manifest = marketplace_manifest(json.load(response), name, market)
+            return Ready(candidate.id, normalize_plugin(dict(name=name, marketplace=market, source=candidate.source,
+                channel="git-ref", ref=candidate.ref, manifest=manifest, enabled=True)))
+        except urllib.error.HTTPError as error:
+            error.close()
+            if error.code != 404:
+                raise ShareError("Selected plugin marketplace could not be verified as public on GitHub.") from None
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            raise ShareError("Selected plugin marketplace could not be verified as public on GitHub.") from None
+    raise ShareError("Selected plugin marketplace could not be verified as public on GitHub.")
 
 
 def package_metadata(command: str, args: list[str], home: Path) -> dict:
@@ -208,33 +259,47 @@ def package_metadata(command: str, args: list[str], home: Path) -> dict:
 def mcp_candidate(name: str, settings: dict, lock: dict, home: Path, state_root: Path) -> dict:
     if name.lower() in {"node_repl", "codegraph"}:
         raise ValueError("Reserved runtime")
+    if "url" in settings:
+        spec = dict(name=name, kind="http", url=settings["url"])
+        if "bearer_token_env_var" in settings:
+            spec["bearer_token_env_var"] = settings["bearer_token_env_var"]
+        spec = normalize_mcp(spec)
+        url = urllib.parse.urlsplit(spec["url"])
+        host = url.hostname.encode("idna").decode("ascii").rstrip(".").lower()
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            try:
+                address = ipaddress.IPv4Address(socket.inet_aton(host))
+            except OSError:
+                address = None
+        if address is not None:
+            if not address.is_global:
+                raise ValueError("Endpoint requires private configuration")
+            host = str(address)
+        elif ("." not in host or host.endswith((".localhost", ".local", ".internal", ".lan", ".home", ".corp"))):
+            raise ValueError("Endpoint requires private configuration")
+        if url.query or url.fragment or url.path not in ("", "/", "/mcp", "/mcp/", "/sse", "/sse/"):
+            raise ValueError("Endpoint requires private configuration")
+        netloc = f"[{host}]" if ":" in host else host
+        if url.port and url.port != 443:
+            netloc += f":{url.port}"
+        return normalize_mcp({**spec, "url": url._replace(netloc=netloc).geturl()})
     records = [p for p in lock.get("mcp", []) if p.get("name") == name]
     if len(records) == 1 and "declaration" in records[0]:
         record = records[0]
         spec = normalize_mcp(record["declaration"])
-        if (spec["name"] == name and record.get("kind") == spec["kind"]
+        if (spec["kind"] != "http" and spec["name"] == name and record.get("kind") == spec["kind"]
                 and record.get("declaration_sha256") == declaration_hash(spec)):
-            if spec["kind"] == "http" and settings.get("url") == spec["url"]:
-                return spec
-            if spec["kind"] != "http":
-                command = settings.get("command", "")
-                if spec["kind"] == "npm" and Path(command).name.lower().removesuffix(".exe") != "node":
-                    raise ValueError("Unknown interpreter")
-                expected = mcp_packages.configuration(record, state_root, node=command)
-                launch = expected["args"][:-len(spec["args"])] if spec["args"] else expected["args"]
-                if command == expected["command"] and settings.get("args", [])[:len(launch)] == launch:
-                    return spec
-    if "url" in settings:
-        url = urllib.parse.urlsplit(settings["url"])
-        if (not url.hostname or "." not in url.hostname or url.hostname.lower().endswith((".internal", ".lan", ".home", ".corp"))
-                or url.query or url.fragment or url.path not in ("", "/", "/mcp", "/mcp/", "/sse", "/sse/")):
-            raise ValueError("Endpoint requires private configuration")
-        spec = dict(name=name, kind="http", url=settings["url"])
-        if "bearer_token_env_var" in settings:
-            spec["bearer_token_env_var"] = settings["bearer_token_env_var"]
-    else:
-        spec = dict(name=name, **package_metadata(settings.get("command", ""), settings.get("args", []), home))
-        spec["env_vars"] = sorted(set(settings.get("env_vars", [])) | set(settings.get("env", {})))
+            command = settings.get("command", "")
+            if spec["kind"] == "npm" and Path(command).name.lower().removesuffix(".exe") != "node":
+                raise ValueError("Unknown interpreter")
+            expected = mcp_packages.configuration(record, state_root, node=command)
+            launch = expected["args"][:-len(spec["args"])] if spec["args"] else expected["args"]
+            if command == expected["command"] and settings.get("args", [])[:len(launch)] == launch:
+                return {**spec, "args": []}
+    spec = dict(name=name, **package_metadata(settings.get("command", ""), settings.get("args", []), home))
+    spec["env_vars"] = sorted(set(settings.get("env_vars", [])) | set(settings.get("env", {})))
     return normalize_mcp(spec)
 
 
@@ -255,6 +320,9 @@ def discover(codex_home: Path, state_root: Path, user_home: Path | None = None) 
         label = f"plugin:{name}@{market}"
         try:
             result.append(Ready(label, plugin_candidate(name, market, config, lock, codex_home)))
+        except MissingPluginManifest:
+            source, ref = plugin_source(market, config)
+            result.append(Resolvable(label, source, ref))
         except (ValueError, OSError, KeyError, TypeError, AttributeError):
             result.append(Blocked(label))
     for name, settings in config.get("mcp_servers", {}).items():
@@ -284,6 +352,8 @@ def merge_registry(text: str, selected: list[Ready]) -> str:
             entries = tomlkit.aot()
             doc[group] = entries
         match = next((item for item in entries if identity(item) == identity(spec)), None)
+        if group == "mcp" and spec["kind"] != "http":
+            spec = {**spec, "args": normalize_mcp(match).get("args", []) if match is not None else []}
         if match is None:
             table = tomlkit.table()
             table.update(spec)
@@ -324,6 +394,51 @@ def gh_api(endpoint: str, *, payload: dict | None = None) -> dict:
         raise ShareError("GitHub response was lost or invalid. Check the remote registry before trying again.") from None
 
 
+class ArtifactRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError("Package artifact redirects are unsupported")
+
+
+def verify_python_entrypoint(spec: dict, metadata: dict) -> None:
+    from pip._vendor.packaging.specifiers import SpecifierSet
+    from pip._vendor.packaging.tags import sys_tags
+    from pip._vendor.packaging.utils import parse_wheel_filename
+    from pip._vendor.packaging.version import Version
+
+    version = Version(metadata["info"]["version"])
+    if spec["version"] != "latest" and version != Version(spec["version"]):
+        raise ValueError("Public Python version differs from selection")
+    tags = set(sys_tags())
+    python_version = Version(".".join(map(str, sys.version_info[:3])))
+    for artifact in metadata.get("urls", []):
+        if artifact.get("packagetype") != "bdist_wheel" or (artifact.get("yanked") and spec["version"] == "latest"):
+            continue
+        filename = artifact["filename"]
+        name, wheel_version, _, wheel_tags = parse_wheel_filename(filename)
+        if (name != spec["package"] or wheel_version != version or not tags.intersection(wheel_tags)
+                or python_version not in SpecifierSet(artifact.get("requires_python") or "")):
+            continue
+        url = urllib.parse.urlsplit(artifact["url"])
+        if (url.scheme != "https" or url.netloc != "files.pythonhosted.org" or url.query or url.fragment
+                or "\\" in artifact["url"] or any(char.isspace() for char in artifact["url"])
+                or urllib.parse.unquote(url.path.rsplit("/", 1)[-1]) != filename):
+            raise ValueError("Unsupported public Python artifact URL")
+        expected = artifact.get("digests", {}).get("sha256", "")
+        if not re.fullmatch(r"[0-9a-f]{64}", expected):
+            raise ValueError("Public Python artifact lacks SHA256")
+        with urllib.request.build_opener(ArtifactRedirect()).open(artifact["url"], timeout=20) as response:
+            data = response.read()
+        if hashlib.sha256(data).hexdigest() != expected:
+            raise ValueError("Public Python artifact SHA256 differs")
+        identity, entries = mcp_packages._wheel(data, filename, {"tags": [str(tag) for tag in tags]})
+        if (re.sub(r"[-_.]+", "-", identity["name"]).lower() != spec["package"] or Version(identity["version"]) != version
+                or python_version not in SpecifierSet(identity["requires_python"])
+                or not re.fullmatch(r"[\w.]+\s*:\s*[\w.]+(?:\s*\[[\w., -]+\])?", entries.get(spec["entrypoint"], ""))):
+            raise ValueError("Public Python wheel does not prove selected console script")
+        return
+    raise ValueError("No compatible public Python wheel proves selected console script")
+
+
 def verify_public_plugins(selected: list[Ready]) -> None:
     for candidate in selected:
         spec = candidate.declaration
@@ -345,7 +460,13 @@ def verify_public_plugins(selected: list[Ready]) -> None:
                     name = re.sub(r"[-_.]+", "-", name).lower()
                 if name != spec["package"]:
                     raise ValueError
-            except (OSError, ValueError, TypeError, AttributeError):
+                if spec["kind"] == "npm":
+                    if not metadata.get("version") or (version != "latest" and metadata["version"] != version):
+                        raise ValueError
+                    mcp_packages._npm_bin(metadata, spec["entrypoint"])
+                else:
+                    verify_python_entrypoint(spec, metadata)
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
                 raise ShareError("Selected package could not be verified through its public package registry.") from None
             continue
         source = github_source(candidate.declaration["source"])
@@ -391,7 +512,9 @@ def main(argv=None) -> int:
         candidates = discover(codex_home, args.state_root, args.home)
         if args.list or not args.select:
             for index, candidate in enumerate(candidates, 1):
-                print(f"{index}. {candidate.id}: " + ("Ready" if isinstance(candidate, Ready) else f"Blocked. {candidate.reason}"))
+                status = ("Ready" if isinstance(candidate, Ready) else "Resolvable through public Git metadata"
+                          if isinstance(candidate, Resolvable) else f"Blocked. {candidate.reason}")
+                print(f"{index}. {candidate.id}: {status}")
         if args.list:
             return 0
         selection = args.select
@@ -407,10 +530,10 @@ def main(argv=None) -> int:
             print("Cancelled.")
             return 0
         ids = [item.strip() for item in selection.split(",")]
-        available = {item.id: item for item in candidates if isinstance(item, Ready)}
+        available = {item.id: item for item in candidates if isinstance(item, (Ready, Resolvable))}
         if len(set(ids)) != len(ids) or any(item not in available for item in ids):
             raise ShareError("Selection contains an unknown, duplicate, or blocked ID.")
-        selected = [available[item] for item in ids]
+        selected = [resolve_plugin(available[item]) if isinstance(available[item], Resolvable) else available[item] for item in ids]
         verify_public_plugins(selected)
         permission = gh_api(API)
         if permission.get("permissions", {}).get("push") is not True:
@@ -422,10 +545,12 @@ def main(argv=None) -> int:
             raise ShareError("Invalid remote registry response.")
         text = base64.b64decode(remote["content"]).decode("utf-8-sig")
         merged = merge_registry(text, selected)
+        public = parse_registry(merged)
+        selected_ids = {candidate.id.casefold() for candidate in selected}
         print("Public declarations for tttaliesin/personal-harness registry.toml:")
         print(tomlkit.dumps({"schema_version": 1,
-            "plugins": [c.declaration for c in selected if c.id.startswith("plugin:")],
-            "mcp": [c.declaration for c in selected if c.id.startswith("mcp:")]}))
+            "plugins": [spec for spec in public.plugins if f"plugin:{spec['name']}@{spec['marketplace']}".casefold() in selected_ids],
+            "mcp": [spec for spec in public.mcp if f"mcp:{spec['name']}".casefold() in selected_ids]}))
         if any(candidate.local_settings for candidate in selected):
             print("Per-PC local settings required. Application args, working directories, and header values stay local.")
         if merged == text:

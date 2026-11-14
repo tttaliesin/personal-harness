@@ -1,5 +1,6 @@
 import base64
 from contextlib import redirect_stderr, redirect_stdout
+import hashlib
 import io
 import json
 import os
@@ -9,12 +10,14 @@ import sys
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
+import urllib.error
+import zipfile
 
 import tomlkit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import share
-from registry import declaration_hash, normalize_mcp
+from registry import declaration_hash, normalize_mcp, parse_registry
 
 
 class ShareTests(unittest.TestCase):
@@ -33,6 +36,7 @@ class ShareTests(unittest.TestCase):
         self.config = {"mcp_servers": {"remote": {"url": "https://share-fixture.example.invalid/mcp",
             "http_headers": {"Authorization": self.secret}}}}
         self.write_config()
+        self.enterContext(patch.object(share.urllib.request, "urlopen", side_effect=AssertionError("Unexpected network")))
 
     def write_config(self):
         (self.codex / "config.toml").write_text(tomlkit.dumps(self.config), encoding="utf-8")
@@ -86,11 +90,11 @@ class ShareTests(unittest.TestCase):
         return {"sha": self.remote_sha, "encoding": "base64",
                 "content": base64.b64encode(self.remote_text.encode()).decode()}
 
-    def run_main(self, options=(), *, answers=(), tty=False):
+    def run_main(self, options=(), *, answers=(), tty=False, verify=False):
         self.uploads = []
         output, errors = io.StringIO(), io.StringIO()
         with patch.object(share, "gh_api", side_effect=self.github) as api, patch.object(
-                share, "verify_public_plugins") as public, patch.object(sys.stdin, "isatty", return_value=tty), patch(
+                share, "verify_public_plugins", **({"wraps": share.verify_public_plugins} if verify else {})) as public, patch.object(sys.stdin, "isatty", return_value=tty), patch(
                 "builtins.input", side_effect=answers), redirect_stdout(output), redirect_stderr(errors):
             code = share.main(["--home", str(self.home), "--codex-home", str(self.codex), "--state-root", str(self.state), *options])
         self.assertNotIn(self.secret, output.getvalue() + errors.getvalue() + repr(self.uploads))
@@ -180,7 +184,59 @@ class ShareTests(unittest.TestCase):
         self.assertEqual(candidate.declaration, spec)
         self.assertNotIn(self.secret, repr(candidate))
         (self.state / "sources/dependencies.lock.json").unlink()
-        self.assertIsInstance(next(c for c in self.discover() if c.id.startswith("plugin:")), share.Blocked)
+        self.assertNotIsInstance(next(c for c in self.discover() if c.id.startswith("plugin:")), share.Ready)
+
+    def test_selected_plugin_resolves_public_exact_ref_without_lock_or_cached_mapping(self):
+        for native in (True, False):
+            with self.subTest(native=native):
+                spec = self.plugin()
+                (self.state / "sources/dependencies.lock.json").unlink()
+                candidate = next(c for c in self.discover() if c.id.startswith("plugin:"))
+                self.assertNotIsInstance(candidate, share.Blocked)
+                code, output, _, api, public = self.run_main(["--list"])
+                self.assertEqual(code, 0)
+                self.assertIn("Resolvable", output)
+                api.assert_not_called()
+                public.assert_not_called()
+                marketplace = {"name": "example-market", "plugins": [{"name": "example", "source":
+                    {"source": "local", "path": "./plugins/example"} if native else "./plugins/example"}]}
+                responses = [io.BytesIO(json.dumps(marketplace).encode()),
+                    io.BytesIO(b'{"private":false,"full_name":"example/plugins"}'), io.BytesIO(b'{"name":"example"}')]
+                if not native:
+                    responses.insert(0, urllib.error.HTTPError("https://raw.githubusercontent.com/fixture", 404, "missing", {}, None))
+                with patch.object(share.urllib.request, "urlopen", side_effect=responses) as fetch:
+                    code, output, _, _, _ = self.run_main(["--select", "plugin:example@example-market", "--yes"], verify=True)
+                self.assertEqual(code, 0)
+                root = "https://raw.githubusercontent.com/example/plugins/" + "c" * 40
+                self.assertEqual(fetch.call_args_list[0].args[0], root + "/.agents/plugins/marketplace.json")
+                if not native:
+                    self.assertEqual(fetch.call_args_list[1].args[0], root + "/.claude-plugin/marketplace.json")
+                self.assertEqual(fetch.call_args_list[-1].args[0], root + "/plugins/example/.codex-plugin/plugin.json")
+                uploaded = parse_registry(base64.b64decode(self.uploads[0][1]["content"]).decode())
+                self.assertEqual(uploaded.plugins, (spec,))
+
+    def test_public_plugin_fallback_refuses_private_source_mapping_and_wrong_manifest(self):
+        self.plugin()
+        (self.state / "sources/dependencies.lock.json").unlink()
+        for source in ({"source": "git", "path": "./plugins/example"}, "../private", "https://private.invalid/plugin", "./../private"):
+            with self.subTest(source=source):
+                marketplace = {"name": "example-market", "plugins": [{"name": "example", "source": source}]}
+                with patch.object(share.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(marketplace).encode())):
+                    code, _, _, api, _ = self.run_main(["--select", "plugin:example@example-market", "--yes"], verify=True)
+                self.assertEqual(code, 1)
+                api.assert_not_called()
+        with patch.object(share.urllib.request, "urlopen", side_effect=urllib.error.HTTPError(
+                "https://raw.githubusercontent.com/fixture", 404, "missing", {}, None)) as fetch:
+            code, _, _, api, _ = self.run_main(["--select", "plugin:example@example-market", "--yes"], verify=True)
+        self.assertEqual(code, 1)
+        self.assertEqual(fetch.call_count, 2)
+        api.assert_not_called()
+        marketplace = {"name": "example-market", "plugins": [{"name": "example", "source": "./plugins/example"}]}
+        with patch.object(share.urllib.request, "urlopen", side_effect=[io.BytesIO(json.dumps(marketplace).encode()),
+                io.BytesIO(b'{"private":false,"full_name":"example/plugins"}'), io.BytesIO(b'{"name":"wrong"}')]):
+            code, _, _, api, _ = self.run_main(["--select", "plugin:example@example-market", "--yes"], verify=True)
+        self.assertEqual(code, 1)
+        api.assert_not_called()
 
     def test_managed_latest_release_declaration_is_preserved_and_noop(self):
         record = self.plugin()
@@ -194,12 +250,15 @@ class ShareTests(unittest.TestCase):
         self.assertEqual(share.merge_registry(text, [candidate]), text)
         self.write_lock({"plugins": [{**record, "version": "1.0.0"}], "registrations": {"plugins": [declaration]}})
         self.assertEqual(next(c for c in self.discover() if c.id.startswith("plugin:")).declaration, declaration)
+        self.write_lock({"plugins": [{**record, "version": "1.0.0", "declaration": declaration,
+                                      "declaration_sha256": "0" * 64}]})
+        self.assertIsInstance(next(c for c in self.discover() if c.id.startswith("plugin:")), share.Blocked)
 
     def test_selected_package_requires_anonymous_public_identity_before_any_github_call(self):
         self.npm()
         self.config["mcp_servers"] = {"package": {"command": "npx", "args": ["@example/server"]}}
         candidate, = self.discover()
-        response = io.BytesIO(json.dumps({"name": "@example/server", "version": "1.2.3"}).encode())
+        response = io.BytesIO(json.dumps({"name": "@example/server", "version": "1.2.3", "bin": {"server": "start.js"}}).encode())
         with patch.object(share.urllib.request, "urlopen", return_value=response) as fetch:
             share.verify_public_plugins([candidate])
         self.assertEqual(fetch.call_args.args[0], "https://registry.npmjs.org/%40example%2Fserver/latest")
@@ -236,6 +295,159 @@ class ShareTests(unittest.TestCase):
             candidate, = self.discover()
             self.assertIsInstance(candidate, share.Blocked)
             self.assertNotIn(self.secret, repr(candidate))
+
+    def test_managed_http_cannot_bypass_private_path_projection(self):
+        spec = normalize_mcp({"name": "remote", "kind": "http", "url": "https://example.com/" + self.secret})
+        self.config["mcp_servers"] = {"remote": {"url": spec["url"]}}
+        self.write_lock({"mcp": [{"name": "remote", "kind": "http", "declaration": spec,
+                                  "declaration_sha256": declaration_hash(spec)}]})
+        self.assertIsInstance(self.discover()[0], share.Blocked)
+        code, _, _, api, _ = self.run_main(["--select", "mcp:remote", "--yes"])
+        self.assertEqual(code, 1)
+        api.assert_not_called()
+
+    def test_managed_stdio_discards_lock_args_and_preserves_version_policy(self):
+        for kind in ("npm", "python"):
+            for version in ("latest", "1.2.3"):
+                with self.subTest(kind=kind, version=version):
+                    spec = normalize_mcp({"name": "service", "kind": kind, "package": "fixture-package",
+                        "entrypoint": "server", "version": version, "args": ["--config", "./" + self.secret]})
+                    launch = {"command": "node" if kind == "npm" else str(self.state / "python.exe"),
+                              "args": [str(self.state / "server-script")]}
+                    self.config["mcp_servers"] = {"service": {**launch, "args": launch["args"] + spec["args"]}}
+                    self.write_lock({"mcp": [{"name": "service", "kind": kind, "declaration": spec,
+                                              "declaration_sha256": declaration_hash(spec)}]})
+                    with patch.object(share.mcp_packages, "configuration", return_value={**launch, "args": launch["args"] + spec["args"]}):
+                        candidate, = self.discover()
+                        self.assertEqual(candidate.declaration, {**spec, "args": []})
+                        self.assertNotIn(self.secret, repr(candidate))
+                        code, _, _, _, _ = self.run_main(["--select", "mcp:service", "--yes"])
+                    self.assertEqual(code, 0)
+                    uploaded = parse_registry(base64.b64decode(self.uploads[0][1]["content"]).decode())
+                    self.assertEqual(uploaded.mcp[0], {**spec, "args": []})
+
+    def test_existing_public_args_survive_merge_and_match_preview(self):
+        self.npm()
+        self.config["mcp_servers"] = {"package": {"command": "npx", "args": ["@example/server", self.secret]}}
+        public = normalize_mcp({"name": "Package", "kind": "npm", "package": "@example/server",
+                               "entrypoint": "server", "version": "1.0.0", "args": ["--mode", "public"]})
+        self.remote_text = tomlkit.dumps({"schema_version": 1, "mcp": [public]})
+        self.write_config()
+        code, output, _, _, _ = self.run_main(["--select", "mcp:package", "--yes"])
+        self.assertEqual(code, 0)
+        uploaded = parse_registry(base64.b64decode(self.uploads[0][1]["content"]).decode())
+        preview = output.split("registry.toml:\n", 1)[1].split("Per-PC", 1)[0]
+        self.assertEqual(parse_registry(preview).mcp, uploaded.mcp)
+        self.assertEqual(uploaded.mcp[0]["args"], public["args"])
+        self.remote_text = base64.b64decode(self.uploads[0][1]["content"]).decode()
+        code, output, _, _, _ = self.run_main(["--select", "mcp:package", "--yes"])
+        self.assertEqual(code, 0)
+        self.assertIn("Unchanged", output)
+        self.assertEqual(self.uploads, [])
+
+    def test_private_host_variants_block_offline_even_with_managed_lock(self):
+        for host in ("localhost.", "127.1", "service.internal.", "service.corp.", "printer.local.",
+                     "sub.localhost.", "service.lan.", "service.home.", "2130706433", "0x7f000001", "0177.0.0.1",
+                     "127.1.", "service.internal\u3002"):
+            for managed in (False, True):
+                with self.subTest(host=host, managed=managed):
+                    spec = normalize_mcp({"name": "remote", "kind": "http", "url": f"https://{host}/mcp"})
+                    self.config["mcp_servers"] = {"remote": {"url": spec["url"]}}
+                    self.write_lock({"mcp": [{"name": "remote", "kind": "http", "declaration": spec,
+                        "declaration_sha256": declaration_hash(spec)}] if managed else []})
+                    self.assertIsInstance(self.discover()[0], share.Blocked)
+                    code, _, _, api, public = self.run_main(["--select", "mcp:remote", "--yes"])
+                    self.assertEqual(code, 1)
+                    api.assert_not_called()
+                    public.assert_not_called()
+
+    def test_npm_requires_selected_official_bin_before_github(self):
+        self.npm(bins={"private-only-bin": "start.js"})
+        self.config["mcp_servers"] = {"package": {"command": "npx", "args": ["@example/server@1.2.3"]}}
+        self.write_config()
+        for bins in ({"public-bin": "public.js"}, {}, {"private-only-bin": "../private.js"}):
+            with self.subTest(bins=bins), patch.object(share.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps({
+                    "name": "@example/server", "version": "1.2.3", "bin": bins}).encode())):
+                code, _, _, api, _ = self.run_main(["--select", "mcp:package", "--yes"], verify=True)
+                self.assertEqual(code, 1)
+                api.assert_not_called()
+
+    def test_python_name_and_empty_artifacts_are_insufficient(self):
+        self.config["mcp_servers"] = {"service": {"command": "uvx", "args": ["--from", "fixture-package", "nonexistent-bin"]}}
+        self.write_config()
+        with patch.object(share.urllib.request, "urlopen", return_value=io.BytesIO(
+                b'{"info":{"name":"fixture-package","version":"1.2.3"},"urls":[]}')):
+            code, _, _, api, _ = self.run_main(["--select", "mcp:service", "--yes"], verify=True)
+        self.assertEqual(code, 1)
+        api.assert_not_called()
+
+    def wheel(self, *, name="fixture-package", version="1.2.3", entry="server = fixture:main", tag="py3-none-any", requires_python=">=3.9"):
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr("fixture_package-1.2.3.dist-info/WHEEL", f"Wheel-Version: 1.0\nTag: {tag}\n")
+            archive.writestr("fixture_package-1.2.3.dist-info/METADATA",
+                f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\nRequires-Python: {requires_python}\n")
+            archive.writestr("fixture_package-1.2.3.dist-info/entry_points.txt", f"[console_scripts]\n{entry}\n")
+        data = stream.getvalue()
+        filename = "fixture_package-1.2.3-py3-none-any.whl"
+        artifact = {"filename": filename, "packagetype": "bdist_wheel",
+                    "url": f"https://files.pythonhosted.org/packages/fixture/{filename}",
+                    "digests": {"sha256": hashlib.sha256(data).hexdigest()}, "requires_python": ">=3.9"}
+        return data, {"info": {"name": "Fixture_Package", "version": "1.2.3"}, "urls": [artifact]}
+
+    def test_python_public_wheel_proves_console_script_without_installing(self):
+        for requested in ("fixture-package", "fixture-package==1.2.3"):
+            with self.subTest(requested=requested):
+                data, metadata = self.wheel()
+                self.config["mcp_servers"] = {"service": {"command": "uvx", "args": ["--from", requested, "server", self.secret]}}
+                self.write_config()
+                with patch.object(share.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(metadata).encode())) as fetch, patch.object(
+                        share.urllib.request, "build_opener") as opener, patch.object(share.subprocess, "run", side_effect=AssertionError("No execution")):
+                    opener.return_value.open.return_value = io.BytesIO(data)
+                    code, _, _, _, _ = self.run_main(["--select", "mcp:service", "--yes"], verify=True)
+                self.assertEqual(code, 0)
+                self.assertEqual(fetch.call_count, 1)
+                opener.return_value.open.assert_called_once_with(metadata["urls"][0]["url"], timeout=20)
+                uploaded = parse_registry(base64.b64decode(self.uploads[0][1]["content"]).decode()).mcp[0]
+                self.assertEqual(uploaded["version"], "latest" if "==" not in requested else "1.2.3")
+                self.assertEqual(uploaded["args"], [])
+
+    def test_python_wheel_identity_integrity_compatibility_and_entrypoint_are_required(self):
+        self.config["mcp_servers"] = {"service": {"command": "uvx", "args": ["--from", "fixture-package", "server"]}}
+        self.write_config()
+        for changes in ({"entry": "other = fixture:main"}, {"entry": "server = "}, {"entry": "server = invalid"},
+                        {"name": "another-package"}, {"version": "9.9.9"}, {"tag": "cp27-none-any"}, {"requires_python": ">=99"},
+                        {"sha256": "0" * 64}, {"filename": "fixture_package-1.2.3-cp27-none-any.whl"}, {"requires_artifact_python": ">=99"}):
+            with self.subTest(changes=changes):
+                data, metadata = self.wheel(**{k: v for k, v in changes.items() if k not in {"sha256", "filename", "requires_artifact_python"}})
+                if "sha256" in changes:
+                    metadata["urls"][0]["digests"]["sha256"] = changes["sha256"]
+                if "filename" in changes:
+                    metadata["urls"][0]["filename"] = changes["filename"]
+                if "requires_artifact_python" in changes:
+                    metadata["urls"][0]["requires_python"] = changes["requires_artifact_python"]
+                with patch.object(share.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(metadata).encode())), patch.object(
+                        share.urllib.request, "build_opener") as opener:
+                    opener.return_value.open.return_value = io.BytesIO(data)
+                    code, _, _, api, _ = self.run_main(["--select", "mcp:service", "--yes"], verify=True)
+                self.assertEqual(code, 1)
+                api.assert_not_called()
+
+    def test_python_artifact_urls_cannot_fetch_private_or_arbitrary_hosts(self):
+        self.config["mcp_servers"] = {"service": {"command": "uvx", "args": ["--from", "fixture-package", "server"]}}
+        self.write_config()
+        for prefix in ("https://localhost.", "https://127.1", "https://service.internal.", "https://arbitrary.example",
+                       "https://files.pythonhosted.org.private.invalid", "http://files.pythonhosted.org",
+                       "https://user@files.pythonhosted.org", "https://files.pythonhosted.org:8443"):
+            with self.subTest(prefix=prefix):
+                _, metadata = self.wheel()
+                metadata["urls"][0]["url"] = prefix + "/" + metadata["urls"][0]["filename"]
+                with patch.object(share.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(metadata).encode())), patch.object(
+                        share.urllib.request, "build_opener") as opener:
+                    code, _, _, api, _ = self.run_main(["--select", "mcp:service", "--yes"], verify=True)
+                self.assertEqual(code, 1)
+                opener.assert_not_called()
+                api.assert_not_called()
 
     def test_selection_dry_run_branch_override_and_publish_json_projection(self):
         code, output, _, api, _ = self.run_main(["--select", "mcp:remote", "--dry-run", "--branch", "acceptance/fixture"])
@@ -309,7 +521,7 @@ class ShareTests(unittest.TestCase):
         self.assertNotIn("GH_DEBUG", run.call_args.kwargs["env"])
 
     def test_auth_denial_conflict_and_lost_write_response_are_not_retried(self):
-        for status, message in ((403, "access denied"), (409, "conflicted"), (422, "conflicted")):
+        for status, message in ((401, "access denied"), (403, "access denied"), (409, "conflicted"), (422, "conflicted")):
             completed = subprocess.CompletedProcess([], 1, "", f"HTTP {status} {self.secret}")
             with patch.object(share.subprocess, "run", return_value=completed) as run:
                 with self.assertRaises(share.ShareError) as raised:
