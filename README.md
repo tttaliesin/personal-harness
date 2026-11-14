@@ -38,10 +38,12 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 ```
 
 목록에서 항목을 선택하고, 공개될 등록 내용을 확인한 뒤 업로드한다.
-업로드에는 그 PC의 GitHub CLI 인증을 사용한다.
-처음 사용하는 PC는 `gh auth login --hostname github.com`으로 이 저장소에 쓰기 권한이 있는 계정에 로그인한다.
-기존 로그인이 있으면 그대로 사용한다.
-토큰을 저장소에 넣지 않는다.
+업로드에는 그 PC의 GitHub CLI에 저장된 `tttaliesin` 계정 인증을 사용한다.
+처음 사용하는 PC는 `gh auth login --hostname github.com`으로 해당 계정에 로그인한다.
+기존 로그인이 있으면 다시 로그인할 필요가 없다.
+`share`는 기본 활성 계정을 바꾸지 않고, 실행하는 GitHub 요청에만 해당 인증을 적용한다.
+명령 실행 환경에 `GH_TOKEN` 또는 `GITHUB_TOKEN`을 직접 제공했다면 그 인증을 우선 사용한다.
+토큰은 파일이나 저장소에 기록하지 않는다.
 
 목록만 보거나 업로드 없이 내용을 확인할 수도 있다.
 
