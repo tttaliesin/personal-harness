@@ -100,6 +100,39 @@ class ShareTests(unittest.TestCase):
         self.assertNotIn(self.secret, output.getvalue() + errors.getvalue() + repr(self.uploads))
         return code, output.getvalue(), errors.getvalue(), api, public
 
+    def test_main_uses_stored_owner_token_while_work_account_stays_active(self):
+        token = "ghp_dummy_owner_token"
+        config = self.root / "gh/hosts.yml"
+        config.parent.mkdir()
+        config.write_text("github.com:\n    user: suchang-busan\n", encoding="utf-8")
+        before_config = config.read_bytes()
+        output, errors = io.StringIO(), io.StringIO()
+        self.uploads = []
+
+        def gh(command, **kwargs):
+            if command[:3] == ["gh", "auth", "token"]:
+                self.assertEqual(command, ["gh", "auth", "token", "--hostname", "github.com", "--user", "tttaliesin"])
+                return subprocess.CompletedProcess(command, 0, token + "\n", "")
+            self.assertEqual(command[:2], ["gh", "api"])
+            if kwargs["env"].get("GH_TOKEN") != token:
+                return subprocess.CompletedProcess(command, 1, "", "HTTP 403 access denied for active work account")
+            payload = json.loads(kwargs["input"]) if kwargs.get("input") else None
+            response = self.github(command[6], payload=payload)
+            return subprocess.CompletedProcess(command, 0, json.dumps(response), "")
+
+        with patch.dict(os.environ, {"PATH": "fixture-path", "GH_CONFIG_DIR": str(config.parent),
+                "USERPROFILE": str(self.home), "HOME": str(self.home)}, clear=True):
+            before_environment = dict(os.environ)
+            with patch.object(share.subprocess, "run", side_effect=gh), redirect_stdout(output), redirect_stderr(errors):
+                code = share.main(["--home", str(self.home), "--codex-home", str(self.codex),
+                    "--state-root", str(self.state), "--select", "mcp:remote", "--yes"])
+            self.assertEqual(dict(os.environ), before_environment)
+        self.assertEqual(config.read_bytes(), before_config)
+        self.assertEqual(code, 0, errors.getvalue())
+        self.assertIn(self.commit_url, output.getvalue())
+        self.assertEqual(len(self.uploads), 1)
+        self.assertNotIn(token, output.getvalue() + errors.getvalue() + repr(self.uploads))
+
     def test_actual_cli_list_is_local_only_and_never_echoes_private_values(self):
         self.config["mcp_servers"].update({"private": {"url": f"https://example.com/mcp?{self.secret}"},
             "node_repl": {"command": self.secret, "args": [self.secret]},
