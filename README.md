@@ -28,6 +28,48 @@ PC별 경로와 의존성 기록은 `%LOCALAPPDATA%/PersonalHarness/state`에 �
 Codex가 생성한 런타임과 인증은 기존 Codex 홈에서 유지한다.
 기존 저장소의 `.local`을 재사용하거나 설치 경로를 지정하는 방법은 [설치 문서](docs/remote-install.md)를 참고한다.
 
+## 설치한 플러그인과 MCP 공유하기
+
+공유할 항목이 있는 PC에서 다음 명령을 실행한다.
+저장소를 직접 clone할 필요는 없다.
+
+```powershell
+npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git share
+```
+
+목록에서 항목을 선택하고, 공개될 등록 내용을 확인한 뒤 업로드한다.
+업로드에는 그 PC의 GitHub CLI 인증을 사용한다.
+처음 사용하는 PC는 `gh auth login --hostname github.com`으로 이 저장소에 쓰기 권한이 있는 계정에 로그인한다.
+기존 로그인이 있으면 그대로 사용한다.
+토큰을 저장소에 넣지 않는다.
+
+목록만 보거나 업로드 없이 내용을 확인할 수도 있다.
+
+```powershell
+npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git share --list
+npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git share --select 'plugin:pstack@pstack-claude' --dry-run
+```
+
+공유하는 내용은 설치 출처와 공통 등록 정보다.
+실행 경로, 실행 인자, 환경변수 값, 인증 헤더와 앱 런타임은 해당 PC에 남는다.
+대상 PC에 필요한 경로와 인증도 그 PC에서 설정한다.
+앱이 제공하는 런타임과 설치 출처를 확인할 수 없는 항목은 자동 업로드하지 않는다.
+
+등록이 `main`에 반영되면 필요한 PC에서 기존 `update` 명령으로 가져온다.
+새 항목을 가져올 때는 `--locked`를 붙이지 않는다.
+
+```mermaid
+sequenceDiagram
+    participant A as 공유할 항목이 있는 PC
+    participant G as GitHub main
+    participant B as 적용할 PC
+    A->>A: share로 항목 선택과 공개 내용 확인
+    A->>G: 해당 PC의 GitHub 인증으로 등록
+    B->>G: update 실행
+    G-->>B: 최신 등록 내용
+    B->>B: 로컬 설정을 유지하며 설치와 적용
+```
+
 ## 저장소에서 개발하기
 
 Windows, Python 3.11 이상, Codex 데스크톱 앱과 [Task](https://taskfile.dev/docs/installation)가 필요하다.

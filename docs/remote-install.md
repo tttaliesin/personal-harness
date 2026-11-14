@@ -56,6 +56,20 @@ WindowsApps의 Python 실행 별칭은 인터프리터로 사용하지 않는다
 새 항목을 등록하거나 설치 출처를 바꾼 뒤에는 일반 `update`로 해당 PC의 정확한 버전 기록을 갱신한다.
 `--locked`는 현재 등록 목록과 기록이 일치할 때 사용한다.
 
+## 다른 PC에 공유할 항목 올리기
+
+공유할 플러그인과 MCP가 설치된 PC에서 `share`를 실행한다.
+
+```powershell
+npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git share
+```
+
+항목을 고르고 공개할 내용을 확인하면, 해당 PC의 GitHub CLI 인증으로 `registry.toml`을 갱신한다.
+올리는 PC에는 GitHub CLI와 이 저장소의 쓰기 권한이 필요하다.
+공유할 항목의 경로와 인증 값은 올리지 않는다.
+받는 PC는 기존 `update` 명령을 사용한다.
+선택과 미리보기 명령은 [설치한 플러그인과 MCP 공유하기](../README.md#설치한-플러그인과-mcp-공유하기)를 참고한다.
+
 ## 소스와 PC별 상태
 
 기본 설치 루트는 `%LOCALAPPDATA%/PersonalHarness`다.
