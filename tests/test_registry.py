@@ -8,11 +8,19 @@ from unittest.mock import patch
 import tomlkit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from registry import declaration_hash, load_registry, lock_issues
+from registry import declaration_hash, load_registry, lock_issues, normalize_plugin, parse_registry
 import install_dependencies as installer
 
 
 class RegistryTests(unittest.TestCase):
+    def test_parse_and_public_plugin_normalizer_share_file_schema(self):
+        plugin = self.plugin()
+        text = '# retained by caller\nschema_version = 1\n' + tomlkit.dumps({"plugins": [plugin]})
+        self.assertEqual(parse_registry(text), self.load(plugins=[plugin]))
+        self.assertEqual(normalize_plugin(plugin), parse_registry(text).plugins[0])
+        with self.assertRaisesRegex(ValueError, "Invalid registry TOML"):
+            parse_registry('schema_version = "unterminated')
+
     def plugin(self, **changes):
         return {"name": "example", "marketplace": "example-market",
                 "source": "https://github.com/example/plugins.git", "channel": "latest-release",

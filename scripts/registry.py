@@ -72,7 +72,7 @@ def _url(value, field: str, *, git: bool = False) -> str:
         raise ValueError(f"Invalid {field}; use a public HTTPS URL without credentials") from None
 
 
-def _plugin(spec: Mapping) -> dict:
+def normalize_plugin(spec: Mapping) -> dict:
     _fields(spec, {"name", "marketplace", "source", "channel", "manifest", "enabled", "ref"},
             {"name", "marketplace", "source", "channel", "manifest"}, "plugin")
     normalized = {"name": _name(spec["name"], "plugin name"),
@@ -166,15 +166,19 @@ def _env_name(value) -> str:
 
 
 def load_registry(path: Path) -> Registry:
+    return parse_registry(path.read_text(encoding="utf-8-sig"))
+
+
+def parse_registry(text: str) -> Registry:
     try:
-        raw = tomlkit.parse(path.read_text(encoding="utf-8-sig")).unwrap()
+        raw = tomlkit.parse(text.lstrip("\ufeff")).unwrap()
     except tomlkit.exceptions.TOMLKitError:
         raise ValueError("Invalid registry TOML") from None
     _fields(raw, {"schema_version", "plugins", "mcp"}, {"schema_version"}, "registry")
     if type(raw["schema_version"]) is not int or raw["schema_version"] != 1:
         raise ValueError("Unsupported registry schema_version")
     groups = {}
-    for key, normalize, identity in (("plugins", _plugin, lambda p: (p["marketplace"], p["name"])),
+    for key, normalize, identity in (("plugins", normalize_plugin, lambda p: (p["marketplace"], p["name"])),
                                      ("mcp", normalize_mcp, lambda p: p["name"])):
         entries = raw.get(key, [])
         if not isinstance(entries, list):
