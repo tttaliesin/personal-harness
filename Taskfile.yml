@@ -63,6 +63,15 @@ tasks:
         -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
         {{.CLI_ARGS}}
 
+  share:
+    dir: '{{.ROOT_DIR}}'
+    desc: 설치된 플러그인과 MCP의 공개 선언 공유
+    cmds:
+      - >-
+        node ./bin/personal-harness.mjs share
+        --host {{.HOST | shellQuote}} --python {{.RUNTIME_PYTHON | shellQuote}}
+        {{.CLI_ARGS}}
+
   update:plan:
     dir: '{{.ROOT_DIR}}'
     desc: 의존성 최신 버전과 설치 계획만 조회

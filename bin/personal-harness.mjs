@@ -10,22 +10,28 @@ const packageName = '@tttaliesin/personal-harness';
 const packageDirectory = path.join('node_modules', '@tttaliesin', 'personal-harness');
 const gitSpec = 'git+https://github.com/tttaliesin/personal-harness.git';
 
-const usage = `Usage: personal-harness <install|update> [options]
+const usage = `Usage: personal-harness <install|update|share> [options]
 
 Install or update the Windows harness and check the result.
+Share selected installed plugins and MCP declarations using existing gh authentication.
 Python 3.11+, Git, Node/npm and Codex must already be installed.
 The public GitHub source can be downloaded without signing in.
 
 Options:
-  --host NAME           Bundled host profile (defaults to COMPUTERNAME)
+  --host NAME           Host name (install/update require a bundled profile)
   --home PATH           Target home; also isolates the manager by default
   --codex-home PATH     Target Codex profile
-  --codex PATH          Codex executable or command
+  --codex PATH          Codex executable or command (install/update only)
   --python PATH         Python 3.11+ executable or command
-  --local-config PATH   Host configuration override
+  --local-config PATH   Host configuration override (install/update only)
   --install-root PATH   Manager (defaults to LocalAppData/PersonalHarness)
   --state-root PATH     Persistent dependency state (defaults to manager/state)
-  --locked              Reproduce the persistent dependency lock
+  --locked              Reproduce the persistent dependency lock (install/update only)
+  --list                List local share candidates
+  --select CSV          Share comma-separated plugin:<name>@<marketplace> or mcp:<name> IDs
+  --dry-run             Preview selected portable declarations without publishing
+  --yes                 Publish noninteractively with --select
+  --branch NAME         Share to an alternate branch (defaults to main)
   --help                Display this help
 
 Paths are literal and relative paths use the caller's working directory.
@@ -36,7 +42,13 @@ const valueOptions = new Map([
   ['--host', 'host'], ['--home', 'home'], ['--codex-home', 'codexHome'],
   ['--codex', 'codex'], ['--python', 'python'], ['--local-config', 'localConfig'],
   ['--install-root', 'installRoot'], ['--state-root', 'stateRoot'],
+  ['--select', 'select'], ['--branch', 'branch'],
 ]);
+const booleanOptions = new Map([
+  ['--locked', 'locked'], ['--list', 'list'], ['--dry-run', 'dryRun'], ['--yes', 'yes'],
+]);
+const shareOptions = new Set(['list', 'select', 'dryRun', 'yes', 'branch']);
+const installOptions = new Set(['locked', 'codex', 'localConfig']);
 
 function assertCanonical(target) {
   const absolute = path.resolve(target);
@@ -160,8 +172,8 @@ function main(args) {
     return 0;
   }
   const command = args.shift();
-  if (!['install', 'update'].includes(command)) {
-    throw new Error('Expected install or update. Use --help for usage.');
+  if (!['install', 'update', 'share'].includes(command)) {
+    throw new Error('Expected install, update or share. Use --help for usage.');
   }
   const options = {};
   for (let index = 0; index < args.length; index += 1) {
@@ -170,11 +182,14 @@ function main(args) {
       process.stdout.write(usage);
       return 0;
     }
-    const key = flag === '--locked' ? 'locked' : valueOptions.get(flag);
+    const key = booleanOptions.get(flag) || valueOptions.get(flag);
     if (!key) throw new Error(`Unknown option: ${flag}`);
+    if ((command === 'share' ? installOptions : shareOptions).has(key)) {
+      throw new Error(`Option ${flag} is not available for ${command}.`);
+    }
     if (Object.hasOwn(options, key)) throw new Error(`Repeated option: ${flag}`);
-    if (flag === '--locked') {
-      options.locked = true;
+    if (booleanOptions.has(flag)) {
+      options[key] = true;
       continue;
     }
     const value = args[++index];

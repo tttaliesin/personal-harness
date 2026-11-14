@@ -200,7 +200,7 @@ except Exception:
     if ($LASTEXITCODE -ne 0) { throw 'Runtime reference audit failed; no configuration values were disclosed.' }
 }
 
-function Get-CapturedPayload([string]$Root, [string]$HostName, [switch]$Legacy) {
+function Get-CapturedPayload([string]$Root, [string]$HostName, [switch]$Legacy, [switch]$Share) {
     if ($Legacy -and (Test-Path -LiteralPath (Get-IOPath ([IO.Path]::Combine($Root, '.git'))))) {
         throw 'Legacy source cleanup refused a foreign Git checkout.'
     }
@@ -214,7 +214,9 @@ function Get-CapturedPayload([string]$Root, [string]$HostName, [switch]$Legacy) 
         'scripts/harness.ps1', 'scripts/install_dependencies.py', 'scripts/harness.py',
         'common/AGENTS.md', 'common/config.toml', 'skills/create-readme/SKILL.md',
         'skills/agent-desktop/SKILL.md', 'skills/agent-desktop-windows/SKILL.md',
-        'sources/agent-desktop-LICENSE', 'sources/dependencies.lock.json', "hosts/$hostName.toml")
+        'sources/agent-desktop-LICENSE', 'sources/dependencies.lock.json')
+    if (-not $Share) { $required += "hosts/$hostName.toml" }
+    if (-not $Legacy) { $required += 'scripts/share.py' }
     if (-not $Legacy -or $manifest.files -contains 'registry.toml') {
         $required += @('registry.toml', 'scripts/registry.py', 'scripts/mcp_packages.py', 'scripts/windows_paths.py')
     }
@@ -264,15 +266,20 @@ function Get-CapturedPayload([string]$Root, [string]$HostName, [switch]$Legacy) 
 try {
     if ($env:OS -ne 'Windows_NT') { throw 'This installer requires Windows.' }
     $request = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($RequestBase64)) | ConvertFrom-Json
-    if ($request.command -notin @('install', 'update')) { throw 'Expected install or update.' }
+    if ($request.command -notin @('install', 'update', 'share')) { throw 'Expected install, update or share.' }
+    $sharing = $request.command -eq 'share'
     $options = @{}
     foreach ($property in $request.options.PSObject.Properties) { $options[$property.Name] = $property.Value }
+    $unavailable = if ($sharing) { @('locked', 'codex', 'localConfig') } else { @('list', 'select', 'dryRun', 'yes', 'branch') }
+    foreach ($key in $unavailable) {
+        if ($options.ContainsKey($key)) { throw "Option '$key' is not available for $($request.command)." }
+    }
     $caller = Get-CanonicalPath $request.cwd ([Environment]::CurrentDirectory)
     $source = Get-CanonicalPath $request.sourceRoot $caller
     $hostName = if ($options.ContainsKey('host')) { [string]$options.host } else { [string]$env:COMPUTERNAME }
     $hostName = $hostName.ToLowerInvariant()
     if ($hostName -notmatch '^[a-z0-9][a-z0-9-]*$' -or
-        -not [IO.File]::Exists((Get-IOPath ([IO.Path]::Combine($source, "hosts/$hostName.toml"))))) {
+        (-not $sharing -and -not [IO.File]::Exists((Get-IOPath ([IO.Path]::Combine($source, "hosts/$hostName.toml")))))) {
         throw "Unknown bundled host '$hostName'. Pass --host with a profile from hosts/."
     }
     $homePath = if ($options.ContainsKey('home')) { Get-CanonicalPath $options.home $caller }
@@ -317,7 +324,7 @@ try {
     if ($options.ContainsKey('codex')) {
         $overrides.Codex = if ($options.codex -match '[/\\:]') { Get-CanonicalPath $options.codex $caller } else { $options.codex }
     }
-    $capture = Get-CapturedPayload $source $hostName
+    $capture = Get-CapturedPayload $source $hostName -Share:$sharing
     $payload = $capture.Files
     $payloadHash = $capture.Hash
 
@@ -428,53 +435,70 @@ try {
         if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE; throw 'Python requirements import check failed. Retry with a working Python 3.11+ installation.' }
         Write-Json $readyPath @{ requirements_sha256 = $requirementsHash; python = $python }
     }
-    $auditFiles = @([IO.Path]::Combine($release, 'common/config.toml'),
-        [IO.Path]::Combine($release, "hosts/$hostName.toml"), [IO.Path]::Combine($release, 'registry.toml'),
-        $localConfig, [IO.Path]::Combine($codexPath, 'config.toml'))
-    Assert-RuntimeReferences $venvPython $auditFiles @($source, $runs, $releases)
-    Assert-Payload $release $payload
-    $arguments = @{
-        Install = $true; StateRoot = $state; HomeDirectory = $homePath; CodexHome = $codexPath
-        HostName = $hostName; Python = $venvPython; Locked = ($options.ContainsKey('locked') -and [bool]$options.locked)
-    }
-    foreach ($entry in $overrides.GetEnumerator()) { $arguments[$entry.Key] = $entry.Value }
-    $global:LASTEXITCODE = 0
-    & ([IO.Path]::Combine($release, 'scripts/update-dependencies.ps1')) @arguments
-    if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE; throw 'Harness install/apply/check failed. The previous active receipt has been retained.' }
-    Assert-Payload $release $payload
-    Assert-RuntimeReferences $venvPython $auditFiles @($source, $runs, $releases)
-    $legacy = @()
-    if ([IO.Directory]::Exists((Get-IOPath $releases))) {
-        Assert-NoLinks $releases
-        foreach ($item in (Get-Item -LiteralPath (Get-IOPath $releases) -Force).GetFileSystemInfos()) {
-            if ($item -isnot [IO.DirectoryInfo] -or $item.Name -cnotmatch '^[a-f0-9]{64}$') {
-                throw 'Legacy source cleanup is incomplete; an unknown entry was retained.'
-            }
-            $oldRoot = Get-CanonicalPath $item.FullName $caller
-            Assert-NoLinks $oldRoot
-            $old = Get-CapturedPayload $oldRoot $hostName -Legacy
-            Assert-Payload $oldRoot $old.Files
-            if ($old.Hash -cne $item.Name) { throw 'Legacy source cleanup is incomplete; a modified release was retained.' }
-            $legacy += $oldRoot
+    if ($sharing) {
+        Assert-Payload $release $payload
+        $shareArguments = @('--home', $homePath, '--codex-home', $codexPath, '--state-root', $state)
+        foreach ($key in @('select', 'branch')) {
+            if ($options.ContainsKey($key)) { $shareArguments += @("--$key", [string]$options[$key]) }
         }
+        foreach ($entry in @{ list = '--list'; dryRun = '--dry-run'; yes = '--yes' }.GetEnumerator()) {
+            if ($options.ContainsKey($entry.Key) -and [bool]$options[$entry.Key]) { $shareArguments += $entry.Value }
+        }
+        & $venvPython -B (Get-IOPath ([IO.Path]::Combine($release, 'scripts/share.py'))) @shareArguments
+        $shareExitCode = $LASTEXITCODE
+        if ($shareExitCode -ne 0) { $exitCode = $shareExitCode }
+        Assert-Payload $release $payload
+        $exitCode = $shareExitCode
     }
-    foreach ($oldRoot in $legacy) {
-        Remove-OwnedSource $oldRoot $releases ([IO.Path]::GetFileName($oldRoot)) $protectedPaths
+    else {
+        $auditFiles = @([IO.Path]::Combine($release, 'common/config.toml'),
+            [IO.Path]::Combine($release, "hosts/$hostName.toml"), [IO.Path]::Combine($release, 'registry.toml'),
+            $localConfig, [IO.Path]::Combine($codexPath, 'config.toml'))
+        Assert-RuntimeReferences $venvPython $auditFiles @($source, $runs, $releases)
+        Assert-Payload $release $payload
+        $arguments = @{
+            Install = $true; StateRoot = $state; HomeDirectory = $homePath; CodexHome = $codexPath
+            HostName = $hostName; Python = $venvPython; Locked = ($options.ContainsKey('locked') -and [bool]$options.locked)
+        }
+        foreach ($entry in $overrides.GetEnumerator()) { $arguments[$entry.Key] = $entry.Value }
+        $global:LASTEXITCODE = 0
+        & ([IO.Path]::Combine($release, 'scripts/update-dependencies.ps1')) @arguments
+        if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE; throw 'Harness install/apply/check failed. The previous active receipt has been retained.' }
+        Assert-Payload $release $payload
+        Assert-RuntimeReferences $venvPython $auditFiles @($source, $runs, $releases)
+        $legacy = @()
+        if ([IO.Directory]::Exists((Get-IOPath $releases))) {
+            Assert-NoLinks $releases
+            foreach ($item in (Get-Item -LiteralPath (Get-IOPath $releases) -Force).GetFileSystemInfos()) {
+                if ($item -isnot [IO.DirectoryInfo] -or $item.Name -cnotmatch '^[a-f0-9]{64}$') {
+                    throw 'Legacy source cleanup is incomplete; an unknown entry was retained.'
+                }
+                $oldRoot = Get-CanonicalPath $item.FullName $caller
+                Assert-NoLinks $oldRoot
+                $old = Get-CapturedPayload $oldRoot $hostName -Legacy
+                Assert-Payload $oldRoot $old.Files
+                if ($old.Hash -cne $item.Name) { throw 'Legacy source cleanup is incomplete; a modified release was retained.' }
+                $legacy += $oldRoot
+            }
+        }
+        foreach ($oldRoot in $legacy) {
+            Remove-OwnedSource $oldRoot $releases ([IO.Path]::GetFileName($oldRoot)) $protectedPaths
+        }
+        Remove-RunSource $runSource $runs $protectedPaths
+        $receipt = @{
+            schema_version = 2; payload_sha256 = $payloadHash
+            state_root = $state; home = $homePath; codex_home = $codexPath; host_name = $hostName
+            python = $venvPython; command = $request.command; checked_at = [DateTime]::UtcNow.ToString('o')
+        }
+        $active = [IO.Path]::Combine($manager, 'active.json')
+        Assert-NoLinks $active
+        $pending = "$active.$([Guid]::NewGuid().ToString('N')).tmp"
+        Write-Json $pending $receipt
+        if ([IO.File]::Exists((Get-IOPath $active))) { [IO.File]::Replace((Get-IOPath $pending), (Get-IOPath $active), [NullString]::Value) }
+        else { [IO.File]::Move((Get-IOPath $pending), (Get-IOPath $active)) }
+        Write-Output "Harness $($request.command) applied and checked. Receipt: $active"
+        $exitCode = 0
     }
-    Remove-RunSource $runSource $runs $protectedPaths
-    $receipt = @{
-        schema_version = 2; payload_sha256 = $payloadHash
-        state_root = $state; home = $homePath; codex_home = $codexPath; host_name = $hostName
-        python = $venvPython; command = $request.command; checked_at = [DateTime]::UtcNow.ToString('o')
-    }
-    $active = [IO.Path]::Combine($manager, 'active.json')
-    Assert-NoLinks $active
-    $pending = "$active.$([Guid]::NewGuid().ToString('N')).tmp"
-    Write-Json $pending $receipt
-    if ([IO.File]::Exists((Get-IOPath $active))) { [IO.File]::Replace((Get-IOPath $pending), (Get-IOPath $active), [NullString]::Value) }
-    else { [IO.File]::Move((Get-IOPath $pending), (Get-IOPath $active)) }
-    Write-Output "Harness $($request.command) applied and checked. Receipt: $active"
-    $exitCode = 0
 }
 catch { Write-Error -Message $_.Exception.Message -ErrorAction Continue }
 finally {

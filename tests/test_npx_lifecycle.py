@@ -73,6 +73,7 @@ class NpxLifecycleTests(unittest.TestCase):
             npm_execpath=str(NPM_CLI), npm_command="exec", GIT_CONFIG_NOSYSTEM="1",
             GIT_CONFIG_GLOBAL=str(self.root / "gitconfig"), GIT_TERMINAL_PROMPT="0",
             LAUNCHER_LOG=str(self.log), LAUNCHER_EXIT="0",
+            PSExecutionPolicyPreference="Bypass",
         )
 
     def write_package(self, package):
@@ -130,6 +131,10 @@ class NpxLifecycleTests(unittest.TestCase):
         cases = [(["install", "--home", "profile's [x] & $()", "--locked"], 0, "0"),
                  (["update"], 43, "43"), (["--help"], 0, "0"),
                  (["install", "--help"], 0, "0"), ([], 0, "0"),
+                 (["share", "--help"], 0, "0"), (["share", "--list"], 0, "0"),
+                 (["share", "--select", "mcp:example", "--yes"], 47, "47"),
+                 (["share", "--locked"], 1, "0"), (["update", "--list"], 1, "0"),
+                 (["share", "--repo", "other/repo"], 1, "0"),
                  (["bad"], 1, "0"), (["install", "--unknown"], 1, "0"),
                  (["install", "--home"], 1, "0")]
         for args, code, child_code in cases:
@@ -138,6 +143,7 @@ class NpxLifecycleTests(unittest.TestCase):
                 sentinels = self.sentinels()
                 metadata = {filename: filename.read_bytes() for filename in
                             [self.entry / "package.json", self.entry / "package-lock.json"]}
+                prior_calls = len(self.calls()) if self.log.exists() else 0
                 result = self.run_launcher(args, expected=code,
                                            environment=dict(self.environment, LAUNCHER_EXIT=child_code))
                 self.assertFalse(self.package.exists())
@@ -145,10 +151,29 @@ class NpxLifecycleTests(unittest.TestCase):
                 self.assert_preserved(sentinels | metadata)
                 if b"Usage:" in result.stdout:
                     self.assertNotIn(b"releases are retained", result.stdout)
+                    self.assertEqual(len(self.calls()) if self.log.exists() else 0, prior_calls)
         first = self.calls()[0]
         self.assertEqual(set(first), {"command", "options", "sourceRoot", "cwd"})
         self.assertEqual(first["options"], {"home": "profile's [x] & $()", "locked": True})
         self.assertEqual(Path(first["cwd"]), self.caller)
+
+    def test_share_forwards_selection_flags_and_paths_with_npm_source_cleanup(self):
+        self.prepare_entry()
+        sentinels = self.sentinels()
+        values = {"host": "UNBUNDLED-PC", "home": "profile's [x] & $()",
+                  "codexHome": "codex [x]", "stateRoot": "state [x]", "installRoot": "manager [x]",
+                  "python": "python.exe", "select": "plugin:example@public,mcp:server",
+                  "branch": "feature/share", "list": True, "dryRun": True, "yes": True}
+        self.run_launcher(["share", "--host", values["host"], "--home", values["home"],
+                           "--codex-home", values["codexHome"], "--state-root", values["stateRoot"],
+                           "--install-root", values["installRoot"], "--python", values["python"],
+                           "--select", values["select"], "--branch", values["branch"],
+                           "--list", "--dry-run", "--yes"])
+        self.assertEqual(self.calls()[0]["command"], "share")
+        self.assertEqual(self.calls()[0]["options"], values)
+        self.assertFalse(self.package.exists())
+        self.assertFalse((self.entry / ".personal-harness-source.lease").exists())
+        self.assert_preserved(sentinels)
 
     def test_checkout_and_direct_execution_are_preserved(self):
         checkout = self.root / "checkout"
@@ -318,10 +343,10 @@ class NpxLifecycleTests(unittest.TestCase):
         self.assertTrue(self.package.exists())
 
     def test_cleanup_failure_preserves_primary_child_exit(self):
-        for child_code in ("0", "43"):
-            with self.subTest(child_code=child_code):
+        for command, child_code in (("update", "0"), ("update", "43"), ("share", "0"), ("share", "43")):
+            with self.subTest(command=command, child_code=child_code):
                 self.prepare_entry()
-                result = self.run_launcher(["update"], expected=int(child_code) or 1,
+                result = self.run_launcher([command], expected=int(child_code) or 1,
                                            environment=dict(self.environment, LAUNCHER_EXIT=child_code,
                                                             LAUNCHER_MUTATE="1"))
                 self.assertIn(b"cleanup failed", result.stderr)
@@ -411,7 +436,7 @@ class NpxLifecycleTests(unittest.TestCase):
         self.assertEqual(process.returncode, 0, stderr.decode(errors="replace"))
         self.assertFalse(self.package.exists())
 
-    def test_exact_public_npx_git_install_and_update_rehydrate(self):
+    def test_exact_public_npx_git_install_update_and_share_rehydrate(self):
         repo = self.root / "git-fixture"
         self.write_package(repo)
         for args in (["init", "--quiet"], ["add", "."], ["commit", "--quiet", "-m", "fixture"]):
@@ -427,12 +452,16 @@ class NpxLifecycleTests(unittest.TestCase):
             environment[f"GIT_CONFIG_VALUE_{index}"] = prefix
         sentinels = self.sentinels()
         prior_metadata = None
-        for command in ("install", "update"):
-            result = subprocess.run([NPX, "--yes", "--prefer-online", SPEC, command], cwd=self.caller,
+        for command in ("install", "update", "share"):
+            flags = ["--select", "plugin:example@public,mcp:server", "--dry-run", "--branch", "feature/share"] if command == "share" else []
+            result = subprocess.run([NPX, "--yes", "--prefer-online", SPEC, command, *flags], cwd=self.caller,
                                     env=environment, capture_output=True, timeout=90)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
             calls = self.calls()
             self.assertEqual(calls[-1]["command"], command)
+            if command == "share":
+                self.assertEqual(calls[-1]["options"], {"select": "plugin:example@public,mcp:server",
+                                                       "dryRun": True, "branch": "feature/share"})
             unpacked = Path(calls[-1]["sourceRoot"])
             self.assertFalse(unpacked.exists(), "Real npx unpacked source survived")
             actual_entry = unpacked.parents[2]

@@ -40,6 +40,14 @@ class FixturePython {
             Convert.ToBase64String(Encoding.UTF8.GetBytes(String.Join("\0", record))) + "\n");
         var args = new List<string>(arguments);
         if (args.Count > 0 && args[0] == "-3") args.RemoveAt(0);
+        if (args.Count > 0 && args[0] == "-B") args.RemoveAt(0);
+        if (args.Count > 0 && Path.GetFileName(args[0]) == "share.py") {
+            string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(String.Join("\0", args)));
+            string script = "import base64,runpy,sys; sys.argv=base64.b64decode('" + encoded + "').decode('utf-8').split(chr(0)); runpy.run_path(sys.argv[0],run_name='__main__')";
+            var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                Environment.GetEnvironmentVariable("HARNESS_FIXTURE_REAL_PYTHON"), "-B -c \"" + script + "\"") { UseShellExecute = false });
+            process.WaitForExit(); return process.ExitCode;
+        }
         if (args.Count > 1 && args[0] == "-c") {
             if (args[1].Contains("import base64, json")) {
                 string script = Path.Combine(Path.GetDirectoryName(Environment.GetEnvironmentVariable("HARNESS_FIXTURE_PYTHON_LOG")), "audit-" + Guid.NewGuid().ToString("N") + ".py");
@@ -123,6 +131,29 @@ if ($env:HARNESS_FIXTURE_MUTATE_SOURCE) {
 exit 0
 '''
 
+SHARE_STUB = r'''
+import argparse
+import json
+import os
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+for flag in ("--home", "--codex-home", "--state-root", "--select", "--branch"):
+    parser.add_argument(flag)
+for flag in ("--list", "--dry-run", "--yes"):
+    parser.add_argument(flag, action="store_true")
+options = vars(parser.parse_args())
+source = Path(__file__).resolve().parents[1]
+with open(os.environ["HARNESS_FIXTURE_LOG"], "a", encoding="utf-8") as stream:
+    stream.write(json.dumps(dict(options, kind="share", source=str(source))) + "\n")
+if os.environ.get("HARNESS_FIXTURE_BAD_OWNER"):
+    (source.parent / "owner.json").write_text("{}", encoding="utf-8")
+if os.environ.get("HARNESS_FIXTURE_MUTATE_SOURCE"):
+    with (source / "README.md").open("a", encoding="utf-8") as stream:
+        stream.write("mutation")
+raise SystemExit(int(os.environ.get("HARNESS_FIXTURE_SHARE_EXIT", "0")))
+'''
+
 
 @unittest.skipUnless(WINDOWS, "Windows PowerShell and Node are required")
 class RemoteCliTests(unittest.TestCase):
@@ -167,6 +198,7 @@ class RemoteCliTests(unittest.TestCase):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, destination)
         (self.payload / "scripts/update-dependencies.ps1").write_text(UPDATE_STUB, encoding="utf-8")
+        (self.payload / "scripts/share.py").write_text(SHARE_STUB, encoding="utf-8")
         self.caller = self.root / "c"
         self.caller.mkdir()
         self.python = self.root / "python's [exe] & $().exe"
@@ -201,7 +233,7 @@ class RemoteCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, expected, (result.stdout + result.stderr).decode("utf-8", errors="replace"))
         if clean and self.log.exists():
             for call in self.calls()[before:]:
-                if call["kind"] == "wrapper":
+                if call["kind"] in ("wrapper", "share"):
                     self.assertFalse(Path(call["source"]).exists())
         if clean:
             self.assertEqual(set((self.manager / "runs").glob("*")), existing_runs)
@@ -219,6 +251,7 @@ class RemoteCliTests(unittest.TestCase):
     def legacy_source(self, change=None, pre_registry=True):
         hashes = dict([call for call in self.calls() if call["kind"] == "wrapper"][-1]["hashes"])
         content = {name: (self.payload / name).read_bytes() for name in hashes}
+        content.pop("scripts/share.py", None)
         if pre_registry:
             manifest = json.loads(content["package.json"])
             manifest["files"].remove("registry.toml")
@@ -291,6 +324,146 @@ class RemoteCliTests(unittest.TestCase):
         self.assertEqual(Path(receipt["state_root"]), self.caller / "state [custom]")
         self.assertEqual(Path(receipt["codex_home"]), self.caller / "codex [custom]")
         self.assertEqual(receipt["host_name"], "homelab-desktop")
+
+    def test_share_routes_flags_and_literal_paths_without_applying(self):
+        self.manager = self.caller / "manager's [x] & $()"
+        self.state = self.caller / "state's [x] & $()"
+        codex = self.caller / "codex's [x] & $() 한글"
+        selection = "plugin:example@public,mcp:server"
+        self.run_cli("share", extra=["--install-root", str(self.manager), "--state-root", str(self.state),
+                                    "--codex-home", str(codex), "--select", selection,
+                                    "--branch", "feature/share", "--list", "--dry-run", "--yes"])
+        self.assertEqual([call["kind"] for call in self.calls()], ["share"])
+        call = self.calls()[0]
+        self.assertEqual(Path(call["home"]), self.home)
+        self.assertEqual(Path(call["codex_home"]), codex)
+        self.assertEqual(Path(call["state_root"]), self.state)
+        self.assertEqual(call["select"], selection)
+        self.assertEqual(call["branch"], "feature/share")
+        self.assertTrue(call["list"] and call["dry_run"] and call["yes"])
+        self.assertFalse((self.manager / "active.json").exists())
+        self.assertFalse((self.manager / "releases").exists())
+        self.assertFalse(codex.exists())
+        self.assertFalse((self.state / "tools").exists())
+        self.assertFalse((self.state / "sources/dependencies.lock.json").exists())
+        self.assertTrue(list(self.state.glob("python/*/ready.json")))
+        self.assertFalse(any("import base64, json" in " ".join(args) for args in self.python_calls()))
+
+    def test_share_preserves_existing_state_and_legacy_sources_and_reuses_python(self):
+        self.run_cli()
+        legacy = self.legacy_source(pre_registry=False)
+        sentinels = {}
+        for target in (self.manager / "active.json", self.state / "sources/dependencies.lock.json",
+                       self.state / "tools/mcp.exe", self.state / "roylabs-desktop.toml",
+                       self.home / ".codex/config.toml", self.home / ".codex/auth.json",
+                       self.home / ".agents/skills/kept.md", legacy / "README.md"):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists():
+                target.write_bytes(b'path = "${REPO_ROOT}/private"\n')
+            sentinels[target] = target.read_bytes()
+        before = len(self.calls())
+        python_before = len(self.python_calls())
+        environment = dict(self.environment, COMPUTERNAME="UNBUNDLED-PC", PATH=str(self.root / "missing-python"))
+        self.run_cli("share", python=False, extra=["--list"], environment=environment)
+        self.assertEqual([call["kind"] for call in self.calls()[before:]], ["share"])
+        self.assertEqual({target: target.read_bytes() for target in sentinels}, sentinels)
+        self.assertTrue(legacy.is_dir())
+        self.assertFalse(any(args[1:3] == ["-m", "venv"] or args[1:4] == ["-m", "pip", "install"]
+                             for args in self.python_calls()[python_before:]))
+
+    def test_share_unknown_host_needs_no_bundled_profile_but_rejects_unsafe_names(self):
+        self.run_cli("share", extra=["--host", "NEW-PC", "--list"])
+        self.assertEqual([call["kind"] for call in self.calls()], ["share"])
+        for host in ("../outside", "bad/name", "bad_name"):
+            with self.subTest(host=host):
+                self.run_cli("share", extra=["--host", host, "--list"], expected=1)
+        self.assertEqual(len(self.calls()), 1)
+        self.assertFalse((self.manager / "active.json").exists())
+
+    @unittest.skipUnless(shutil.which("task"), "Task is required")
+    def test_task_share_uses_launcher_and_forwards_paths(self):
+        self.payload = self.payload.rename(self.root / "task-payload")
+        shutil.copy2(ROOT / "Taskfile.yml", self.payload / "Taskfile.yml")
+        python = self.root / "task-python.exe"
+        shutil.copy2(self.python, python)
+        self.home = self.root / "task-home"
+        self.manager = self.home / ".local/share/personal-harness"
+        result = subprocess.run([shutil.which("task"), "--taskfile", str(self.payload / "Taskfile.yml"),
+                                 "share", f"PYTHON={python}", "--", "--home", "../task-home",
+                                 "--list"], cwd=self.caller, env=self.environment, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([call["kind"] for call in self.calls()], ["share"])
+        self.assertEqual(Path(self.calls()[0]["home"]), self.home)
+        self.assertTrue(self.calls()[0]["list"])
+        self.assertFalse(Path(self.calls()[0]["source"]).exists())
+        self.assertFalse(list((self.manager / "runs").glob("*")))
+        self.assertFalse((self.manager / "active.json").exists())
+
+    def test_share_runs_real_managed_python_without_payload_bytecode(self):
+        helper = self.payload / "scripts/share.py"
+        helper.write_text("import windows_paths\n" + SHARE_STUB, encoding="utf-8")
+        digest = hashlib.sha256((self.payload / "requirements.txt").read_bytes()).hexdigest()
+        venv = self.state / "python" / digest
+        created = subprocess.run([sys.executable, "-B", "-m", "venv", "--without-pip", str(venv)], capture_output=True)
+        self.assertEqual(created.returncode, 0, created.stderr)
+        (venv / "Lib/site-packages/tomlkit.py").write_text("fixture = True\n", encoding="utf-8")
+        (venv / "ready.json").write_text(json.dumps({"requirements_sha256": digest}), encoding="utf-8")
+        self.run_cli("share", python=False, extra=["--list"],
+                     environment=dict(self.environment, COMPUTERNAME="NEW-PC", PATH=str(self.root / "missing")))
+        self.assertEqual([call["kind"] for call in self.calls()], ["share"])
+        self.assertFalse((self.manager / "active.json").exists())
+        self.assertTrue((venv / "Scripts/python.exe").exists())
+
+    def test_share_preserves_child_exit_and_asserts_payload_after_helper(self):
+        for child_code in (0, 47):
+            for mutation in (False, True):
+                with self.subTest(child_code=child_code, mutation=mutation):
+                    environment = dict(self.environment, HARNESS_FIXTURE_SHARE_EXIT=str(child_code))
+                    if mutation:
+                        environment["HARNESS_FIXTURE_MUTATE_SOURCE"] = "1"
+                    result = self.run_cli("share", extra=["--dry-run"], environment=environment,
+                                          expected=child_code or int(mutation))
+                    if mutation:
+                        self.assertIn(b"Managed source verification failed", result.stderr)
+                    self.assertFalse((self.manager / "active.json").exists())
+        self.assertEqual([call["kind"] for call in self.calls()], ["share"] * 4)
+
+    def test_share_cleanup_refusal_preserves_helper_failure_code(self):
+        result = self.run_cli("share", expected=43, clean=False, environment=dict(
+            self.environment, HARNESS_FIXTURE_SHARE_EXIT="43", HARNESS_FIXTURE_BAD_OWNER="1"))
+        self.assertIn(b"Source cleanup failed", result.stderr)
+        self.assertTrue(Path(self.calls()[0]["source"]).exists())
+        self.assertFalse((self.manager / "active.json").exists())
+
+    def test_share_cleanup_refusal_turns_helper_success_into_failure(self):
+        result = self.run_cli("share", expected=1, clean=False,
+                              environment=dict(self.environment, HARNESS_FIXTURE_BAD_OWNER="1"))
+        self.assertIn(b"Source cleanup failed", result.stderr)
+        self.assertTrue(Path(self.calls()[0]["source"]).exists())
+        self.assertFalse((self.manager / "active.json").exists())
+
+    def test_new_incoming_payload_requires_share_helper_for_every_command(self):
+        (self.payload / "scripts/share.py").unlink()
+        for command in ("install", "update", "share"):
+            with self.subTest(command=command):
+                result = self.run_cli(command, expected=1)
+                self.assertIn(b"Required source is missing from the payload allowlist: scripts/share.py", result.stderr)
+                self.assertFalse(self.manager.exists())
+                self.assertFalse(self.python_log.exists())
+
+    def test_command_specific_flags_are_rejected_before_bootstrap(self):
+        cases = [("share", flags) for flags in (["--locked"], ["--codex", "codex"],
+                                                 ["--local-config", "private.toml"], ["--repo", "other/repo"])]
+        cases += [(command, flags) for command in ("install", "update")
+                  for flags in (["--list"], ["--select", "mcp:server"], ["--dry-run"],
+                                ["--yes"], ["--branch", "feature/share"])]
+        cases += [("share", flags) for flags in (["--select"], ["--branch"], ["--list", "--list"],
+                                                ["--select", "mcp:a", "--select", "mcp:b"])]
+        for command, flags in cases:
+            with self.subTest(command=command, flags=flags):
+                self.run_cli(command, extra=flags, expected=1)
+                self.assertFalse(self.manager.exists())
+                self.assertFalse(self.python_log.exists())
 
     def test_two_payloads_preserve_core_state_and_reuse_requirements_venv(self):
         self.run_cli()
@@ -826,7 +999,7 @@ class RemoteCliTests(unittest.TestCase):
             with self.subTest(extra=extra):
                 self.run_cli(extra=extra, expected=1)
                 self.assertFalse(self.manager.exists())
-        for args in ([], ["--help"], ["install", "--help"]):
+        for args in ([], ["--help"], ["install", "--help"], ["share", "--help"]):
             result = subprocess.run([NODE, str(self.payload / "bin/personal-harness.mjs"), *args], cwd=self.caller,
                                     env=self.environment, capture_output=True, timeout=10)
             self.assertEqual(result.returncode, 0)
@@ -933,7 +1106,7 @@ class RemoteCliTests(unittest.TestCase):
         files = {item["path"] for item in package["files"]}
         for name in ("skills/agent-desktop/references/commands-system.md", "skills/agent-desktop-windows/references/troubleshooting.md",
                      "sources/agent-desktop-LICENSE", "docs/deployment.md", "scripts/bootstrap.ps1",
-                     "registry.toml", "scripts/registry.py", "scripts/mcp_packages.py", "scripts/windows_paths.py"):
+                     "registry.toml", "scripts/registry.py", "scripts/mcp_packages.py", "scripts/windows_paths.py", "scripts/share.py"):
             self.assertIn(name, files)
         self.assertFalse(any(name.startswith("docs/history/") for name in files))
         self.assertNotIn("scripts/test.ps1", files)
