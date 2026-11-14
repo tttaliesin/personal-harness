@@ -735,6 +735,180 @@ class RegistryPlanTests(TemporaryHarnessTestCase):
         content = next(change.after for change in plan.changes if change.path == self.fixture.codex / 'config.toml')
         return tomllib.loads(content.decode())
 
+    def existing_server(self, settings):
+        path = self.fixture.codex / 'config.toml'
+        path.write_text(CURRENT_CONFIG + '\n' + harness.tomlkit.dumps({'mcp_servers': {'service': settings}}),
+                        encoding='utf-8')
+
+    def test_bare_stdio_launch_and_private_values_survive_registration_and_plan(self):
+        self.fixture.write_host(paths={'node': sys.executable})
+        for kind, command in (('npm', 'npx'), ('python', 'uvx')):
+            with self.subTest(kind=kind), \
+                    mock.patch.object(harness.mcp_packages, '_resolve_' + kind, return_value={}), \
+                    mock.patch.object(harness.mcp_packages, 'missing', return_value=[]), \
+                    mock.patch.object(harness.mcp_packages, 'configuration',
+                                      side_effect=lambda *args, **kwargs: {
+                                          'command': 'managed-command', 'args': ['--public'],
+                                          'env_vars': ['NEW_TOKEN', 'LOCAL_TOKEN']}):
+                registry, lock = self.register(f'''[[mcp]]
+name = "service"
+kind = "{kind}"
+package = "fixture-service"
+entrypoint = "service"
+env_vars = ["NEW_TOKEN", "LOCAL_TOKEN"]
+''')
+                previous = {'command': command, 'args': ['fixture-service', '--root=private-relative',
+                                                        '--token=private-arg-sentinel'],
+                            'cwd': 'private-working-directory', 'env': {'LOCAL_TOKEN': 'private-env-sentinel'},
+                            'env_vars': ['LOCAL_TOKEN', {'name': 'OTHER_TOKEN'}]}
+                self.existing_server(previous)
+                current = {'mcp_servers': {'service': previous}}
+                overlay = harness.registered_settings(registry, lock, self.fixture.repo / '.local',
+                                                     self.simple_plan(), {'node': sys.executable}, current)
+                for key in ('command', 'args', 'cwd'):
+                    self.assertEqual(overlay['mcp_servers']['service'][key], previous[key])
+                before = tree_snapshot(self.root)
+                plan = self.build()
+                self.assertEqual(plan.missing, [])
+                self.assertEqual(tree_snapshot(self.root), before)
+                config = self.planned_config(plan)
+                expected = {**previous, 'env_vars': previous['env_vars'] + ['NEW_TOKEN']}
+                self.assertEqual(config['mcp_servers']['service'], expected)
+                for name in ('node_repl', 'unrelated'):
+                    self.assertEqual(config['mcp_servers'][name], tomllib.loads(CURRENT_CONFIG)['mcp_servers'][name])
+                self.assertNotIn('private-arg-sentinel', '\n'.join(plan.settings))
+                self.assertNotIn('private-env-sentinel', '\n'.join(plan.settings))
+                write_file(self.fixture.repo / '.local/roylabs-desktop.toml',
+                           '[config.mcp_servers.service]\ncommand = "local-override"\nargs = ["--local"]\n')
+                server = self.planned_config(self.build())['mcp_servers']['service']
+                self.assertEqual(server['command'], 'local-override')
+                self.assertEqual(server['args'], ['--local'])
+                (self.fixture.repo / '.local/roylabs-desktop.toml').unlink()
+
+    def test_unmanaged_launch_without_args_does_not_gain_public_args(self):
+        registry = mock.Mock(plugins=(), mcp=({'name': 'service', 'kind': 'python'},))
+        with mock.patch.object(harness, 'lock_issues', return_value=[]), \
+                mock.patch.object(harness.mcp_packages, 'missing', return_value=[]), \
+                mock.patch.object(harness.mcp_packages, 'configuration',
+                                  return_value={'command': 'managed-command', 'args': ['--public']}):
+            overlay = harness.registered_settings(registry, {'mcp': [{'name': 'service'}]}, self.root,
+                                                 self.simple_plan(), {},
+                                                 {'mcp_servers': {'service': {'command': 'private-command'}}})
+        self.assertEqual(overlay['mcp_servers']['service'], {'command': 'private-command', 'env_vars': []})
+
+    def test_only_expected_node_and_python_launches_refresh(self):
+        self.addCleanup(harness.shutil.rmtree, harness.io_path(self.root))
+        state = self.root / 'state'
+        old = state / 'tools/mcp/service' / ('a' * 64)
+        new = state / 'tools/mcp/service' / ('b' * 64)
+        layouts = (
+            ('npm', {'command': 'node', 'args': [str(old / 'node_modules/service/bin.js'), '--old']},
+             {'command': 'node', 'args': [str(new / 'node_modules/service/bin.js'), '--new']}),
+            ('python', {'command': str(old / 'venv/bin/service'), 'args': ['--old']},
+             {'command': str(new / 'venv/bin/service'), 'args': ['--new']}),
+            ('python', {'command': str(old / 'venv/Scripts/python.exe'),
+                        'args': [str(old / 'venv/Scripts/service.exe'), '--old']},
+             {'command': str(new / 'venv/Scripts/python.exe'),
+              'args': [str(new / 'venv/Scripts/service.exe'), '--new']}),
+        )
+        for kind, previous, configured in layouts:
+            for launch in (previous, configured):
+                if kind == 'python':
+                    write_file(harness.io_path(Path(launch['command'])), b'fixture launcher')
+                if kind == 'npm' or Path(launch['command']).name == 'python.exe':
+                    write_file(harness.io_path(Path(launch['args'][0])), b'fixture script')
+            impostors = [
+                {'command': 'npx', 'args': ['service', str(old / 'private-data')]},
+                {'command': 'private-command', 'args': [previous['args'][0], str(old / 'private-data')]},
+                {**previous, 'command': str(old / 'private-data')},
+            ]
+            if kind == 'npm' or Path(previous['command']).name == 'python.exe':
+                impostors.append({**previous, 'args': ['--workspace', str(old / 'private-data')]})
+            if kind == 'npm':
+                impostors.append({**previous, 'args': [str(old / 'private-data')]})
+                impostors.append({**previous, 'args': [str(state / 'tools/mcp/service/unhashed/node_modules/service/bin.js')]})
+                write_file(harness.io_path(Path(impostors[-1]['args'][0])), b'unowned script')
+                impostors.append({**previous, 'args': [str(state / 'tools/mcp/service' / ('c' * 64) /
+                                                          'node_modules/service/bin.js')]})
+            for index, candidate in enumerate([previous, *impostors]):
+                with self.subTest(kind=kind, candidate=candidate), \
+                        mock.patch.object(harness, 'lock_issues', return_value=[]), \
+                        mock.patch.object(harness.mcp_packages, 'missing', return_value=[]), \
+                        mock.patch.object(harness.mcp_packages, 'configuration', return_value=copy.deepcopy(configured)):
+                    registration = mock.Mock(plugins=(), mcp=({'name': 'service', 'kind': kind},))
+                    overlay = harness.registered_settings(registration, {'mcp': [{'name': 'service'}]},
+                                                         state, self.simple_plan(), {'node': sys.executable},
+                                                         {'mcp_servers': {'service': candidate}})
+                    expected = configured if index == 0 else candidate
+                    server = overlay['mcp_servers']['service']
+                    self.assertEqual(server['command'], expected['command'])
+                    self.assertEqual(server['args'], expected['args'])
+
+    def test_unreadable_launch_paths_preserve_the_existing_tuple(self):
+        state = self.root / 'state'
+        command = str(self.root / 'private-path-sentinel/service.exe')
+        previous = {'command': command, 'args': ['--private'], 'cwd': 'private-cwd'}
+        registration = mock.Mock(plugins=(), mcp=({'name': 'service', 'kind': 'python'},))
+        original_io_path = harness.io_path
+
+        def inaccessible(path):
+            if str(path) == command:
+                return mock.Mock(resolve=mock.Mock(side_effect=OSError(448, 'private-error-sentinel')))
+            return original_io_path(path)
+
+        with mock.patch.object(harness, 'io_path', side_effect=inaccessible), \
+                mock.patch.object(harness, 'lock_issues', return_value=[]), \
+                mock.patch.object(harness.mcp_packages, 'missing', return_value=[]), \
+                mock.patch.object(harness.mcp_packages, 'configuration',
+                                  return_value={'command': str(state / 'tools/mcp/service' / ('b' * 64) /
+                                                              'venv/bin/service'), 'args': ['--public']}):
+            plan = self.simple_plan()
+            overlay = harness.registered_settings(registration, {'mcp': [{'name': 'service'}]}, state,
+                                                 plan, {}, {'mcp_servers': {'service': previous}})
+        self.assertEqual(overlay['mcp_servers']['service'], {**previous, 'env_vars': []})
+        self.assertEqual(plan.missing, [])
+
+    def test_http_url_change_with_local_auth_is_rejected_without_values_or_writes(self):
+        self.register('''[[mcp]]
+name = "service"
+kind = "http"
+url = "https://new.example.test/mcp"
+''')
+        for authentication in ({'http_headers': {'Authorization': 'private-auth-sentinel'}},
+                               {'env_http_headers': {'X-Api-Key': 'PRIVATE_ENV_SENTINEL'}},
+                               {'bearer_token_env_var': 'PRIVATE_BEARER_SENTINEL'}):
+            with self.subTest(authentication=authentication):
+                self.existing_server({'url': 'https://old.example.test/private-url-sentinel', **authentication})
+                before = tree_snapshot(self.root)
+                with self.assertRaisesRegex(harness.HarnessError, 'URL conflicts with local authentication') as caught:
+                    self.build()
+                self.assertEqual(tree_snapshot(self.root), before)
+                for sentinel in ('private-auth-sentinel', 'PRIVATE_ENV_SENTINEL',
+                                 'PRIVATE_BEARER_SENTINEL', 'private-url-sentinel', 'new.example.test'):
+                    self.assertNotIn(sentinel, str(caught.exception))
+
+    def test_http_url_updates_without_auth_and_explicit_overrides_keep_precedence(self):
+        self.register('''[[mcp]]
+name = "service"
+kind = "http"
+url = "https://new.example.test/mcp"
+''')
+        self.existing_server({'url': 'https://old.example.test/mcp'})
+        self.assertEqual(self.planned_config(self.build())['mcp_servers']['service']['url'],
+                         'https://new.example.test/mcp')
+        authentication = {'http_headers': {'Authorization': 'private-auth-sentinel'},
+                          'bearer_token_env_var': 'LOCAL_TOKEN'}
+        self.existing_server({'url': 'https://new.example.test/mcp', **authentication})
+        self.assertEqual(self.planned_config(self.build())['mcp_servers']['service'],
+                         {'url': 'https://new.example.test/mcp', **authentication})
+        self.existing_server({'url': 'https://old.example.test/mcp', **authentication})
+        for url in ('https://old.example.test/mcp', 'https://explicit.example.test/mcp'):
+            with self.subTest(url=url):
+                write_file(self.fixture.repo / '.local/roylabs-desktop.toml',
+                           '[config.mcp_servers.service]\nurl = ' + json.dumps(url) + '\n')
+                self.assertEqual(self.planned_config(self.build())['mcp_servers']['service'],
+                                 {'url': url, **authentication})
+
     def test_new_http_registration_merges_with_local_auth_and_runtime(self):
         self.register('''[[mcp]]
 name = "service"
@@ -823,9 +997,9 @@ url = "https://public.example.test/mcp"
 
     def test_private_launch_paths_survive_but_old_managed_launchers_update(self):
         state = self.root / 'state'
-        fresh = state / 'tools/mcp/service/new/Scripts/service.exe'
+        fresh = write_file(state / 'tools/mcp/service' / ('b' * 64) / 'Scripts/service.exe', b'new launcher')
         private = self.root / 'private tooling/service.exe'
-        old_managed = state / 'tools/mcp/service/old/Scripts/service.exe'
+        old_managed = write_file(state / 'tools/mcp/service' / ('a' * 64) / 'Scripts/service.exe', b'old launcher')
         registration = mock.Mock(plugins=(), mcp=({'name': 'service', 'kind': 'python'},))
         lock = {'mcp': [{'name': 'service'}]}
         for old, expected in ((private, private), (old_managed, fresh)):

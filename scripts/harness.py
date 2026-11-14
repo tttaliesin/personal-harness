@@ -268,6 +268,45 @@ def previously_applied_files(codex_home: Path) -> dict[str, str]:
     return files
 
 
+def managed_mcp_launch(spec: Mapping, previous: Mapping, configured: Mapping, state: Path) -> bool:
+    try:
+        root = io_path(state / 'tools/mcp' / spec['name']).resolve()
+    except OSError:
+        return False
+
+    def package_path(value, *, existing=False):
+        if not isinstance(value, str) or not Path(value).is_absolute():
+            return ()
+        try:
+            path = io_path(Path(value)).resolve()
+            parts = path.relative_to(root).parts
+            if (len(parts) > 1 and re.fullmatch(r'[0-9a-f]{64}', parts[0])
+                    and (not existing or path.is_file())):
+                return parts
+            return ()
+        except (OSError, ValueError):
+            return ()
+
+    arguments = previous.get('args', [])
+    expected_arguments = configured.get('args', [])
+    command = previous.get('command', '')
+    if spec['kind'] == 'npm':
+        if (command != configured['command']
+                and Path(command).name.casefold() not in ('node', 'node.exe')):
+            return False
+        launch = package_path(arguments[0], existing=True) if arguments else ()
+        expected = package_path(expected_arguments[0])
+    else:
+        launch = package_path(command, existing=True)
+        expected = package_path(configured['command'])
+        expected_script = package_path(expected_arguments[0]) if expected_arguments else ()
+        if expected_script:
+            script = package_path(arguments[0], existing=True) if arguments else ()
+            if not script or not launch or script[0] != launch[0] or script[1:] != expected_script[1:]:
+                return False
+    return len(launch) > 1 and launch[1:] == expected[1:]
+
+
 def registered_settings(registry, lock: Mapping, state: Path, plan: Plan,
                         paths: Mapping, current: Mapping) -> dict:
     issues = lock_issues(registry, lock)
@@ -296,13 +335,13 @@ def registered_settings(registry, lock: Mapping, state: Path, plan: Plan,
                     forwarded.append(variable)
                     names.add(variable)
             configured['env_vars'] = forwarded
-        values = [previous.get('command', ''), *previous.get('args', [])]
-        absolute = [Path(value) for value in values if isinstance(value, str) and Path(value).is_absolute()]
-        managed = any(io_path(path).resolve().is_relative_to(io_path(state / 'tools/mcp').resolve()) for path in absolute)
-        if previous.get('command') and absolute and not managed and spec['kind'] != 'http':
+        if (spec['kind'] != 'http' and previous.get('command')
+                and not managed_mcp_launch(spec, previous, configured, state)):
             for key in ('command', 'args', 'cwd'):
                 if key in previous:
                     configured[key] = copy.deepcopy(previous[key])
+                else:
+                    configured.pop(key, None)
         overlay.setdefault('mcp_servers', {})[spec['name']] = configured
     return overlay
 
@@ -360,6 +399,13 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
         server = merged.get('mcp_servers', {}).get(spec['name'], {})
         if server.get('command') and server.get('url'):
             raise HarnessError(f"MCP {spec['name']} has conflicting STDIO and HTTP settings; reconcile its local transport")
+        previous = old.get('mcp_servers', {}).get(spec['name'], {})
+        url_override = any('url' in source.get('config', {}).get('mcp_servers', {}).get(spec['name'], {})
+                           for source in (profile, local))
+        credentials = any(previous.get(key) or server.get(key)
+                          for key in ('http_headers', 'env_http_headers', 'bearer_token_env_var'))
+        if previous.get('url') and previous['url'] != server.get('url') and credentials and not url_override:
+            raise HarnessError(f"MCP {spec['name']} URL conflicts with local authentication; set an explicit local URL override")
     previous_codegraph = old.get("mcp_servers", {}).get("codegraph", {}).get("command")
     override_codegraph = (local.get("config", {}).get("mcp_servers", {}).get("codegraph", {}).get("command")
                           or profile.get("config", {}).get("mcp_servers", {}).get("codegraph", {}).get("command"))
