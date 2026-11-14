@@ -69,7 +69,7 @@ tasks:
     cmds:
       - >-
         node ./bin/personal-harness.mjs share
-        --host {{.HOST | shellQuote}} --python {{.RUNTIME_PYTHON | shellQuote}}
+        --host {{.HOST | shellQuote}}{{if .PYTHON}} --python {{.PYTHON | shellQuote}}{{end}}
         {{.CLI_ARGS}}
 
   update:plan:
