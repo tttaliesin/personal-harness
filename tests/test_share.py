@@ -30,6 +30,7 @@ class ShareTests(unittest.TestCase):
         self.state = self.root / "state"
         self.codex.mkdir()
         self.secret = "PRIVATE-sentinel-abc123"
+        self.owner_token = "ghp_dummy_owner_token"
         self.remote_text = '# keep this comment\nschema_version = 1\n'
         self.remote_sha = "a" * 40
         self.commit_url = f"https://github.com/tttaliesin/personal-harness/commit/{'b' * 40}"
@@ -93,45 +94,197 @@ class ShareTests(unittest.TestCase):
     def run_main(self, options=(), *, answers=(), tty=False, verify=False):
         self.uploads = []
         output, errors = io.StringIO(), io.StringIO()
-        with patch.object(share, "gh_api", side_effect=self.github) as api, patch.object(
+        with patch.object(share, "ShareGitHub") as github, patch.object(
                 share, "verify_public_plugins", **({"wraps": share.verify_public_plugins} if verify else {})) as public, patch.object(sys.stdin, "isatty", return_value=tty), patch(
                 "builtins.input", side_effect=answers), redirect_stdout(output), redirect_stderr(errors):
+            api = github.return_value.api
+            api.side_effect = self.github
             code = share.main(["--home", str(self.home), "--codex-home", str(self.codex), "--state-root", str(self.state), *options])
         self.assertNotIn(self.secret, output.getvalue() + errors.getvalue() + repr(self.uploads))
         return code, output.getvalue(), errors.getvalue(), api, public
 
-    def test_main_uses_stored_owner_token_while_work_account_stays_active(self):
-        token = "ghp_dummy_owner_token"
+    def run_transport(self, options=("--select", "mcp:remote", "--yes"), *, environment=None,
+                      credential=None, api_failure=None, answers=(), tty=False):
         config = self.root / "gh/hosts.yml"
-        config.parent.mkdir()
+        config.parent.mkdir(exist_ok=True)
         config.write_text("github.com:\n    user: suchang-busan\n", encoding="utf-8")
-        before_config = config.read_bytes()
+        before_config = hashlib.sha256(config.read_bytes()).hexdigest()
+        before_local_config = (self.codex / "config.toml").read_bytes()
         output, errors = io.StringIO(), io.StringIO()
         self.uploads = []
+        commands, inputs, api_environments = [], [], []
 
         def gh(command, **kwargs):
+            commands.append(command)
+            inputs.append(kwargs.get("input"))
+            self.assertEqual(kwargs["env"]["PATH"], "fixture-path")
+            self.assertEqual(kwargs["env"]["GH_CONFIG_DIR"], str(config.parent))
+            self.assertIsNot(kwargs["env"], os.environ)
+            for key in ("GH_DEBUG", "DEBUG", "GH_HOST", "GH_REPO", "GITHUB_TOKEN"):
+                self.assertNotIn(key, kwargs["env"])
+            self.assertTrue(kwargs["capture_output"])
+            self.assertTrue(kwargs["text"])
+            self.assertEqual(kwargs["encoding"], "utf-8")
+            self.assertGreater(kwargs["timeout"], 0)
+            self.assertLessEqual(kwargs["timeout"], 60)
             if command[:3] == ["gh", "auth", "token"]:
                 self.assertEqual(command, ["gh", "auth", "token", "--hostname", "github.com", "--user", "tttaliesin"])
-                return subprocess.CompletedProcess(command, 0, token + "\n", "")
+                self.assertNotIn("GH_TOKEN", kwargs["env"])
+                if isinstance(credential, Exception):
+                    raise credential
+                return credential or subprocess.CompletedProcess(command, 0, self.owner_token + "\n", "")
             self.assertEqual(command[:2], ["gh", "api"])
-            if kwargs["env"].get("GH_TOKEN") != token:
+            self.assertEqual(command[2:4], ["--hostname", "github.com"])
+            api_environments.append(dict(kwargs["env"]))
+            if api_failure and len(api_environments) == api_failure[0]:
+                result = api_failure[1]
+                if isinstance(result, Exception):
+                    raise result
+                return result
+            if kwargs["env"].get("GH_TOKEN") not in {self.owner_token, "ghp_dummy_caller", "github_pat_dummy_caller"}:
                 return subprocess.CompletedProcess(command, 1, "", "HTTP 403 access denied for active work account")
             payload = json.loads(kwargs["input"]) if kwargs.get("input") else None
+            self.assertEqual(command[4:6], ["--method", "PUT" if payload else "GET"])
             response = self.github(command[6], payload=payload)
             return subprocess.CompletedProcess(command, 0, json.dumps(response), "")
 
         with patch.dict(os.environ, {"PATH": "fixture-path", "GH_CONFIG_DIR": str(config.parent),
-                "USERPROFILE": str(self.home), "HOME": str(self.home)}, clear=True):
+                "USERPROFILE": str(self.home), "HOME": str(self.home), "GH_DEBUG": "api", "DEBUG": "1",
+                "GH_HOST": "private.invalid", "GH_REPO": "work/private", **(environment or {})}, clear=True):
             before_environment = dict(os.environ)
-            with patch.object(share.subprocess, "run", side_effect=gh), redirect_stdout(output), redirect_stderr(errors):
+            with patch.object(share.subprocess, "run", side_effect=gh), patch.object(
+                    sys.stdin, "isatty", return_value=tty), patch("builtins.input", side_effect=answers), redirect_stdout(output), redirect_stderr(errors):
                 code = share.main(["--home", str(self.home), "--codex-home", str(self.codex),
-                    "--state-root", str(self.state), "--select", "mcp:remote", "--yes"])
+                    "--state-root", str(self.state), *options])
             self.assertEqual(dict(os.environ), before_environment)
-        self.assertEqual(config.read_bytes(), before_config)
-        self.assertEqual(code, 0, errors.getvalue())
-        self.assertIn(self.commit_url, output.getvalue())
+        self.assertEqual(hashlib.sha256(config.read_bytes()).hexdigest(), before_config)
+        self.assertEqual(list(config.parent.iterdir()), [config])
+        self.assertEqual((self.codex / "config.toml").read_bytes(), before_local_config)
+        visible = output.getvalue() + errors.getvalue() + repr(commands) + repr(inputs) + repr(self.uploads)
+        visible += "".join(base64.b64decode(json.loads(value)["content"]).decode() for value in inputs if value)
+        for token in (self.owner_token, "ghp_dummy_caller", "github_pat_dummy_caller", self.secret):
+            self.assertNotIn(token, visible)
+        return code, output.getvalue(), errors.getvalue(), commands, api_environments
+
+    def test_main_uses_stored_owner_token_while_work_account_stays_active(self):
+        code, output, errors, commands, environments = self.run_transport()
+        self.assertEqual(code, 0, errors)
+        self.assertIn(self.commit_url, output)
         self.assertEqual(len(self.uploads), 1)
-        self.assertNotIn(token, output.getvalue() + errors.getvalue() + repr(self.uploads))
+        self.assertEqual(len(commands), 4)
+        self.assertEqual([environment["GH_TOKEN"] for environment in environments], [self.owner_token] * 3)
+        self.assertEqual([command[4:6] for command in commands[1:]], [["--method", "GET"], ["--method", "GET"], ["--method", "PUT"]])
+        self.assertEqual([command[6] for command in commands[1:]], [share.API,
+            f"{share.API}/contents/registry.toml?ref=main", f"{share.API}/contents/registry.toml"])
+        self.assertEqual(self.uploads[0][1]["sha"], self.remote_sha)
+
+    def test_explicit_token_precedence_and_empty_token_fallback(self):
+        for environment, expected in (({"GH_TOKEN": "ghp_dummy_caller", "GITHUB_TOKEN": "github_pat_dummy_caller"}, "ghp_dummy_caller"),
+                ({"GH_TOKEN": "ghp_dummy_caller", "GITHUB_TOKEN": "invalid lower priority token"}, "ghp_dummy_caller"),
+                ({"GH_TOKEN": "ghp_dummy_caller"}, "ghp_dummy_caller"),
+                ({"GITHUB_TOKEN": "github_pat_dummy_caller"}, "github_pat_dummy_caller"),
+                ({"GH_TOKEN": "", "GITHUB_TOKEN": "github_pat_dummy_caller"}, "github_pat_dummy_caller"),
+                ({"GH_TOKEN": "", "GITHUB_TOKEN": ""}, self.owner_token)):
+            with self.subTest(environment=environment):
+                code, _, errors, commands, environments = self.run_transport(environment=environment)
+                self.assertEqual(code, 0, errors)
+                self.assertEqual(len(commands), 4 if expected == self.owner_token else 3)
+                self.assertEqual([entry["GH_TOKEN"] for entry in environments], [expected] * 3)
+
+    def test_explicit_denial_never_falls_back_or_retries(self):
+        for key in ("GH_TOKEN", "GITHUB_TOKEN"):
+            for status in (401, 403):
+                for request in (1, 2, 3):
+                    with self.subTest(key=key, status=status, request=request):
+                        failure = subprocess.CompletedProcess([], 1, self.owner_token, f"HTTP {status} ghp_dummy_caller")
+                        code, _, errors, commands, environments = self.run_transport(
+                            environment={key: "ghp_dummy_caller"}, api_failure=(request, failure))
+                        self.assertEqual(code, 1)
+                        self.assertIn("access denied", errors)
+                        self.assertEqual(len(commands), request)
+                        self.assertEqual([entry["GH_TOKEN"] for entry in environments], ["ghp_dummy_caller"] * request)
+                        self.assertEqual(self.uploads, [])
+
+    def test_stored_credential_failures_stop_before_api_without_leaks(self):
+        failures = [subprocess.CompletedProcess([], 1, self.owner_token, self.secret)]
+        failures += [subprocess.CompletedProcess([], 0, value, self.secret) for value in (
+            "", "\n", " " + self.owner_token, self.owner_token + " ", self.owner_token + "\nextra",
+            self.owner_token + "\n\n", "\x1b[31m" + self.owner_token, self.owner_token + "\x00")]
+        failures += [OSError(self.owner_token), subprocess.TimeoutExpired(["gh", "auth", "token"], 20,
+            output=self.owner_token, stderr=self.secret), UnicodeError(self.owner_token)]
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                code, _, errors, commands, environments = self.run_transport(credential=failure)
+                self.assertEqual(code, 1)
+                self.assertEqual(errors, "GitHub authentication is unavailable or invalid for sharing.\n")
+                self.assertEqual(len(commands), 1)
+                self.assertEqual(environments, [])
+                self.assertEqual(self.uploads, [])
+
+    def test_malformed_explicit_token_does_not_use_other_credentials(self):
+        for key in ("GH_TOKEN", "GITHUB_TOKEN"):
+            for token in (" ", "ghp_dummy_caller\n", "ghp_dummy_caller\r", "ghp_dummy_caller\tother", "\x1b[31mghp_dummy_caller"):
+                with self.subTest(key=key, token=token):
+                    environment = {"GITHUB_TOKEN": "github_pat_dummy_caller", key: token}
+                    code, _, errors, commands, _ = self.run_transport(environment=environment)
+                    self.assertEqual(code, 1)
+                    self.assertIn("authentication is unavailable or invalid", errors)
+                    self.assertEqual(commands, [])
+                    self.assertEqual(self.uploads, [])
+
+    def test_local_list_cancel_and_invalid_selection_do_not_retrieve_credentials(self):
+        for options, answers, tty, expected in ((["--list"], (), False, 0), ([], [""], True, 0),
+                (["--select", "mcp:missing", "--yes"], (), False, 1), (["--yes"], (), False, 1)):
+            with self.subTest(options=options):
+                code, _, _, commands, _ = self.run_transport(options, answers=answers, tty=tty)
+                self.assertEqual(code, expected)
+                self.assertEqual(commands, [])
+
+    def test_request_failure_never_retries_or_changes_default_auth(self):
+        for request in (1, 2, 3):
+            for failure in (OSError(self.owner_token), subprocess.TimeoutExpired(["gh", "api"], 60,
+                    output=self.owner_token, stderr=self.secret), subprocess.CompletedProcess([], 1, self.owner_token, self.secret),
+                    subprocess.CompletedProcess([], 0, self.owner_token, self.secret), UnicodeError(self.owner_token)):
+                with self.subTest(request=request, failure=type(failure).__name__):
+                    code, _, errors, commands, environments = self.run_transport(api_failure=(request, failure))
+                    self.assertEqual(code, 1)
+                    self.assertIn("Check the remote registry before trying again", errors)
+                    self.assertEqual(len(commands), request + 1)
+                    self.assertEqual([entry["GH_TOKEN"] for entry in environments], [self.owner_token] * request)
+                    self.assertEqual(self.uploads, [])
+
+    def test_permission_and_content_sha_validation_still_block_writes(self):
+        for request, response, message in ((1, {"permissions": {"push": False}}, "write permission is required"),
+                (2, {"sha": "invalid", "encoding": "base64", "content": ""}, "Invalid remote registry response")):
+            with self.subTest(request=request):
+                code, _, errors, commands, _ = self.run_transport(api_failure=(request,
+                    subprocess.CompletedProcess([], 0, json.dumps(response), "")))
+                self.assertEqual(code, 1)
+                self.assertIn(message, errors)
+                self.assertEqual(len(commands), request + 1)
+                self.assertEqual(self.uploads, [])
+
+    def test_api_keeps_one_private_environment_when_parent_changes(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "ghp_dummy_caller", "GITHUB_TOKEN": "github_pat_dummy_caller",
+                "PATH": "original-path", "GH_CONFIG_DIR": "original-config"}, clear=True):
+            github = share.ShareGitHub()
+            with patch.dict(os.environ, {"GH_TOKEN": "changed_parent_token", "PATH": "changed-path",
+                    "GH_CONFIG_DIR": "changed-config"}), patch.object(share.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], 0, "{}", "")) as run:
+                before = dict(os.environ)
+                github.api(share.API)
+                github.api(f"{share.API}/contents/registry.toml?ref=main")
+                github.api(f"{share.API}/contents/registry.toml", payload={"sha": self.remote_sha})
+                self.assertEqual(dict(os.environ), before)
+            environments = [call.kwargs["env"] for call in run.call_args_list]
+            self.assertEqual(len(environments), 3)
+            for environment in environments:
+                self.assertIs(environment, environments[0])
+                self.assertIsNot(environment, os.environ)
+                self.assertEqual(environment["GH_TOKEN"], "ghp_dummy_caller")
+                self.assertEqual(environment["PATH"], "original-path")
+                self.assertEqual(environment["GH_CONFIG_DIR"], "original-config")
+                self.assertNotIn("GITHUB_TOKEN", environment)
 
     def test_actual_cli_list_is_local_only_and_never_echoes_private_values(self):
         self.config["mcp_servers"].update({"private": {"url": f"https://example.com/mcp?{self.secret}"},
@@ -296,11 +449,11 @@ class ShareTests(unittest.TestCase):
             share.verify_public_plugins([candidate])
         self.assertEqual(fetch.call_args.args[0], "https://registry.npmjs.org/%40example%2Fserver/latest")
         with patch.object(share.urllib.request, "urlopen", side_effect=OSError(self.secret)), patch.object(
-                share, "gh_api") as api, redirect_stderr(io.StringIO()) as errors:
+                share, "ShareGitHub") as github, redirect_stderr(io.StringIO()) as errors:
             code = share.main(["--home", str(self.home), "--codex-home", str(self.codex), "--state-root", str(self.state),
                                "--select", "mcp:package", "--yes"])
         self.assertEqual(code, 1)
-        api.assert_not_called()
+        github.assert_not_called()
         self.assertNotIn(self.secret, errors.getvalue())
 
     def test_unmanaged_marketplace_relative_root_and_repository_prefix(self):
@@ -544,27 +697,31 @@ class ShareTests(unittest.TestCase):
 
     def test_gh_transport_suppresses_debug_and_uses_json_stdin(self):
         completed = subprocess.CompletedProcess([], 0, '{"ok": true}', "")
-        with patch.dict(os.environ, {"GH_DEBUG": self.secret, "GH_HOST": self.secret, "GH_REPO": self.secret}), patch.object(
+        with patch.dict(os.environ, {"GH_TOKEN": "ghp_dummy_caller", "GH_DEBUG": self.secret,
+                "DEBUG": self.secret, "GH_HOST": self.secret, "GH_REPO": self.secret}), patch.object(
                 share.subprocess, "run", return_value=completed) as run:
-            self.assertEqual(share.gh_api(f"{share.API}/contents/registry.toml", payload={"sha": self.remote_sha}), {"ok": True})
+            self.assertEqual(share.ShareGitHub().api(f"{share.API}/contents/registry.toml", payload={"sha": self.remote_sha}), {"ok": True})
         command = run.call_args.args[0]
         self.assertIn("github.com", command)
         self.assertEqual(command[-2:], ["--input", "-"])
         self.assertEqual(json.loads(run.call_args.kwargs["input"]), {"sha": self.remote_sha})
         self.assertNotIn("GH_DEBUG", run.call_args.kwargs["env"])
+        self.assertNotIn("DEBUG", run.call_args.kwargs["env"])
 
     def test_auth_denial_conflict_and_lost_write_response_are_not_retried(self):
         for status, message in ((401, "access denied"), (403, "access denied"), (409, "conflicted"), (422, "conflicted")):
             completed = subprocess.CompletedProcess([], 1, "", f"HTTP {status} {self.secret}")
-            with patch.object(share.subprocess, "run", return_value=completed) as run:
+            with patch.dict(os.environ, {"GH_TOKEN": "ghp_dummy_caller"}), patch.object(
+                    share.subprocess, "run", return_value=completed) as run:
                 with self.assertRaises(share.ShareError) as raised:
-                    share.gh_api(f"{share.API}/contents/registry.toml", payload={"sha": self.remote_sha})
+                    share.ShareGitHub().api(f"{share.API}/contents/registry.toml", payload={"sha": self.remote_sha})
                 self.assertIn(message, str(raised.exception))
                 self.assertNotIn(self.secret, str(raised.exception))
                 self.assertEqual(run.call_count, 1)
-        with patch.object(share.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, self.secret, "")) as run:
+        with patch.dict(os.environ, {"GH_TOKEN": "ghp_dummy_caller"}), patch.object(
+                share.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, self.secret, "")) as run:
             with self.assertRaisesRegex(share.ShareError, "lost or invalid"):
-                share.gh_api(f"{share.API}/contents/registry.toml", payload={"sha": self.remote_sha})
+                share.ShareGitHub().api(f"{share.API}/contents/registry.toml", payload={"sha": self.remote_sha})
             self.assertEqual(run.call_count, 1)
 
 

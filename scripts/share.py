@@ -368,30 +368,52 @@ def merge_registry(text: str, selected: list[Ready]) -> str:
     return text if before.fingerprint == after.fingerprint else rendered
 
 
-def gh_api(endpoint: str, *, payload: dict | None = None) -> dict:
-    command = ["gh", "api", "--hostname", "github.com", "--method", "PUT" if payload is not None else "GET", endpoint]
-    if payload is not None:
-        command += ["--input", "-"]
-    environment = {key: value for key, value in os.environ.items() if key not in {"GH_DEBUG", "GH_HOST", "GH_REPO"}}
-    try:
-        completed = subprocess.run(command, input=json.dumps(payload) if payload is not None else None,
-            capture_output=True, text=True, encoding="utf-8", env=environment, timeout=60)
-    except (OSError, subprocess.TimeoutExpired):
-        raise ShareError("GitHub request failed. Check the remote registry before trying again.") from None
-    if completed.returncode:
-        diagnostics = completed.stderr + completed.stdout
-        if re.search(r"\b(?:409|422)\b", diagnostics):
-            raise ShareError("Registry changed or the write conflicted. Review it and run share again.")
-        if re.search(r"\b(?:401|403)\b", diagnostics):
-            raise ShareError("GitHub access denied. Check gh authentication and repository write permission.")
-        raise ShareError("GitHub request failed. Check the remote registry before trying again.")
-    try:
-        value = json.loads(completed.stdout)
-        if not isinstance(value, dict):
-            raise ValueError
-        return value
-    except ValueError:
-        raise ShareError("GitHub response was lost or invalid. Check the remote registry before trying again.") from None
+class ShareGitHub:
+    def __init__(self):
+        self._environment = os.environ.copy()
+        for key in ("GH_DEBUG", "DEBUG", "GH_HOST", "GH_REPO"):
+            self._environment.pop(key, None)
+        gh_token = self._environment.pop("GH_TOKEN", "")
+        github_token = self._environment.pop("GITHUB_TOKEN", "")
+        token = gh_token or github_token
+        auth_error = "GitHub authentication is unavailable or invalid for sharing."
+        if not token:
+            try:
+                completed = subprocess.run(["gh", "auth", "token", "--hostname", "github.com",
+                    "--user", REPOSITORY.split("/", 1)[0]], capture_output=True, text=True,
+                    encoding="utf-8", env=self._environment, timeout=20)
+            except (OSError, UnicodeError, subprocess.TimeoutExpired):
+                raise ShareError(auth_error) from None
+            if completed.returncode:
+                raise ShareError(auth_error)
+            token = completed.stdout.removesuffix("\n").removesuffix("\r")
+        if not re.fullmatch(r"[A-Za-z0-9_]+", token):
+            raise ShareError(auth_error)
+        self._environment["GH_TOKEN"] = token
+
+    def api(self, endpoint: str, *, payload: dict | None = None) -> dict:
+        command = ["gh", "api", "--hostname", "github.com", "--method", "PUT" if payload is not None else "GET", endpoint]
+        if payload is not None:
+            command += ["--input", "-"]
+        try:
+            completed = subprocess.run(command, input=json.dumps(payload) if payload is not None else None,
+                capture_output=True, text=True, encoding="utf-8", env=self._environment, timeout=60)
+        except (OSError, UnicodeError, subprocess.TimeoutExpired):
+            raise ShareError("GitHub request failed. Check the remote registry before trying again.") from None
+        if completed.returncode:
+            diagnostics = completed.stderr + completed.stdout
+            if re.search(r"\b(?:409|422)\b", diagnostics):
+                raise ShareError("Registry changed or the write conflicted. Review it and run share again.")
+            if re.search(r"\b(?:401|403)\b", diagnostics):
+                raise ShareError("GitHub access denied. Check gh authentication and repository write permission.")
+            raise ShareError("GitHub request failed. Check the remote registry before trying again.")
+        try:
+            value = json.loads(completed.stdout)
+            if not isinstance(value, dict):
+                raise ValueError
+            return value
+        except ValueError:
+            raise ShareError("GitHub response was lost or invalid. Check the remote registry before trying again.") from None
 
 
 class ArtifactRedirect(urllib.request.HTTPRedirectHandler):
@@ -535,11 +557,12 @@ def main(argv=None) -> int:
             raise ShareError("Selection contains an unknown, duplicate, or blocked ID.")
         selected = [resolve_plugin(available[item]) if isinstance(available[item], Resolvable) else available[item] for item in ids]
         verify_public_plugins(selected)
-        permission = gh_api(API)
+        github = ShareGitHub()
+        permission = github.api(API)
         if permission.get("permissions", {}).get("push") is not True:
             raise ShareError("Repository write permission is required.")
         endpoint = f"{API}/contents/registry.toml"
-        remote = gh_api(endpoint + "?ref=" + urllib.parse.quote(args.branch, safe=""))
+        remote = github.api(endpoint + "?ref=" + urllib.parse.quote(args.branch, safe=""))
         sha = remote.get("sha")
         if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha) or remote.get("encoding") != "base64":
             raise ShareError("Invalid remote registry response.")
@@ -566,7 +589,7 @@ def main(argv=None) -> int:
                 print("Cancelled.")
                 return 0
         writing = True
-        result = gh_api(endpoint, payload={"message": "Share selected portable registrations", "branch": args.branch,
+        result = github.api(endpoint, payload={"message": "Share selected portable registrations", "branch": args.branch,
             "sha": sha, "content": base64.b64encode(merged.encode("utf-8")).decode("ascii")})
         url = result.get("commit", {}).get("html_url", "")
         if not re.fullmatch(r"https://github\.com/tttaliesin/personal-harness/commit/[0-9a-f]{40}", url):
