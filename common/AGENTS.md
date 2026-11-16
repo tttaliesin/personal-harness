@@ -26,13 +26,24 @@
 <!-- CODEGRAPH_START -->
 ## CodeGraph
 
-In repositories indexed by CodeGraph (a `.codegraph/` directory exists at the repo root), reach for it BEFORE grep/find or reading files when you need to understand or locate code:
+In repositories already indexed by CodeGraph (a `.codegraph/` directory exists at the repo root), choose it when symbol relationships, call paths, or cross-module structure help answer the current question.
 
-- **MCP tool** (when available): `codegraph_explore` answers most code questions in one call — the relevant symbols' verbatim source plus the call paths between them, including dynamic-dispatch hops grep can't follow. Name a file or symbol in the query to read its current line-numbered source. If it's listed but deferred, load it by name via tool search.
-- **Shell** (always works): `codegraph explore "<symbol names or question>"` prints the same output.
-
-If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is the user's decision.
+- Read known files and lines directly, and use text search for exact text; neither requires a preceding CodeGraph call.
+- Use the available `codegraph_explore` MCP tool or `codegraph explore "<symbol names or question>"` CLI when graph exploration fits the task.
+- If CodeGraph is unavailable, fails, or returns stale or insufficient context, continue with direct reads, searches, and relevant checks instead of treating it as a prerequisite.
+- If there is no `.codegraph/` directory, skip CodeGraph; indexing remains the user's decision.
 <!-- CODEGRAPH_END -->
+
+<!-- task-tool-routing:start -->
+## Task-based routing for Sites and browsers
+
+- Select these skills and tools autonomously from the user's goal; an explicit skill name or invocation is not required. These preferences narrow broader plugin trigger descriptions and defaults. Honor the user's chosen tool, framework, destination, and deployment scope.
+- For work in an existing repository or app, keep its checkout, framework, test commands, and deployment path. Website or dashboard work alone does not call for a new Site, repository, registration, or publication.
+- Choose Sites when creating a hosted site, publishing a site, or maintaining an existing Site is part of the requested outcome and its workflow fits the chosen destination. Treat an existing repository change as local development unless the user requests hosting or deployment work.
+- Use repository browser or E2E tests directly when they fit the verification task. For public information lookup, use available search and page-reading tools directly. Neither requires an interactive browser to be initialized first.
+- When live browser interaction is needed, choose the available tool that fits the target and session. Consider Ego for needed logged-in user context, the in-app browser for local targets, and Chrome for an existing Chrome session. Initialize and read instructions only for tools needed by the task; do not require every browser skill or runtime first.
+- If the selected browser tool is unavailable or cannot perform the needed action, use a suitable available fallback within the authorized task. Native desktop GUI work retains the agent-desktop default above.
+<!-- task-tool-routing:end -->
 
 하나의 글에는 하나의 주장이나 목적만 포함하라
 하나의 문단에는 하나의 주제만 담아라
