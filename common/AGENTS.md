@@ -57,6 +57,17 @@ In repositories already indexed by CodeGraph (a `.codegraph/` directory exists a
   호스팅·게시 도구 선택은 기존 Sites 라우팅을 따른다.
 <!-- taste-skill-routing:end -->
 
+<!-- korean-typography:start -->
+## 한글 타이포그래피
+
+- 한국어 웹·앱 화면을 만들거나 시각적으로 수정·검토할 때 `korean-typography`를 자율적으로 선택한다.
+  대화 언어만으로 결과물의 언어를 결정하지 않는다.
+- 기존 브랜드 서체와 디자인 토큰을 우선하고, 실제 한글 글리프·혼합 조판·줄바꿈·웹폰트 로딩을 확인한다.
+  영문 중심 스킬의 폰트 추첨이나 자간·단어 수 기준을 한글에 그대로 적용하지 않는다.
+- 한글 보정은 해당 프로젝트의 스타일·토큰에서 수행한다.
+  Taste Skill 원본과 repo-governance는 수정하지 않는다.
+<!-- korean-typography:end -->
+
 <!-- task-tool-routing:start -->
 ## Task-based routing for Sites and browsers
 

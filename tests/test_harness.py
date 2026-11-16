@@ -178,6 +178,9 @@ class FakeRepository:
         self.skill_files = {
             ("create-readme", "SKILL.md"): b"# README skill\n",
             ("create-readme", "references/guide.md"): "# 사용 지침\n".encode(),
+            ("korean-typography", "SKILL.md"): "# 한국어 타이포그래피\n".encode(),
+            ("korean-typography", "references/fonts.md"): "# 글꼴 선택\n".encode(),
+            ("korean-typography", "references/layout/wrapping.md"): "# 한글 줄바꿈\r\n".encode(),
             ("agent-desktop", "SKILL.md"): b"# Desktop skill\r\n",
             ("agent-desktop", "scripts/payload.bin"): b"\x00\xff\x01\r\n",
             ("agent-desktop-windows", "SKILL.md"): b"# Windows desktop skill\n",
@@ -222,21 +225,30 @@ class FakeRepository:
         command = self.commands.get(name)
         return str(command) if command is not None and command.is_file() else None
 
+    def skill_target(self, skill, relative):
+        root = self.codex if harness.SKILLS[skill] == "codex" else self.home / ".agents"
+        return root / "skills" / skill / relative
+
     def expected_targets(self):
-        result = {self.codex / "config.toml", self.codex / "AGENTS.md"}
-        for skill, relative in self.skill_files:
-            root = self.home / ".agents" if skill == "create-readme" else self.codex
-            result.add(root / "skills" / skill / relative)
-        return result
+        return {self.codex / "config.toml", self.codex / "AGENTS.md"} | {
+            self.skill_target(skill, relative) for skill, relative in self.skill_files
+        }
 
 
 class PersistentStateTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(mock.patch.object(
+            Path, "home", side_effect=AssertionError("A test attempted to use the real user home"),
+        ))
+
     def prepare(self, directory):
         fixture = FakeRepository(Path(directory))
         state = Path(directory) / "state [cache] 한글"
         files = {"sources/agent-desktop-LICENSE": b"state license"}
         for (skill, relative), data in fixture.skill_files.items():
-            if skill != "create-readme":
+            if skill in harness.REPOSITORY_SKILLS:
+                write_file(state / "skills" / skill / relative, b"stale state:" + data)
+            else:
                 files[f"skills/{skill}/{relative}"] = b"state:" + data
         for path, data in files.items():
             write_file(state / path, data)
@@ -265,15 +277,25 @@ class PersistentStateTests(unittest.TestCase):
             harness.apply_plan(plan)
             self.assertEqual(tree_snapshot(fixture.repo), before)
             self.assertEqual(tree_snapshot(state), state_before)
-            self.assertEqual((fixture.codex / "skills/agent-desktop/SKILL.md").read_bytes(),
-                             files["skills/agent-desktop/SKILL.md"])
-            config = tomllib.loads((fixture.codex / "config.toml").read_text(encoding="utf-8"))
+            for (skill, relative), payload in fixture.skill_files.items():
+                expected = payload if skill in harness.REPOSITORY_SKILLS else files[f"skills/{skill}/{relative}"]
+                with self.subTest(skill=skill, relative=relative):
+                    self.assertEqual(fixture.skill_target(skill, relative).read_bytes(), expected)
+            self.assertTrue((fixture.home / ".agents/skills/korean-typography/SKILL.md").is_file())
+            self.assertFalse((fixture.codex / "skills/korean-typography").exists())
+            rendered = (fixture.codex / "config.toml").read_text(encoding="utf-8")
+            ConfigPreservationTests.assert_preserved(self, rendered)
+            config = tomllib.loads(rendered)
             self.assertEqual(Path(config["mcp_servers"]["codegraph"]["command"]), graph)
-            self.assertEqual(config["mcp_servers"]["node_repl"], tomllib.loads(CURRENT_CONFIG)["mcp_servers"]["node_repl"])
             self.assertEqual(Path(config["desktop"]["state_path"]), state)
             self.assertEqual(Path(config["desktop"]["source_path"]), fixture.repo)
             self.assertEqual(Path(config["desktop"]["home_path"]), fixture.home)
-            self.assertEqual(self.build(fixture, state).changes, [])
+            before_second = tree_snapshot(Path(directory))
+            second = self.build(fixture, state)
+            self.assertEqual(second.missing, [])
+            self.assertEqual(second.changes, [])
+            self.assertIsNone(harness.apply_plan(second))
+            self.assertEqual(tree_snapshot(Path(directory)), before_second)
 
     def test_missing_or_mismatched_state_never_falls_back_to_bundled_sources(self):
         for failure in ("lock", "skill", "digest", "extra", "license"):
@@ -693,6 +715,9 @@ documentation = "https://example.invalid/guide"
 
 class TemporaryHarnessTestCase(unittest.TestCase):
     def setUp(self):
+        self.enterContext(mock.patch.object(
+            Path, "home", side_effect=AssertionError("A test attempted to use the real user home"),
+        ))
         temporary = TemporaryDirectory(prefix="harness-contract-")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
@@ -1065,6 +1090,10 @@ class BuildPlanTests(TemporaryHarnessTestCase):
         self.assertEqual(plan.missing, [])
         self.assertEqual({change.path for change in plan.changes}, self.fixture.expected_targets())
         self.assertEqual(len(plan.changes), len(self.fixture.expected_targets()))
+        typography = self.fixture.home / ".agents/skills/korean-typography"
+        self.assertIn(typography / "SKILL.md", {change.path for change in plan.changes})
+        self.assertFalse(any(change.path.is_relative_to(self.fixture.codex / "skills/korean-typography")
+                             for change in plan.changes))
         for change in plan.changes:
             with self.subTest(path=change.path):
                 expected_before = change.path.read_bytes() if change.path.exists() else None
@@ -1352,8 +1381,8 @@ class ApplyPlanTests(TemporaryHarnessTestCase):
         self.assertTrue(original_config.startswith(b"\xef\xbb\xbf"))
         self.assertIn(b"\r\n", original_config)
         for (skill, relative), payload in fixture.skill_files.items():
-            root = fixture.home / ".agents" if skill == "create-readme" else fixture.codex
-            self.assertEqual((root / "skills" / skill / relative).read_bytes(), payload)
+            self.assertEqual(fixture.skill_target(skill, relative).read_bytes(), payload)
+        ConfigPreservationTests.assert_preserved(self, (fixture.codex / "config.toml").read_text(encoding="utf-8"))
         for path, content in unmanaged.items():
             self.assertEqual(path.read_bytes(), content)
         before = tree_snapshot(self.root)

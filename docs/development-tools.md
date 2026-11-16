@@ -10,6 +10,7 @@ Taste Skill의 `design-taste-frontend`는 웹사이트 제작과 시각 디자�
 | CodeGraph | 호출 관계, 영향 범위, 여러 모듈의 구조 탐색 | 해당 저장소에 `.codegraph/` 인덱스가 있음 |
 | OpenSpec | 기존 변경 이어가기, 지속적인 요구사항이 필요한 기능·구조 변경 | 해당 저장소에서 OpenSpec 도입을 요청했거나 이미 사용 중임 |
 | Taste Skill | 웹사이트 제작, 시각 디자인·리디자인·완성도 개선 | 원본 `taste-skill@taste-skill` 플러그인의 `design-taste-frontend` 사용 가능 |
+| Korean Typography | 한국어 웹·앱 UI의 서체·혼합 조판·줄바꿈·로딩 검토 | `korean-typography` 사용자 스킬 사용 가능 |
 
 알려진 파일 읽기와 정확한 텍스트 검색은 바로 수행한다.
 설명, 작은 수정, 기계적인 편집에는 별도의 명세 변경을 요구하지 않는다.
@@ -55,6 +56,22 @@ Taste Skill 선택만으로 Site 생성이나 게시를 시작하지 않는다.
 
 원본은 [Taste Skill 공식 저장소](https://github.com/Leonxlnx/taste-skill)에서 제공한다.
 설치·검증 결과는 [2026년 11월 16일 적용 기록](history/taste-skill-2026-11-16.md)에 남겼다.
+
+## 한글 타이포그래피
+
+한국어 결과물에는 `korean-typography`를 자동 선택해 적용한다.
+Taste를 사용할 때도 기존 브랜드 서체와 프로젝트 토큰을 우선한다.
+한글을 지원하는 서체를 선택하고 실제 렌더링된 글꼴과 혼합 문자열을 확인한다.
+Latin-only 폰트의 선언이나 다운로드 성공만으로 한글이 같은 서체로 표시됐다고 판단하지 않는다.
+
+후보 서체와 출처는 [서체 참조](../skills/korean-typography/references/fonts.md)에 있다.
+이 후보를 모두 로드하거나 모든 화면을 같은 서체로 통일할 필요는 없다.
+폰트는 필요한 프로젝트에서만 연결하며 OS 전체 서체를 설치하지 않는다.
+수치·줄바꿈·CSS 적용 예시는 [조판 패턴](../skills/korean-typography/references/patterns.md)에 있다.
+
+이 지침은 일반 한국어 대화나 백엔드 작업의 필수 단계가 아니다.
+기존 스택과 repo-governance, Taste 원본은 보존한다.
+두 PC의 배포와 렌더링 검증은 [한글 타이포그래피 적용 기록](history/korean-typography-2026-11-16.md)에 남겼다.
 
 ## CodeGraph와 OpenSpec 설치·갱신
 

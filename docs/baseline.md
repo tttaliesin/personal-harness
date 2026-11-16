@@ -55,6 +55,7 @@
 |---|---|
 | `create-readme` | 사용자 원본을 `~/.agents/skills/create-readme`에 복사 |
 | `openspec-workflow` | 저장소에서 작성한 연동 스킬을 `~/.agents/skills/openspec-workflow`에 복사 |
+| `korean-typography` | 한글 웹·앱 UI 지침과 참조 문서를 `~/.agents/skills/korean-typography`에 복사 |
 | `agent-desktop` | 설치한 최신 안정 릴리스의 공식 스킬과 참조 문서를 Codex 홈의 `skills`에 복사 |
 | `agent-desktop-windows` | 같은 릴리스의 Windows 스킬과 참조 문서를 복사 |
 | agent-desktop CLI | GitHub 최신 안정 릴리스의 Windows x64 배포물과 실행 파일 SHA256 확인 |
@@ -68,6 +69,11 @@ Taste Skill을 사용할 때도 기존 프레임워크, SSR·API·인증·데이
 원본의 Next.js 정적 내보내기 규칙 때문에 기존 프로젝트를 정적 내보내기로 전환하지 않는다.
 
 원본 플러그인 파일과 캐시는 수정하지 않는다.
+
+한국어 UI를 생성하거나 시각적으로 검토할 때는 `korean-typography`를 함께 선택한다.
+기존 브랜드 서체를 우선하고 한글 글리프, 영문·숫자 혼합, 줄바꿈과 실제 폰트 로딩을 확인한다.
+수치와 후보 서체는 작업에 맞게 조정하는 출발점이다.
+대화가 한국어라는 이유만으로 결과물의 언어를 바꾸지 않는다.
 
 초기 스킬 파일 11개의 SHA256은 [Roylabs 원본 기록](../sources/roylabs-2026-11-12.json)에 있다.
 현재 설치 결과와 버전 정보는 [dependencies.lock.json](../sources/dependencies.lock.json)에 기록한다.
