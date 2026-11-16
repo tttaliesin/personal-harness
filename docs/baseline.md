@@ -17,6 +17,7 @@
 - 인덱스가 있는 저장소에서는 호출 관계·구조 탐색에 CodeGraph를 선택하고, 알려진 파일 읽기와 텍스트 검색은 바로 수행한다.
 - 기존 OpenSpec 변경과 지속적인 명세가 필요한 기능·구조 변경에는 `openspec-workflow`를 선택하고, 구현 요청은 설계 이후에도 이어서 수행한다.
 - 스킬 이름을 명시하지 않아도 모델이 작업 목적에 맞는 도구를 선택한다.
+- 웹사이트 제작과 시각 디자인·리디자인·완성도 개선에 적합하면 `design-taste-frontend`를 선택한다.
 - 기존 저장소의 웹 개발 경로와 사용자가 지정한 배포 대상을 유지하고, 요청한 호스팅·게시 또는 기존 Site 유지보수에 Sites가 적합할 때 선택한다.
 - 저장소의 E2E 테스트와 공개 자료 조회를 바로 수행하고, 실제 브라우저 조작이 필요할 때 대상·세션에 맞는 도구를 선택한다.
 - 글·문단·문장의 목적을 하나로 유지하고 문장별 줄바꿈과 Mermaid를 사용한다.
@@ -59,6 +60,14 @@
 | agent-desktop CLI | GitHub 최신 안정 릴리스의 Windows x64 배포물과 실행 파일 SHA256 확인 |
 | CodeGraph CLI | npm `@colbymchenry/codegraph`의 `latest` 배포와 integrity 확인 |
 | OpenSpec CLI | npm `@fission-ai/openspec`의 `latest` 배포와 integrity 확인 |
+| Taste Skill | 원본 `taste-skill@taste-skill` 플러그인의 `design-taste-frontend`를 두 PC의 설치 대상으로 지정 |
+
+Taste Skill을 사용할 때도 기존 프레임워크, SSR·API·인증·데이터 흐름, 컴포넌트·디자인 토큰과 배포 경로를 유지한다.
+기존 저장소의 개발 규칙도 유지한다.
+사용자와 프로젝트의 제약은 스킬의 호환되지 않는 기본값보다 우선한다.
+원본의 Next.js 정적 내보내기 규칙 때문에 기존 프로젝트를 정적 내보내기로 전환하지 않는다.
+
+원본 플러그인 파일과 캐시는 수정하지 않는다.
 
 초기 스킬 파일 11개의 SHA256은 [Roylabs 원본 기록](../sources/roylabs-2026-11-12.json)에 있다.
 현재 설치 결과와 버전 정보는 [dependencies.lock.json](../sources/dependencies.lock.json)에 기록한다.

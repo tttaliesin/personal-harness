@@ -43,6 +43,20 @@ In repositories already indexed by CodeGraph (a `.codegraph/` directory exists a
 - An authorized implementation request can proceed through planning, implementation, and verification in one task. Pause for a material unresolved decision or an actual authorization boundary, not merely because a proposal was written.
 <!-- openspec-routing:end -->
 
+<!-- taste-skill-routing:start -->
+## Taste Skill 선택
+
+- 웹사이트 제작, 시각 디자인, 리디자인, 시각적 완성도 개선에 적합하면 원본 플러그인 `taste-skill@taste-skill`의 `design-taste-frontend`를 자율적으로 선택한다.
+  스킬 이름을 명시적으로 호출할 필요는 없다.
+- 기존 프로젝트의 프레임워크, SSR·API·인증·데이터 흐름, 컴포넌트·디자인 토큰, 배포 경로와 repo-governance를 포함한 저장소 개발 규칙을 유지한다.
+- 사용자와 프로젝트의 제약은 스킬의 호환되지 않는 기본값보다 우선한다.
+  원본의 Next.js 정적 내보내기 규칙 때문에 기존 프로젝트를 정적 내보내기로 전환하지 않는다.
+- 원본 플러그인 파일과 캐시는 수정하지 않는다.
+  스킬 사용을 위한 별도 작업 흐름이나 새로운 필수 승인·검증 단계를 추가하지 않는다.
+- Taste Skill 선택만으로 Site 생성이나 게시를 시작하지 않는다.
+  호스팅·게시 도구 선택은 기존 Sites 라우팅을 따른다.
+<!-- taste-skill-routing:end -->
+
 <!-- task-tool-routing:start -->
 ## Task-based routing for Sites and browsers
 

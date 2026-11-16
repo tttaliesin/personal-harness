@@ -14,6 +14,10 @@ Ego and its bundled skills are owned by each PC's browser installation and are o
 The installer does not install, version-check, link or overwrite them.
 The CodeGraph and OpenSpec CLIs are resolved from their official npm latest stable releases when installation or update is explicitly requested.
 Exact successful installation results are recorded in [dependencies.lock.json](dependencies.lock.json).
+Taste Skill is registered from [Leonxlnx/taste-skill](https://github.com/Leonxlnx/taste-skill) as the original Codex plugin `taste-skill@taste-skill`.
+The official CLI installs its complete source, including skill references, scripts, assets and MIT license.
+The selected stable release, exact commit and whole-plugin source digest are recorded in the dependency lock.
+The harness does not edit upstream plugin files; its task selection and existing-project preservation rules live in `common/AGENTS.md`.
 `skills/openspec-workflow` is a Personal Harness adapter authored in this repository.
 It uses the official OpenSpec CLI's schema and instructions instead of distributing modified upstream workflow skills.
 The initial adapter was checked against `@fission-ai/openspec` 2.0.0 and the [official CLI reference](https://github.com/Fission-AI/OpenSpec/blob/main/docs/cli.md).

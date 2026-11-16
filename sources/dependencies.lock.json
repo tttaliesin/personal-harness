@@ -1,12 +1,32 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "baseline_host": "roylabs-desktop",
   "captured_on": "2026-11-12",
   "update_policy": {
     "trigger": "on_command",
     "channel": "latest_stable"
   },
-  "plugins": [],
+  "plugins": [
+    {
+      "name": "taste-skill",
+      "marketplace": "taste-skill",
+      "manifest": ".codex-plugin/plugin.json",
+      "source": "https://github.com/Leonxlnx/taste-skill.git",
+      "ref": "f6b76575f949707b4e3c37cd86cb44b0b98643e8",
+      "version": "2.5.1",
+      "ref_basis": "Official stable release v2.5.1",
+      "content_sha256": "39704efa1ccf7833cb9eefca3879346c247926c65097a9d4e1216ce7d9f2b5c5",
+      "declaration": {
+        "name": "taste-skill",
+        "marketplace": "taste-skill",
+        "source": "https://github.com/Leonxlnx/taste-skill.git",
+        "channel": "latest-release",
+        "manifest": ".codex-plugin/plugin.json",
+        "enabled": true
+      },
+      "declaration_sha256": "aedec1b74326d627510b79f12953a582ce5e43b86afdbf24785b75785a2df44b"
+    }
+  ],
   "agent_desktop": {
     "version": "1.3.0",
     "source": "https://github.com/vercel-labs/agent-desktop",
@@ -42,5 +62,20 @@
     "source": "https://github.com/Fission-AI/OpenSpec",
     "integrity": "sha512-TsGwEAWogMOhuI8npa3o8Y3popwqBIHLdbn80KGUv6rSExvlmY1kYNALMfSZG+qbliH9gffc+CWC4JPlkoFshw==",
     "tarball": "https://registry.npmjs.org/@fission-ai/openspec/-/openspec-2.0.0.tgz"
-  }
+  },
+  "registry_sha256": "441ac786f3827b454035e00872ea67469202977afc09b7c278b19319fe7cc175",
+  "registrations": {
+    "plugins": [
+      {
+        "name": "taste-skill",
+        "marketplace": "taste-skill",
+        "source": "https://github.com/Leonxlnx/taste-skill.git",
+        "channel": "latest-release",
+        "manifest": ".codex-plugin/plugin.json",
+        "enabled": true
+      }
+    ],
+    "mcp": []
+  },
+  "mcp": []
 }
