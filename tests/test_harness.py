@@ -195,8 +195,6 @@ class FakeRepository:
         for (skill, relative), payload in self.skill_files.items():
             write_file(self.repo / "skills" / skill / relative, payload)
         if ready:
-            write_file(self.codex / "plugins/cache/pstack-claude/pstack/1.0/.codex-plugin/plugin.json", "{}")
-            write_file(self.codex / "plugins/cache/egm/egm/2.0/plugin.json", "{}")
             for command in self.commands.values():
                 write_file(command, "This fixture must never be executed.\n")
             write_file(

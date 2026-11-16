@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "baseline_host": "roylabs-desktop",
+  "captured_on": "2026-11-12",
+  "update_policy": {
+    "trigger": "on_command",
+    "channel": "latest_stable"
+  },
+  "plugins": [
+    {
+      "name": "pstack",
+      "marketplace": "pstack-claude",
+      "version": "0.9.138",
+      "source": "https://github.com/michael-denyer/pstack-claude.git",
+      "ref": "2044f1810afc98c3aa80100587dd990c83cf6ea8",
+      "ref_basis": "Official stable release v0.9.138",
+      "manifest": "plugins/pstack/.codex-plugin/plugin.json",
+      "content_sha256": "fd99b6bf58455574a60ad3e3f387bf9edd706d6b25f6b92fabaec604acb6c09b"
+    },
+    {
+      "name": "egm",
+      "marketplace": "egm",
+      "version": "0.1.1",
+      "source": "https://github.com/google/elephant-goldfish-model.git",
+      "ref": "dea7761de06ce5b51c177ebb9bba0469f24af5a4",
+      "ref_basis": "Official stable release v0.1.1",
+      "manifest": ".codex-plugin/plugin.json",
+      "content_sha256": "4bc2420828c49d60325e5375bf25e945e3f0fc31ffe7d26dd1699fe2e9056a3b"
+    }
+  ],
+  "agent_desktop": {
+    "version": "1.3.0",
+    "source": "https://github.com/vercel-labs/agent-desktop",
+    "source_commit": "a7765959eb44d27d0f9b0799066e377b6d1d2cd1",
+    "platform": "windows-x64",
+    "url": "https://github.com/vercel-labs/agent-desktop/releases/download/v1.3.0/agent-desktop-v1.3.0-x86_64-pc-windows-msvc.tar.gz",
+    "sha256": "511d5625a4c5d9e592d161369211f2d53cb36573a5022722bb9831d784c26c68",
+    "executable_sha256": "f7f161f1ddd0b072235d0531f8a3176a99288c7632c1be3aabef21f864457d94",
+    "files_sha256": {
+      "skills/agent-desktop-windows/SKILL.md": "babc8d3f0583afc3f41b3b84cc775d3be24010043b57966755fcf9bda8880073",
+      "skills/agent-desktop-windows/references/chromium-and-electron.md": "db7a62782aa5717f0c70269faf26c1193a4fdfa2eee6c46f915bb3b86f1e3ea4",
+      "skills/agent-desktop-windows/references/permissions-and-elevation.md": "1ae422d682a4ed48025b5f17c2ce8a37e830b8d86b0a18f3f4d725fc74ada733",
+      "skills/agent-desktop-windows/references/shell-and-overlay.md": "5ed688610f3ed9e9c20a878b20507a11f59bd695df56be0b17534ff9b539c778",
+      "skills/agent-desktop-windows/references/troubleshooting.md": "8f6115c920495f84f7ef866750d50e789c3a9efac84ed7b4c337f1e116ecc923",
+      "skills/agent-desktop/SKILL.md": "abd913be10552c028e461e0a45c20e3734a7a1e5251fc2f9ef6fd63fdd606a6e",
+      "skills/agent-desktop/references/commands-interaction.md": "5ef8a87be8aed9b0102adb3c332dcd50586c7fb28dc0f1490207ab9321673bf5",
+      "skills/agent-desktop/references/commands-observation.md": "9c31aec6f51dacfc14ff68dc04533a8dcf3ed5edb3f935d90e453f471894b936",
+      "skills/agent-desktop/references/commands-system.md": "673c931a285b360c1deb669983e87ca8571ee8520f48c81f00d49f711e0e95ac",
+      "skills/agent-desktop/references/workflows.md": "9c5a93361f992d73eff50e9ec99bb895424ababd57d3f6742ff71e73734c1af1",
+      "sources/agent-desktop-LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+  },
+  "codegraph": {
+    "package": "@colbymchenry/codegraph",
+    "version": "1.6.2",
+    "source": "https://github.com/colbymchenry/codegraph",
+    "integrity": "sha512-hODH/mGnCf3IUMs6rzktv/zbecJIKJfdZAYHZ9mqecb0G7ZkHaA8CZafDVnswANFEL1YFcG+lfAwc5SIXzUH6Q==",
+    "tarball": "https://registry.npmjs.org/@colbymchenry/codegraph/-/codegraph-1.6.2.tgz"
+  }
+}

@@ -12,6 +12,7 @@ The upstream [Apache 2.0 license](agent-desktop-LICENSE) is included.
 
 Ego and its bundled skills are owned by each PC's browser installation and are outside this repository's managed dependencies.
 The installer does not install, version-check, link or overwrite them.
-pstack, EGM and the CodeGraph CLI are resolved from official latest stable releases when installation or update is explicitly requested.
+The CodeGraph CLI is resolved from the official latest stable release when installation or update is explicitly requested.
 Exact successful installation results are recorded in [dependencies.lock.json](dependencies.lock.json).
+pstack and EGM were removed from managed dependencies on 2026-11-16.
 The original pstack import used the upstream tag for Roylabs' installed version because the exact original checkout commit was unavailable.

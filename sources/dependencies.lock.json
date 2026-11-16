@@ -6,28 +6,7 @@
     "trigger": "on_command",
     "channel": "latest_stable"
   },
-  "plugins": [
-    {
-      "name": "pstack",
-      "marketplace": "pstack-claude",
-      "version": "0.9.138",
-      "source": "https://github.com/michael-denyer/pstack-claude.git",
-      "ref": "2044f1810afc98c3aa80100587dd990c83cf6ea8",
-      "ref_basis": "Official stable release v0.9.138",
-      "manifest": "plugins/pstack/.codex-plugin/plugin.json",
-      "content_sha256": "fd99b6bf58455574a60ad3e3f387bf9edd706d6b25f6b92fabaec604acb6c09b"
-    },
-    {
-      "name": "egm",
-      "marketplace": "egm",
-      "version": "0.1.1",
-      "source": "https://github.com/google/elephant-goldfish-model.git",
-      "ref": "dea7761de06ce5b51c177ebb9bba0469f24af5a4",
-      "ref_basis": "Official stable release v0.1.1",
-      "manifest": ".codex-plugin/plugin.json",
-      "content_sha256": "4bc2420828c49d60325e5375bf25e945e3f0fc31ffe7d26dd1699fe2e9056a3b"
-    }
-  ],
+  "plugins": [],
   "agent_desktop": {
     "version": "1.3.0",
     "source": "https://github.com/vercel-labs/agent-desktop",

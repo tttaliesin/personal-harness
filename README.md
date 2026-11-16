@@ -46,10 +46,11 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 토큰은 파일이나 저장소에 기록하지 않는다.
 
 목록만 보거나 업로드 없이 내용을 확인할 수도 있다.
+`<항목 ID>`는 `share --list`에 표시된 공유 대상의 ID로 바꾼다.
 
 ```powershell
 npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git share --list
-npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git share --select 'plugin:pstack@pstack-claude' --dry-run
+npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git share --select '<항목 ID>' --dry-run
 ```
 
 공유하는 내용은 설치 출처와 공통 등록 정보다.

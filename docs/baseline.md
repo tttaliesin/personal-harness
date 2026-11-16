@@ -7,14 +7,13 @@
 ## 공통 사용자 지침
 
 [common/AGENTS.md](../common/AGENTS.md)는 Roylabs의 전역 지침을 보관한다.
-내용은 유지하고 사용자 절대경로 한 곳만 `${CODEX_HOME}`으로 바꿨다.
+사용자 절대경로 한 곳은 `${CODEX_HOME}`으로 바꿨다.
+2026년 11월 16일 pstack과 EGM을 제거하면서 두 플러그인의 자동 호출 지침도 제거했다.
 
 - 실질적인 완료 시간을 줄이는 병렬 작업과 검증 가능한 근거를 사용한다.
 - 관찰과 가설을 구분하고 인과·성능 주장에 재현 시험과 반증 조건을 둔다.
 - 공식 agent-desktop CLI를 기본 데스크톱 조작 도구로 사용한다.
 - 인덱스가 있는 저장소에서 CodeGraph를 먼저 사용한다.
-- pstack이 전체 작업을 조율하고 필요한 문서 단계는 EGM이 담당한다.
-- 같은 입력과 기준으로 완료한 검토를 재사용한다.
 - 글·문단·문장의 목적을 하나로 유지하고 문장별 줄바꿈과 Mermaid를 사용한다.
 
 적용 시 확인된 CLI의 절대경로가 있으면 생성되는 지침 끝에 해당 PC의 실행 위치를 덧붙인다.
@@ -34,7 +33,7 @@
 | 자동 보관 | 1일 |
 | 로캘 | `ko-KR` |
 | MCP | 공통 CodeGraph 실행 인자와 각 PC의 실행 파일 위치 |
-| 플러그인 | 공통 OpenAI 11개와 pstack, EGM |
+| 플러그인 | 공통 OpenAI 11개 |
 | 스킬 선택 | `computer-use` 비활성, `agent-desktop` 계열 활성 |
 
 이 sandbox 값은 Roylabs 사용자가 설정한 기준이다.
@@ -50,8 +49,6 @@
 | `agent-desktop-windows` | 같은 릴리스의 Windows 스킬과 참조 문서를 복사 |
 | agent-desktop CLI | GitHub 최신 안정 릴리스의 Windows x64 배포물과 실행 파일 SHA256 확인 |
 | CodeGraph CLI | npm `@colbymchenry/codegraph`의 `latest` 배포와 integrity 확인 |
-| pstack | 공식 최신 안정 릴리스의 정확한 commit으로 Codex 플러그인 설치 |
-| EGM | 공식 최신 안정 릴리스의 정확한 commit으로 Codex 플러그인 설치 |
 
 초기 스킬 파일 11개의 SHA256은 [Roylabs 원본 기록](../sources/roylabs-2026-11-12.json)에 있다.
 현재 설치 결과와 버전 정보는 [dependencies.lock.json](../sources/dependencies.lock.json)에 기록한다.

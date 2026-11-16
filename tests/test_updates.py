@@ -17,6 +17,10 @@ from registry import load_registry, declaration_hash, lock_issues
 import tomlkit
 
 
+# Historical offline inputs, independent of active harness registrations.
+FIXTURES = Path(__file__).resolve().parent / "fixtures/plugin_updates"
+
+
 def archive(executable=b"official exe"):
     output = io.BytesIO()
     with tarfile.open(fileobj=output, mode="w:gz") as package:
@@ -28,7 +32,8 @@ def archive(executable=b"official exe"):
 
 class UpdateTests(unittest.TestCase):
     def setUp(self):
-        self.lock = json.loads((installer.REPO / "sources/dependencies.lock.json").read_bytes())
+        self.lock = json.loads((FIXTURES / "dependencies.lock.json").read_bytes())
+        self.registry = load_registry(FIXTURES / "registry.toml")
         self.lock["update_policy"] = {"trigger": "on_command", "channel": "latest_stable"}
         self.commit = "a" * 40
         self.tag = "b" * 40
@@ -81,7 +86,7 @@ class UpdateTests(unittest.TestCase):
 
     def resolve(self):
         with patch.object(installer, "fetch", side_effect=self.fetch):
-            return installer.resolve(self.lock)
+            return installer.resolve(self.lock, registry=self.registry)
 
     def desired(self, directory, *, plugins=None, mcp=None):
         path = Path(directory) / "registry.toml"
@@ -127,7 +132,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_locked_changed_declaration_rejects_before_resolution_or_installation(self):
         resolved = self.resolve()
-        original = load_registry(installer.REPO / "registry.toml")
+        original = self.registry
         for changes in ({"source": "https://github.com/changed/repo.git"}, {"enabled": False},
                         {"manifest": "changed/plugin.json"}, {"channel": "git-ref", "ref": "main"}):
             with self.subTest(changes=changes), TemporaryDirectory() as directory:
@@ -321,7 +326,7 @@ class UpdateTests(unittest.TestCase):
             return b'{"name":"pstack","version":"0.0.0"}' if url.endswith("plugin.json") else self.fetch(url)
         with patch.object(installer, "fetch", side_effect=fetch):
             with self.assertRaisesRegex(installer.HarnessError, "disagreement"):
-                installer.resolve(self.lock)
+                installer.resolve(self.lock, registry=self.registry)
 
     def test_asset_digest_and_symlink_source_are_rejected(self):
         for failure in ("digest", "symlink"):
@@ -339,7 +344,7 @@ class UpdateTests(unittest.TestCase):
                     return data
                 with patch.object(installer, "fetch", side_effect=fetch):
                     with self.assertRaises(installer.HarnessError):
-                        installer.resolve(self.lock)
+                        installer.resolve(self.lock, registry=self.registry)
 
     def test_two_agent_upgrades_use_separate_version_and_hash_caches(self):
         with TemporaryDirectory() as directory, patch.object(installer, "fetch") as network:
@@ -358,7 +363,7 @@ class UpdateTests(unittest.TestCase):
         repo = Path(directory)
         (repo / "sources").mkdir(parents=True)
         (repo / "sources/dependencies.lock.json").write_text(json.dumps(self.lock))
-        (repo / "registry.toml").write_bytes((installer.REPO / "registry.toml").read_bytes())
+        (repo / "registry.toml").write_bytes((FIXTURES / "registry.toml").read_bytes())
         return repo
 
     def run_main(self, repo, *args):
@@ -381,7 +386,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_locked_resolution_performs_no_http(self):
         with patch.object(installer, "fetch", side_effect=AssertionError("locked HTTP")):
-            result = installer.resolve(self.lock, locked=True)
+            result = installer.resolve(self.lock, locked=True, registry=self.registry)
         for old, adopted in zip(self.lock["plugins"], result.lock["plugins"]):
             self.assertEqual(old, {key: value for key, value in adopted.items()
                                    if key not in ("declaration", "declaration_sha256")})
