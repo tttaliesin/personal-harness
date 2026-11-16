@@ -26,3 +26,9 @@ Its references link to original font publishers and W3C layout/CSS guidance.
 It distributes no font binaries and does not modify Taste Skill or other upstream packages.
 pstack and EGM were removed from managed dependencies on 2026-11-16.
 The original pstack import used the upstream tag for Roylabs' installed version because the exact original checkout commit was unavailable.
+
+## Windows Taste 실행 호환
+
+`skills/taste-windows-runtime`은 이 저장소에서 작성한 실행 어댑터다.
+원본 Taste 플러그인을 포함하거나 패치하지 않는다.
+선택한 브라우저와 Node 실행 옵션은 검사 자식 프로세스에만 전달한다.

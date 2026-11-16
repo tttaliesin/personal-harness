@@ -181,6 +181,9 @@ class FakeRepository:
             ("korean-typography", "SKILL.md"): "# 한국어 타이포그래피\n".encode(),
             ("korean-typography", "references/fonts.md"): "# 글꼴 선택\n".encode(),
             ("korean-typography", "references/layout/wrapping.md"): "# 한글 줄바꿈\r\n".encode(),
+            ("taste-windows-runtime", "SKILL.md"): b"# Taste Windows runtime\n",
+            ("taste-windows-runtime", "scripts/run.mjs"): b"import './preload.mjs';\r\n",
+            ("taste-windows-runtime", "scripts/preload.mjs"): b"export const runtime = 'windows';\n",
             ("agent-desktop", "SKILL.md"): b"# Desktop skill\r\n",
             ("agent-desktop", "scripts/payload.bin"): b"\x00\xff\x01\r\n",
             ("agent-desktop-windows", "SKILL.md"): b"# Windows desktop skill\n",
@@ -281,8 +284,10 @@ class PersistentStateTests(unittest.TestCase):
                 expected = payload if skill in harness.REPOSITORY_SKILLS else files[f"skills/{skill}/{relative}"]
                 with self.subTest(skill=skill, relative=relative):
                     self.assertEqual(fixture.skill_target(skill, relative).read_bytes(), expected)
-            self.assertTrue((fixture.home / ".agents/skills/korean-typography/SKILL.md").is_file())
-            self.assertFalse((fixture.codex / "skills/korean-typography").exists())
+            for skill in ("korean-typography", "taste-windows-runtime"):
+                with self.subTest(agents_skill=skill):
+                    self.assertTrue((fixture.home / ".agents/skills" / skill / "SKILL.md").is_file())
+                    self.assertFalse((fixture.codex / "skills" / skill).exists())
             rendered = (fixture.codex / "config.toml").read_text(encoding="utf-8")
             ConfigPreservationTests.assert_preserved(self, rendered)
             config = tomllib.loads(rendered)
@@ -1090,10 +1095,12 @@ class BuildPlanTests(TemporaryHarnessTestCase):
         self.assertEqual(plan.missing, [])
         self.assertEqual({change.path for change in plan.changes}, self.fixture.expected_targets())
         self.assertEqual(len(plan.changes), len(self.fixture.expected_targets()))
-        typography = self.fixture.home / ".agents/skills/korean-typography"
-        self.assertIn(typography / "SKILL.md", {change.path for change in plan.changes})
-        self.assertFalse(any(change.path.is_relative_to(self.fixture.codex / "skills/korean-typography")
-                             for change in plan.changes))
+        for skill in ("korean-typography", "taste-windows-runtime"):
+            with self.subTest(agents_skill=skill):
+                target = self.fixture.home / ".agents/skills" / skill
+                self.assertIn(target / "SKILL.md", {change.path for change in plan.changes})
+                self.assertFalse(any(change.path.is_relative_to(self.fixture.codex / "skills" / skill)
+                                     for change in plan.changes))
         for change in plan.changes:
             with self.subTest(path=change.path):
                 expected_before = change.path.read_bytes() if change.path.exists() else None

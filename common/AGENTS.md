@@ -53,6 +53,9 @@ In repositories already indexed by CodeGraph (a `.codegraph/` directory exists a
   원본의 Next.js 정적 내보내기 규칙 때문에 기존 프로젝트를 정적 내보내기로 전환하지 않는다.
 - 원본 플러그인 파일과 캐시는 수정하지 않는다.
   스킬 사용을 위한 별도 작업 흐름이나 새로운 필수 승인·검증 단계를 추가하지 않는다.
+- Windows에서 Taste의 브라우저 검사 명령을 실행할 때 `taste-windows-runtime`을 함께 선택한다.
+  원본 스크립트와 인수를 해당 스킬의 `scripts/run.mjs`에 전달해 실행하며 원본 검사·판정은 유지한다.
+  브라우저 경로와 Edge 실행 보정은 그 검사 프로세스에만 적용한다.
 - Taste Skill 선택만으로 Site 생성이나 게시를 시작하지 않는다.
   호스팅·게시 도구 선택은 기존 Sites 라우팅을 따른다.
 <!-- taste-skill-routing:end -->

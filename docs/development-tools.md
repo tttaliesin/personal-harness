@@ -11,6 +11,7 @@ Taste Skill의 `design-taste-frontend`는 웹사이트 제작과 시각 디자�
 | OpenSpec | 기존 변경 이어가기, 지속적인 요구사항이 필요한 기능·구조 변경 | 해당 저장소에서 OpenSpec 도입을 요청했거나 이미 사용 중임 |
 | Taste Skill | 웹사이트 제작, 시각 디자인·리디자인·완성도 개선 | 원본 `taste-skill@taste-skill` 플러그인의 `design-taste-frontend` 사용 가능 |
 | Korean Typography | 한국어 웹·앱 UI의 서체·혼합 조판·줄바꿈·로딩 검토 | `korean-typography` 사용자 스킬 사용 가능 |
+| Taste Windows Runtime | 원본 Taste 브라우저 검사의 Windows 실행 호환 | `taste-windows-runtime` 사용자 스킬 사용 가능 |
 
 알려진 파일 읽기와 정확한 텍스트 검색은 바로 수행한다.
 설명, 작은 수정, 기계적인 편집에는 별도의 명세 변경을 요구하지 않는다.
@@ -72,6 +73,15 @@ Latin-only 폰트의 선언이나 다운로드 성공만으로 한글이 같은 
 이 지침은 일반 한국어 대화나 백엔드 작업의 필수 단계가 아니다.
 기존 스택과 repo-governance, Taste 원본은 보존한다.
 두 PC의 배포와 렌더링 검증은 [한글 타이포그래피 적용 기록](history/korean-typography-2026-11-16.md)에 남겼다.
+
+## Windows의 Taste 브라우저 검사
+
+Windows에서는 [taste-windows-runtime](../skills/taste-windows-runtime/SKILL.md)을 함께 선택한다.
+기존 명령의 원본 스크립트와 인수를 이 스킬의 `scripts/run.mjs`에 전달한다.
+실행기는 검사 프로세스에만 설치된 브라우저 경로와 선택된 Edge의 headless 실행 플래그를 적용한다.
+원본 캐시와 페이지를 고치지 않으며 검사 결과와 종료 코드를 그대로 반환한다.
+브라우저 실행 오류의 해소와 페이지의 게이트 통과는 별도로 확인한다.
+실제 두 PC의 적용과 원인 재현은 [Windows Taste 검증 기록](history/taste-windows-runtime-2026-11-16.md)에 남겼다.
 
 ## CodeGraph와 OpenSpec 설치·갱신
 

@@ -56,6 +56,7 @@
 | `create-readme` | 사용자 원본을 `~/.agents/skills/create-readme`에 복사 |
 | `openspec-workflow` | 저장소에서 작성한 연동 스킬을 `~/.agents/skills/openspec-workflow`에 복사 |
 | `korean-typography` | 한글 웹·앱 UI 지침과 참조 문서를 `~/.agents/skills/korean-typography`에 복사 |
+| `taste-windows-runtime` | 원본 Taste 브라우저 검사에만 적용하는 Windows 실행기를 `~/.agents/skills/taste-windows-runtime`에 복사 |
 | `agent-desktop` | 설치한 최신 안정 릴리스의 공식 스킬과 참조 문서를 Codex 홈의 `skills`에 복사 |
 | `agent-desktop-windows` | 같은 릴리스의 Windows 스킬과 참조 문서를 복사 |
 | agent-desktop CLI | GitHub 최신 안정 릴리스의 Windows x64 배포물과 실행 파일 SHA256 확인 |
