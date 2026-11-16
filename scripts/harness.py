@@ -29,6 +29,7 @@ REPO = Path(__file__).resolve().parents[1]
 PROTECTED = {"notify", "model_catalog_json", "openai_base_url", "experimental_realtime_ws_base_url",
              "projects", "hooks", "model_providers", "computer_use"}
 SKILLS = {"create-readme": "agents", "agent-desktop": "codex", "agent-desktop-windows": "codex"}
+REPOSITORY_SKILLS = {"create-readme", "openspec-workflow"}
 
 
 class HarnessError(Exception):
@@ -421,6 +422,9 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     agent_desktop = tool_path("agent_desktop", paths)
     if not agent_desktop:
         plan.missing.append("agent-desktop CLI: run scripts/install-dependencies.ps1 or set [paths].agent_desktop locally")
+    openspec = tool_path("openspec", paths) if "openspec" in lock else None
+    if "openspec" in lock and not openspec:
+        plan.missing.append("openspec CLI: run scripts/install-dependencies.ps1 or set [paths].openspec locally")
     lock_path = layout.lock
     official_ready = not layout.persistent
     if lock_path.exists():
@@ -451,7 +455,7 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
         plan.add(config_path, rendered.encode("utf-8"), codex_home)
     instructions = (repo / "common" / "AGENTS.md").read_text(encoding="utf-8")
     instructions = instructions.replace("${CODEX_HOME}", codex_home.as_posix())
-    executables = [("agent-desktop", agent_desktop), ("codegraph", codegraph)]
+    executables = [("agent-desktop", agent_desktop), ("codegraph", codegraph), ("openspec", openspec)]
     local_commands = [(name, path) for name, path in executables if path and ("/" in path or "\\" in path)]
     if local_commands:
         instructions += "\n## Local tool executables\n\nUse these executable locations for this PC when running the official CLI commands.\n"
@@ -461,11 +465,14 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     if (codex_home / "AGENTS.override.md").exists():
         plan.missing.append("AGENTS.override.md shadows the shared AGENTS.md; reconcile the local override before applying")
     applied_files = previously_applied_files(codex_home)
-    for skill, scope in SKILLS.items():
-        if skill != "create-readme" and not official_ready:
+    skills = dict(SKILLS)
+    if "openspec" in lock:
+        skills["openspec-workflow"] = "agents"
+    for skill, scope in skills.items():
+        if skill not in REPOSITORY_SKILLS and not official_ready:
             continue
         root = codex_home if scope == "codex" else user_home / ".agents"
-        source = (repo if skill == "create-readme" else layout.sources) / "skills" / skill
+        source = (repo if skill in REPOSITORY_SKILLS else layout.sources) / "skills" / skill
         if not (source / "SKILL.md").is_file():
             raise HarnessError(f"Missing source skill: {skill}")
         destination_root = root / "skills" / skill

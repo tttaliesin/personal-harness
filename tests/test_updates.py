@@ -38,6 +38,10 @@ class UpdateTests(unittest.TestCase):
         self.commit = "a" * 40
         self.tag = "b" * 40
         self.urls = []
+        self.openspec = {"package": "@fission-ai/openspec", "version": "2.0.0",
+                         "source": "https://github.com/Fission-AI/OpenSpec",
+                         "integrity": "sha512-" + "A" * 86 + "==",
+                         "tarball": "https://fixtures.test/openspec.tgz"}
         self.package = archive()
         self.skill_files = {
             "LICENSE": b"official license\r\n",
@@ -66,6 +70,9 @@ class UpdateTests(unittest.TestCase):
         if url.endswith("codegraph/latest"):
             return json.dumps({"name": "@colbymchenry/codegraph", "version": "5.0.0",
                                "dist": {"integrity": "sha512-fixture", "tarball": "https://fixtures.test/graph.tgz"}}).encode()
+        if url == "https://registry.npmjs.org/@fission-ai%2fopenspec/latest":
+            return json.dumps({"name": self.openspec["package"], "version": self.openspec["version"],
+                               "dist": {key: self.openspec[key] for key in ("integrity", "tarball")}}).encode()
         if url.endswith("agent.tar.gz"):
             return self.package
         if "/git/trees/" in url:
@@ -287,7 +294,7 @@ class UpdateTests(unittest.TestCase):
                     stack.enter_context(patch.object(installer, "git_output", side_effect=git))
                     stack.enter_context(patch.object(installer, "fetch", side_effect=AssertionError("network")))
                     operations = [stack.enter_context(patch.object(installer, name)) for name in (
-                        "install_agent", "install_codegraph", "install_plugins", "sync_sources", "save_paths")]
+                        "install_agent", "install_codegraph", "install_openspec", "install_plugins", "sync_sources", "save_paths")]
                     operations.append(stack.enter_context(patch.object(installer.mcp_packages, "install")))
                     with self.assertRaisesRegex(installer.HarnessError, "Unsupported plugin source entry"):
                         installer.resolve_plugins(desired.plugins)
@@ -308,10 +315,125 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(result.lock["plugins"][1]["ref"], self.commit)
         self.assertTrue(any(f"/git/tags/{self.tag}" in url for url in self.urls))
         self.assertEqual(result.lock["codegraph"]["version"], "5.0.0")
+        self.assertEqual(result.lock["openspec"], self.openspec)
         self.assertEqual(result.lock["agent_desktop"]["sha256"], installer.digest(self.package))
         self.assertEqual(result.files["sources/agent-desktop-LICENSE"], self.skill_files["LICENSE"])
         for path, data in result.files.items():
             self.assertEqual(result.lock["agent_desktop"]["files_sha256"][path], installer.digest(data))
+        self.assertEqual(set(result.files), {"sources/agent-desktop-LICENSE", *(
+            path for path in self.skill_files if path != "LICENSE")})
+
+    def test_openspec_legacy_locks_replay_without_metadata_and_default_update_adds_record(self):
+        for schema in (1, 2):
+            with self.subTest(schema=schema):
+                legacy = copy.deepcopy(self.lock)
+                if schema == 2:
+                    with patch.object(installer, "fetch", side_effect=AssertionError("locked metadata")):
+                        legacy = installer.resolve(legacy, locked=True, registry=self.registry).lock
+                with patch.object(installer, "fetch", side_effect=AssertionError("locked metadata")):
+                    replay = installer.resolve(legacy, locked=True, registry=self.registry)
+                self.assertNotIn("openspec", replay.lock)
+                with patch.object(installer, "fetch", side_effect=self.fetch):
+                    updated = installer.resolve(replay.lock, registry=self.registry)
+                self.assertEqual(updated.lock["openspec"], self.openspec)
+                with patch.object(installer, "fetch", side_effect=AssertionError("locked metadata")):
+                    self.assertEqual(installer.resolve(updated.lock, locked=True, registry=self.registry).lock,
+                                     updated.lock)
+
+    def test_openspec_latest_metadata_is_validated_and_failure_preserves_old_lock(self):
+        for changes in ({"name": "other"}, {"version": "2.0.0-beta.1"}, {"version": None},
+                        {"dist": None}, {"dist": {"integrity": "sha512-bad", "tarball": self.openspec["tarball"]}},
+                        {"dist": {"integrity": self.openspec["integrity"], "tarball": "http://example.test/a.tgz"}}):
+            with self.subTest(changes=changes), TemporaryDirectory() as directory:
+                repo = self.make_repo(directory)
+                old = (repo / "sources/dependencies.lock.json").read_bytes()
+                metadata = {"name": self.openspec["package"], "version": "2.0.0",
+                            "dist": {key: self.openspec[key] for key in ("integrity", "tarball")}}
+                metadata.update(changes)
+
+                def fetch(url):
+                    if url == "https://registry.npmjs.org/@fission-ai%2fopenspec/latest":
+                        return json.dumps(metadata).encode()
+                    return self.fetch(url)
+
+                with patch.object(installer, "fetch", side_effect=fetch), \
+                        patch.object(installer, "install_agent") as agent, \
+                        patch.object(installer, "install_openspec") as openspec:
+                    self.assertEqual(self.run_main(repo, "--install"), 2)
+                agent.assert_not_called()
+                openspec.assert_not_called()
+                self.assertEqual((repo / "sources/dependencies.lock.json").read_bytes(), old)
+
+    def test_openspec_malformed_present_locked_record_fails_before_any_install_or_write(self):
+        invalid = [None, [], {}, *({**self.openspec, key: value} for key, value in (
+            ("package", "other"), ("version", "latest"), ("version", 2), ("integrity", "sha512-bad"),
+            ("source", "https://example.test/other"), ("tarball", "file:///a.tgz"),
+            ("tarball", "https://user:secret@example.test/a.tgz"), ("tarball", "https://[invalid")))]
+        for record in invalid:
+            with self.subTest(record=record), TemporaryDirectory() as directory:
+                repo = self.make_repo(directory)
+                lock = copy.deepcopy(self.lock)
+                installer.stamp_registry(lock, self.registry)
+                lock["openspec"] = record
+                path = repo / "sources/dependencies.lock.json"
+                path.write_text(json.dumps(lock), encoding="utf-8")
+                before = {p: p.read_bytes() for p in repo.rglob("*") if p.is_file()}
+                with ExitStack() as stack:
+                    stack.enter_context(patch.object(installer, "fetch", side_effect=AssertionError("network")))
+                    operations = [stack.enter_context(patch.object(installer, name)) for name in (
+                        "install_agent", "install_codegraph", "install_openspec", "install_plugins",
+                        "sync_sources", "save_paths", "atomic_write")]
+                    self.assertEqual(self.run_main(repo, "--install", "--locked"), 2)
+                for operation in operations:
+                    operation.assert_not_called()
+                self.assertEqual({p: p.read_bytes() for p in repo.rglob("*") if p.is_file()}, before)
+
+    def test_openspec_missing_locked_record_skips_install_and_keeps_existing_path(self):
+        with TemporaryDirectory() as directory:
+            repo = self.make_repo(directory)
+            config = repo / ".local/homelab-desktop.toml"
+            config.parent.mkdir()
+            config.write_text('[paths]\nopenspec = "D:/private/openspec.cmd"\n', encoding="utf-8")
+            with patch.object(installer, "fetch", side_effect=AssertionError("locked network")), \
+                    patch.object(installer.platform, "machine", return_value="AMD64"), \
+                    patch.object(installer.shutil, "which", return_value="fixture"), \
+                    patch.object(installer, "install_agent", return_value=repo / "agent.exe"), \
+                    patch.object(installer, "install_codegraph", return_value=repo / "graph.cmd"), \
+                    patch.object(installer, "install_openspec") as openspec, \
+                    patch.object(installer, "install_plugins"), patch.object(installer, "sync_sources"):
+                self.assertEqual(self.run_main(repo, "--install", "--locked"), 0)
+            openspec.assert_not_called()
+            self.assertNotIn("openspec", json.loads((repo / "sources/dependencies.lock.json").read_bytes()))
+            self.assertEqual(tomlkit.parse(config.read_text(encoding="utf-8"))["paths"]["openspec"],
+                             "D:/private/openspec.cmd")
+
+    def test_openspec_node_engine_failure_precedes_all_install_writes(self):
+        with TemporaryDirectory() as directory:
+            repo = self.make_repo(directory)
+            result = self.resolve()
+            before = {p: p.read_bytes() for p in repo.rglob("*") if p.is_file()}
+            output = io.StringIO()
+            with ExitStack() as stack:
+                stack.enter_context(patch.object(installer, "REPO", repo))
+                stack.enter_context(patch.object(installer, "resolve", return_value=result))
+                stack.enter_context(patch.object(installer, "find_codex", return_value="fixture-codex"))
+                stack.enter_context(patch.object(installer.platform, "machine", return_value="AMD64"))
+                stack.enter_context(patch.object(installer.shutil, "which", return_value="fixture-node"))
+                execute = stack.enter_context(patch.object(installer.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], 0, "v22.11.9\n")))
+                operations = [stack.enter_context(patch.object(installer, name)) for name in (
+                    "install_agent", "install_codegraph", "install_openspec", "install_plugins",
+                    "sync_sources", "save_paths", "atomic_write")]
+                stack.enter_context(redirect_stdout(io.StringIO()))
+                stack.enter_context(redirect_stderr(output))
+                self.assertEqual(installer.main(["--install", "--host", "homelab-desktop", "--codex-home",
+                                                 str(repo / "fake home")]), 2)
+            self.assertIn("Node.js >=22.12.0", output.getvalue())
+            self.assertEqual(execute.call_args.args[0], ["fixture-node", "--version"])
+            for operation in operations:
+                operation.assert_not_called()
+            self.assertEqual({p: p.read_bytes() for p in repo.rglob("*") if p.is_file()}, before)
+            self.assertFalse((repo / ".local").exists())
 
     def test_release_rejects_drafts_prereleases_and_nonstable_tags(self):
         for overrides in ({"draft": True}, {"prerelease": True}, {"tag_name": "v1.0.0-rc.1"}):
@@ -368,6 +490,7 @@ class UpdateTests(unittest.TestCase):
 
     def run_main(self, repo, *args):
         with patch.object(installer, "REPO", repo), patch.object(installer, "find_codex", return_value="codex"), \
+                patch.object(installer, "check_openspec_node"), \
                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             return installer.main(["--host", "homelab-desktop", "--codex-home", str(repo / "fake home"), *args])
 
@@ -405,7 +528,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_lock_is_written_only_after_every_install_source_sync_and_paths_succeed(self):
         result = self.resolve()
-        operations = ("install_agent", "install_codegraph", "install_plugins", "sync_sources", "save_paths")
+        operations = ("install_agent", "install_codegraph", "install_openspec", "install_plugins", "sync_sources", "save_paths")
         for failing in (*operations, None):
             with self.subTest(failing=failing), TemporaryDirectory() as directory:
                 repo = self.make_repo(directory)
@@ -579,9 +702,47 @@ class UpdateTests(unittest.TestCase):
                 if mode != "persistent":
                     self.assertFalse(state.exists())
 
+    def test_ordinary_update_migrates_prior_state_lock_despite_new_payload_seed(self):
+        with patch.object(installer, "fetch", side_effect=AssertionError("legacy lock metadata")):
+            legacy = installer.resolve(self.lock, locked=True, registry=self.registry).lock
+        self.assertNotIn("openspec", legacy)
+        for host in ("homelab-desktop", "roylabs-desktop"):
+            with self.subTest(host=host), TemporaryDirectory() as directory:
+                payload = self.make_repo(Path(directory) / "new payload")
+                seed = copy.deepcopy(legacy)
+                seed["openspec"] = {**self.openspec, "version": "99.0.0"}
+                (payload / "sources/dependencies.lock.json").write_text(json.dumps(seed), encoding="utf-8")
+                state = Path(directory) / "prior state [literal] & 한글"
+                lock_path = state / "sources/dependencies.lock.json"
+                lock_path.parent.mkdir(parents=True)
+                prior = copy.deepcopy(legacy)
+                prior["codegraph"]["version"] = "98.0.0"
+                lock_path.write_text(json.dumps(prior), encoding="utf-8")
+                before = {p: p.read_bytes() for p in payload.rglob("*") if p.is_file()}
+                launcher = state / "tools/openspec/node_modules/.bin/openspec.cmd"
+                with patch.object(installer, "fetch", side_effect=self.fetch), \
+                        patch.object(installer, "resolve", wraps=installer.resolve) as resolve, \
+                        patch.object(installer.platform, "machine", return_value="AMD64"), \
+                        patch.object(installer.shutil, "which", return_value="fixture"), \
+                        patch.object(installer, "install_agent", return_value=state / "tools/agent.exe"), \
+                        patch.object(installer, "install_codegraph", return_value=state / "tools/graph.cmd"), \
+                        patch.object(installer, "install_openspec", return_value=launcher) as install, \
+                        patch.object(installer, "install_plugins"):
+                    self.assertEqual(self.run_main(payload, "--install", "--host", host,
+                                                   "--state-root", str(state)), 0)
+                self.assertEqual(resolve.call_args.args[0], prior)
+                self.assertFalse(resolve.call_args.kwargs["locked"])
+                install.assert_called_once_with(self.openspec, state, "fixture")
+                migrated = json.loads(lock_path.read_bytes())
+                self.assertEqual(migrated["openspec"], self.openspec)
+                self.assertEqual(migrated["codegraph"]["version"], "5.0.0")
+                local = tomlkit.parse((state / f"{host}.toml").read_text(encoding="utf-8"))
+                self.assertEqual(local["paths"]["openspec"], launcher.as_posix())
+                self.assertEqual({p: p.read_bytes() for p in payload.rglob("*") if p.is_file()}, before)
+
     def test_persistent_install_writes_only_state_and_keeps_lock_on_each_failure(self):
         result = self.resolve()
-        operations = ("install_agent", "install_codegraph", "install_plugins", "sync_sources", "save_paths")
+        operations = ("install_agent", "install_codegraph", "install_openspec", "install_plugins", "sync_sources", "save_paths")
         for failing in (*operations, None):
             with self.subTest(failing=failing), TemporaryDirectory() as directory:
                 payload = self.make_repo(Path(directory) / "payload")
@@ -614,7 +775,7 @@ class UpdateTests(unittest.TestCase):
                                 raise installer.HarnessError("fixture failure")
                             if name in ("sync_sources", "save_paths"):
                                 return original(*args)
-                            if name in ("install_agent", "install_codegraph"):
+                            if name in ("install_agent", "install_codegraph", "install_openspec"):
                                 self.assertEqual(args[1], state)
                                 return state / "tools" / name
 
@@ -647,6 +808,7 @@ class UpdateTests(unittest.TestCase):
                     patch.object(installer.shutil, "which", return_value="fixture"), \
                     patch.object(installer, "install_agent", return_value=state / "tools/agent.exe"), \
                     patch.object(installer, "install_codegraph", return_value=state / "tools/graph.cmd"), \
+                    patch.object(installer, "install_openspec", return_value=state / "tools/openspec.cmd"), \
                     patch.object(installer, "install_plugins"), \
                     patch.object(installer, "resolve", return_value=result) as resolve:
                 self.assertEqual(self.run_main(first, "--install", "--state-root", str(state)), 0)
@@ -879,6 +1041,7 @@ class UpdateTests(unittest.TestCase):
                     patch.object(installer.shutil, "which", return_value="fixture"), \
                     patch.object(installer, "install_agent", return_value=state / "agent.exe"), \
                     patch.object(installer, "install_codegraph", return_value=state / "graph.cmd"), \
+                    patch.object(installer, "install_openspec", return_value=state / "openspec.cmd"), \
                     patch.object(installer, "install_plugins"), \
                     patch.object(installer.mcp_packages, "preflight", create=True) as preflight, \
                     patch.object(installer.mcp_packages, "configuration") as configuration, \
@@ -932,7 +1095,7 @@ class UpdateTests(unittest.TestCase):
                                                            side_effect=preflight))
                 stack.enter_context(patch.object(installer, "fetch", side_effect=AssertionError("network")))
                 operations = [stack.enter_context(patch.object(installer, name)) for name in (
-                    "install_agent", "install_codegraph", "install_plugins", "sync_sources", "save_paths", "atomic_write")]
+                    "install_agent", "install_codegraph", "install_openspec", "install_plugins", "sync_sources", "save_paths", "atomic_write")]
                 operations.append(stack.enter_context(patch.object(installer.mcp_packages, "install")))
                 self.assertEqual(self.run_main(repo, "--install", "--locked"), 2)
             validate.assert_called_once_with(record)

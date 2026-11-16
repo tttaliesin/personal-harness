@@ -205,12 +205,32 @@ def plugin_record(spec: dict, commit: str, data: bytes, tree: list[dict], *,
             "declaration_sha256": declaration_hash(spec)}
 
 
+def validate_openspec(record) -> None:
+    if (not isinstance(record, dict)
+            or record.get("package") != "@fission-ai/openspec"
+            or record.get("source") != "https://github.com/Fission-AI/OpenSpec"
+            or not isinstance(record.get("version"), str)
+            or not re.fullmatch(r"\d+\.\d+\.\d+", record["version"])
+            or not isinstance(record.get("integrity"), str)
+            or not re.fullmatch(r"sha512-[A-Za-z0-9+/]{86}==", record["integrity"])
+            or not isinstance(record.get("tarball"), str)):
+        raise HarnessError("Invalid OpenSpec dependency record")
+    try:
+        url = urllib.parse.urlsplit(record["tarball"])
+        if url.scheme != "https" or not url.hostname or url.username or url.password or url.fragment:
+            raise ValueError("Invalid tarball URL")
+    except ValueError:
+        raise HarnessError("Invalid OpenSpec tarball URL") from None
+
+
 def resolve(lock: dict, locked: bool = False, registry: Registry | None = None) -> Resolution:
     registry = registry if registry is not None else load_registry(REPO / "registry.toml")
     result = Resolution(copy.deepcopy(lock))
     candidate = result.lock
     candidate.pop("ego_lite", None)
     if locked:
+        if "openspec" in candidate:
+            validate_openspec(candidate["openspec"])
         issues = lock_issues(registry, candidate)
         if issues:
             raise HarnessError("; ".join(issues))
@@ -231,6 +251,13 @@ def resolve(lock: dict, locked: bool = False, registry: Registry | None = None) 
         raise HarnessError("Invalid CodeGraph registry metadata")
     candidate["codegraph"].update(version=stable_version(graph["version"]), integrity=integrity,
                                   tarball=graph["dist"]["tarball"])
+    spec = json.loads(fetch("https://registry.npmjs.org/@fission-ai%2fopenspec/latest"))
+    if not isinstance(spec, dict) or spec.get("name") != "@fission-ai/openspec" or not isinstance(spec.get("dist"), dict):
+        raise HarnessError("Invalid OpenSpec registry metadata")
+    candidate["openspec"] = {"package": spec["name"], "source": "https://github.com/Fission-AI/OpenSpec",
+                             "version": spec.get("version"), "integrity": spec["dist"].get("integrity"),
+                             "tarball": spec["dist"].get("tarball")}
+    validate_openspec(candidate["openspec"])
     repo = "vercel-labs/agent-desktop"
     metadata, commit = release(repo)
     version = stable_version(metadata["tag_name"])
@@ -319,6 +346,57 @@ def install_codegraph(lock: dict, local: Path, npm: str) -> Path:
         raise HarnessError("CodeGraph's Windows x64 optional bundle is missing; no home-directory fallback was run")
     launcher = prefix / "node_modules" / ".bin" / "codegraph.cmd"
     safe_file(launcher, local)
+    original = launcher.read_bytes()
+    quoted = original.replace(b"SET dp0=%~dp0", b'SET "dp0=%~dp0"')
+    if quoted != original:
+        atomic_write(launcher, quoted)
+    return launcher
+
+
+def check_openspec_node(node: str | None) -> None:
+    message = "OpenSpec requires Node.js >=22.12.0; select a compatible Node installation before retrying"
+    if not node:
+        raise HarnessError(message)
+    try:
+        response = subprocess.run([node, "--version"], check=True, capture_output=True,
+                                  text=True, encoding="utf-8")
+    except (OSError, subprocess.CalledProcessError):
+        raise HarnessError(message) from None
+    version = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", response.stdout.strip())
+    if not version or tuple(map(int, version.groups())) < (22, 12, 0):
+        raise HarnessError(message)
+
+
+def install_openspec(lock: dict, local: Path, npm: str) -> Path:
+    validate_openspec(lock)
+    prefix = local / "tools" / "openspec"
+    safe_file(prefix, local)
+    prefix.mkdir(parents=True, exist_ok=True)
+    subprocess.run([npm, "install", "--prefix", str(prefix), "--ignore-scripts",
+                    "--no-audit", "--no-fund", "--registry=https://registry.npmjs.org",
+                    f"{lock['package']}@{lock['version']}"], check=True)
+    package = prefix / "node_modules" / "@fission-ai" / "openspec"
+    manifest = package / "package.json"
+    receipt_path = prefix / "package-lock.json"
+    entrypoint = package / "bin" / "openspec.js"
+    launcher = prefix / "node_modules" / ".bin" / "openspec.cmd"
+    for path in (manifest, receipt_path, entrypoint, launcher):
+        safe_file(path, local)
+    metadata = json.loads(manifest.read_text(encoding="utf-8"))
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if (not isinstance(metadata, dict) or not isinstance(receipt, dict)
+            or not isinstance(receipt.get("packages"), dict)):
+        raise HarnessError("Invalid OpenSpec package metadata or installation receipt")
+    selected = receipt["packages"].get("node_modules/@fission-ai/openspec", {})
+    if not isinstance(selected, dict):
+        raise HarnessError("Invalid OpenSpec installation receipt")
+    if (metadata.get("name") != lock["package"] or metadata.get("version") != lock["version"]
+            or selected.get("version") != lock["version"] or selected.get("integrity") != lock["integrity"]):
+        raise HarnessError("OpenSpec package/version/integrity does not match the lock")
+    bins = metadata.get("bin")
+    if (not isinstance(bins, dict) or bins.get("openspec") not in ("./bin/openspec.js", "bin/openspec.js")
+            or not entrypoint.is_file() or not launcher.is_file()):
+        raise HarnessError("OpenSpec's declared bin or Windows launcher is missing or unexpected")
     original = launcher.read_bytes()
     quoted = original.replace(b"SET dp0=%~dp0", b'SET "dp0=%~dp0"')
     if quoted != original:
@@ -478,11 +556,13 @@ def sync_sources(result: Resolution, repo: Path, backup_root: Path | None = None
             path.unlink()
 
 
-def save_paths(path: Path, agent: Path, codegraph: Path):
+def save_paths(path: Path, agent: Path, codegraph: Path, openspec: Path | None = None):
     local = read_toml(path) if path.exists() else tomlkit.document()
     if "paths" not in local:
         local["paths"] = tomlkit.table()
-    for key, executable in (("agent_desktop", agent), ("codegraph", codegraph)):
+    for key, executable in (("agent_desktop", agent), ("codegraph", codegraph), ("openspec", openspec)):
+        if executable is None:
+            continue
         if key not in local["paths"]:
             local["paths"][key] = executable.as_posix()
         elif local["paths"][key] != executable.as_posix():
@@ -515,6 +595,8 @@ def main(argv=None) -> int:
         seed = lock_path if lock_path.exists() else layout.seed_lock
         result = resolve(json.loads(seed.read_text(encoding="utf-8")), locked=args.locked)
         lock = result.lock
+        if "openspec" in lock:
+            validate_openspec(lock["openspec"])
         for record in lock.get("mcp", []):
             mcp_packages.preflight(record)
         if layout.persistent:
@@ -523,6 +605,10 @@ def main(argv=None) -> int:
         codex = find_codex(args.codex, codex_home)
         print(f"Agent desktop {lock['agent_desktop']['version']} -> {local / 'tools/agent-desktop'} (SHA256 verified on install)")
         print(f"{lock['codegraph']['package']}@{lock['codegraph']['version']} -> {local / 'tools/codegraph'}")
+        if "openspec" in lock:
+            print(f"{lock['openspec']['package']}@{lock['openspec']['version']} -> {local / 'tools/openspec'}")
+        else:
+            print("OpenSpec absent from legacy lock; skipped. Run an ordinary update to add it.")
         for item in lock["plugins"]:
             print(f"{item['name']}@{item['marketplace']} version {item['version']}: {item['source']} ref {item['ref']}")
         for item in lock.get("mcp", []):
@@ -536,10 +622,13 @@ def main(argv=None) -> int:
         npm = shutil.which("npm")
         if not npm or not shutil.which("git") or not codex:
             raise HarnessError("Install Node/npm, Git and Codex first; specify --codex when it is not on PATH")
+        if "openspec" in lock:
+            check_openspec_node(shutil.which("node"))
         safe_file(config, local)
         safe_file(lock_path, local if layout.persistent else REPO)
         agent = install_agent(lock["agent_desktop"], local, result.archive)
         codegraph = install_codegraph(lock["codegraph"], local, npm)
+        openspec = install_openspec(lock["openspec"], local, npm) if "openspec" in lock else None
         install_plugins(lock["plugins"], codex, codex_home)
         for record in lock.get("mcp", []):
             mcp_packages.install(record, local, guard=safe_file)
@@ -547,7 +636,7 @@ def main(argv=None) -> int:
             sync_sources(result, layout.sources, layout.source_backups)
         else:
             sync_sources(result, REPO)
-        save_paths(config, agent, codegraph)
+        save_paths(config, agent, codegraph, openspec)
         atomic_write(lock_path, (json.dumps(lock, indent=2) + "\n").encode("utf-8"))
         print(f"Dependencies installed and lock saved. Run harness.ps1 apply/check -HostName {host}.")
         return 0

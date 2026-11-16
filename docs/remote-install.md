@@ -6,7 +6,7 @@
 
 ## 준비
 
-Windows x64에서 Node.js 22 이상과 npm, Git, Python 3.11 이상, Codex가 필요하다.
+Windows x64에서 Node.js 22.12.0 이상과 npm, Git, Python 3.11 이상, Codex가 필요하다.
 대상 PC에서 Codex를 한 번 실행해 로컬 런타임 설정을 생성한다.
 공개 소스를 내려받는 데 GitHub 로그인은 필요하지 않다.
 Codex 사용에 필요한 계정과 인증은 해당 PC의 기존 설정을 사용한다.

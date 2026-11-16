@@ -1125,7 +1125,7 @@ class RemoteCliTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256((self.payload / name).read_bytes()).hexdigest(), digest)
         manifest = json.loads((self.payload / "package.json").read_text())
         self.assertTrue(manifest["private"])
-        self.assertEqual(manifest["engines"]["node"], ">=22")
+        self.assertEqual(manifest["engines"]["node"], ">=22.12.0")
         self.assertNotIn("scripts", manifest)
         self.assertNotIn("dependencies", manifest)
 

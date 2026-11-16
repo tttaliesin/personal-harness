@@ -306,6 +306,46 @@ class PersistentStateTests(unittest.TestCase):
             with self.assertRaisesRegex(harness.HarnessError, "inside the selected state root"):
                 self.build(fixture, state, local_config=fixture.repo / ".local/local.toml")
 
+    def test_openspec_uses_payload_skill_and_private_launcher_without_changing_mcp(self):
+        with TemporaryDirectory() as directory:
+            fixture, state, _ = self.prepare(directory)
+            skill = b"---\nname: openspec-workflow\ndescription: Fixture\n---\nworkflow\n"
+            write_file(fixture.repo / "skills/openspec-workflow/SKILL.md", skill)
+            lock_path = state / "sources/dependencies.lock.json"
+            lock = json.loads(lock_path.read_bytes())
+            lock["openspec"] = {"package": "@fission-ai/openspec", "version": "2.0.0"}
+            write_file(lock_path, json.dumps(lock))
+            cli = write_file(state / "tools/openspec/node_modules/.bin/openspec.cmd", b"fixture")
+            write_file(state / "roylabs-desktop.toml", '[paths]\nopenspec = "' + cli.as_posix() + '"\n')
+            before_repo = tree_snapshot(fixture.repo)
+            before_state = tree_snapshot(state)
+            plan = self.build(fixture, state)
+            self.assertEqual(plan.missing, [])
+            harness.apply_plan(plan)
+            self.assertEqual((fixture.home / ".agents/skills/openspec-workflow/SKILL.md").read_bytes(), skill)
+            self.assertIn(f"`openspec`: `{cli.as_posix()}`", (fixture.codex / "AGENTS.md").read_text(encoding="utf-8"))
+            config = tomllib.loads((fixture.codex / "config.toml").read_text(encoding="utf-8"))
+            self.assertNotIn("openspec", config["mcp_servers"])
+            self.assertEqual(config["hooks"], tomllib.loads(CURRENT_CONFIG)["hooks"])
+            self.assertEqual(tree_snapshot(fixture.repo), before_repo)
+            self.assertEqual(tree_snapshot(state), before_state)
+            self.assertEqual(self.build(fixture, state).changes, [])
+
+    def test_missing_openspec_in_new_lock_prevents_all_profile_writes(self):
+        with TemporaryDirectory() as directory:
+            fixture, state, _ = self.prepare(directory)
+            write_file(fixture.repo / "skills/openspec-workflow/SKILL.md", b"workflow")
+            lock_path = state / "sources/dependencies.lock.json"
+            lock = json.loads(lock_path.read_bytes())
+            lock["openspec"] = {"package": "@fission-ai/openspec", "version": "2.0.0"}
+            write_file(lock_path, json.dumps(lock))
+            before = tree_snapshot(Path(directory))
+            plan = self.build(fixture, state)
+            self.assertTrue(any("openspec CLI" in item for item in plan.missing))
+            with self.assertRaises(harness.HarnessError):
+                harness.apply_plan(plan)
+            self.assertEqual(tree_snapshot(Path(directory)), before)
+
 
 class ConfigPreservationTests(unittest.TestCase):
     def assert_preserved(self, rendered):

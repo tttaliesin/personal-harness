@@ -5,6 +5,7 @@
 [paths]
 # agent_desktop = "D:/tools/agent-desktop.exe"
 # codegraph = "D:/tools/codegraph.cmd"
+# openspec = "D:/tools/openspec.cmd"
 
 # Optional local preferences override common values.
 # App-generated runtime keys remain in the existing ~/.codex/config.toml.

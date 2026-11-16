@@ -12,7 +12,10 @@ The upstream [Apache 2.0 license](agent-desktop-LICENSE) is included.
 
 Ego and its bundled skills are owned by each PC's browser installation and are outside this repository's managed dependencies.
 The installer does not install, version-check, link or overwrite them.
-The CodeGraph CLI is resolved from the official latest stable release when installation or update is explicitly requested.
+The CodeGraph and OpenSpec CLIs are resolved from their official npm latest stable releases when installation or update is explicitly requested.
 Exact successful installation results are recorded in [dependencies.lock.json](dependencies.lock.json).
+`skills/openspec-workflow` is a Personal Harness adapter authored in this repository.
+It uses the official OpenSpec CLI's schema and instructions instead of distributing modified upstream workflow skills.
+The initial adapter was checked against `@fission-ai/openspec` 2.0.0 and the [official CLI reference](https://github.com/Fission-AI/OpenSpec/blob/main/docs/cli.md).
 pstack and EGM were removed from managed dependencies on 2026-11-16.
 The original pstack import used the upstream tag for Roylabs' installed version because the exact original checkout commit was unavailable.

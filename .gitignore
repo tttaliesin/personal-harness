@@ -3,6 +3,7 @@
 .venv/
 .audit/
 .task/
+.codegraph/
 
 # Python caches.
 __pycache__/

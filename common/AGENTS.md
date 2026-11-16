@@ -34,6 +34,15 @@ In repositories already indexed by CodeGraph (a `.codegraph/` directory exists a
 - If there is no `.codegraph/` directory, skip CodeGraph; indexing remains the user's decision.
 <!-- CODEGRAPH_END -->
 
+<!-- openspec-routing:start -->
+## OpenSpec
+
+- Select `openspec-workflow` autonomously for work on existing OpenSpec changes, or feature and structural changes where persistent requirements and implementation progress help the task.
+- Keep explanations, small fixes, and mechanical edits proportional to the request; they do not require an OpenSpec change.
+- Use the repository's existing OpenSpec root, schema, and governance when present. Initialize a new root only when adopting OpenSpec in that repository is part of the user's request.
+- An authorized implementation request can proceed through planning, implementation, and verification in one task. Pause for a material unresolved decision or an actual authorization boundary, not merely because a proposal was written.
+<!-- openspec-routing:end -->
+
 <!-- task-tool-routing:start -->
 ## Task-based routing for Sites and browsers
 

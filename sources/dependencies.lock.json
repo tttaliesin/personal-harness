@@ -35,5 +35,12 @@
     "source": "https://github.com/colbymchenry/codegraph",
     "integrity": "sha512-hODH/mGnCf3IUMs6rzktv/zbecJIKJfdZAYHZ9mqecb0G7ZkHaA8CZafDVnswANFEL1YFcG+lfAwc5SIXzUH6Q==",
     "tarball": "https://registry.npmjs.org/@colbymchenry/codegraph/-/codegraph-1.6.2.tgz"
+  },
+  "openspec": {
+    "package": "@fission-ai/openspec",
+    "version": "2.0.0",
+    "source": "https://github.com/Fission-AI/OpenSpec",
+    "integrity": "sha512-TsGwEAWogMOhuI8npa3o8Y3popwqBIHLdbn80KGUv6rSExvlmY1kYNALMfSZG+qbliH9gffc+CWC4JPlkoFshw==",
+    "tarball": "https://registry.npmjs.org/@fission-ai/openspec/-/openspec-2.0.0.tgz"
   }
 }

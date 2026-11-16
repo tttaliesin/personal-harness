@@ -8,7 +8,7 @@
     "personal-harness": "bin/personal-harness.mjs"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   },
   "files": [
     "registry.toml",

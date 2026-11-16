@@ -15,6 +15,7 @@
 - 관찰과 가설을 구분하고 인과·성능 주장에 재현 시험과 반증 조건을 둔다.
 - 공식 agent-desktop CLI를 기본 데스크톱 조작 도구로 사용한다.
 - 인덱스가 있는 저장소에서는 호출 관계·구조 탐색에 CodeGraph를 선택하고, 알려진 파일 읽기와 텍스트 검색은 바로 수행한다.
+- 기존 OpenSpec 변경과 지속적인 명세가 필요한 기능·구조 변경에는 `openspec-workflow`를 선택하고, 구현 요청은 설계 이후에도 이어서 수행한다.
 - 스킬 이름을 명시하지 않아도 모델이 작업 목적에 맞는 도구를 선택한다.
 - 기존 저장소의 웹 개발 경로와 사용자가 지정한 배포 대상을 유지하고, 요청한 호스팅·게시 또는 기존 Site 유지보수에 Sites가 적합할 때 선택한다.
 - 저장소의 E2E 테스트와 공개 자료 조회를 바로 수행하고, 실제 브라우저 조작이 필요할 때 대상·세션에 맞는 도구를 선택한다.
@@ -52,10 +53,12 @@
 | 구성 | 관리 방식 |
 |---|---|
 | `create-readme` | 사용자 원본을 `~/.agents/skills/create-readme`에 복사 |
+| `openspec-workflow` | 저장소에서 작성한 연동 스킬을 `~/.agents/skills/openspec-workflow`에 복사 |
 | `agent-desktop` | 설치한 최신 안정 릴리스의 공식 스킬과 참조 문서를 Codex 홈의 `skills`에 복사 |
 | `agent-desktop-windows` | 같은 릴리스의 Windows 스킬과 참조 문서를 복사 |
 | agent-desktop CLI | GitHub 최신 안정 릴리스의 Windows x64 배포물과 실행 파일 SHA256 확인 |
 | CodeGraph CLI | npm `@colbymchenry/codegraph`의 `latest` 배포와 integrity 확인 |
+| OpenSpec CLI | npm `@fission-ai/openspec`의 `latest` 배포와 integrity 확인 |
 
 초기 스킬 파일 11개의 SHA256은 [Roylabs 원본 기록](../sources/roylabs-2026-11-12.json)에 있다.
 현재 설치 결과와 버전 정보는 [dependencies.lock.json](../sources/dependencies.lock.json)에 기록한다.
@@ -90,5 +93,7 @@ Ego가 없거나 스킬이 다른 경로에 연결돼 있어도 Harness 적용�
 설치·업데이트 명령은 공식 최신 버전 조회와 버전·배포 해시 검증을 수행한다.
 최신 조회가 실패하면 기존 lock을 최신 결과로 가장하지 않고 실패를 알린다.
 `-Locked`는 기록한 설치 결과를 재현할 때 사용한다.
+OpenSpec가 없는 이전 lock을 `-Locked`로 재현하면 기존 의존성만 설치한다.
+OpenSpec를 추가하려면 일반 `update`로 새 lock을 만든다.
 
 내장 스킬, OpenAI 앱 런타임, 계정별 연결 앱 목록, 채팅 이력은 이 저장소의 배포 대상에 포함하지 않는다.

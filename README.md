@@ -3,11 +3,11 @@
 Roylabs Desktop의 Codex User Harness를 기준으로 사용자 지침, 스킬, 공통 설정을 관리한다.
 공통 설정을 각 PC의 기존 설정에 병합하고, 앱 경로와 실행 중 생성되는 값은 해당 PC에서 유지한다.
 
-[한 명령으로 설치](docs/remote-install.md) · [관리 범위와 기준 구성](docs/baseline.md) · [적용과 복구](docs/deployment.md) · [원본과 버전](sources/NOTICE.md)
+[한 명령으로 설치](docs/remote-install.md) · [관리 범위와 기준 구성](docs/baseline.md) · [개발 도구 사용](docs/development-tools.md) · [적용과 복구](docs/deployment.md) · [원본과 버전](sources/NOTICE.md)
 
 ## 시작하기
 
-Windows x64에서 Node.js 22 이상과 npm, Git, Python 3.11 이상, Codex가 필요하다.
+Windows x64에서 Node.js 22.12.0 이상과 npm, Git, Python 3.11 이상, Codex가 필요하다.
 공개 저장소에서 소스를 받는 데 GitHub 인증은 필요하지 않다.
 처음 사용하는 PC에서는 Codex를 한 번 실행해 로컬 런타임 설정을 생성한다.
 어느 폴더에서든 다음 명령으로 전체 Harness를 설치한다.
@@ -99,7 +99,7 @@ task install
 ```
 
 설치 도우미는 실행할 때 `registry.toml`에 등록된 플러그인과 MCP를 각 항목의 갱신 기준으로 조회한다.
-agent-desktop의 공식 최신 안정 릴리스와 CodeGraph의 npm `latest` 조회도 유지한다.
+agent-desktop의 공식 최신 안정 릴리스와 CodeGraph·OpenSpec의 npm `latest` 배포도 조회한다.
 실제 설치에 사용할 commit과 배포 해시를 확정한 뒤 도구를 설치한다.
 설치와 검증을 마치면 그 결과를 `sources/dependencies.lock.json`에 기록한다.
 agent-desktop의 공식 스킬과 참조 문서도 같은 릴리스로 갱신한다.
@@ -157,7 +157,7 @@ task install -- -Locked
 | [common/AGENTS.md](common/AGENTS.md) | 전역 사용자 지침. `${CODEX_HOME}`은 적용 대상 PC에서 치환 |
 | [registry.toml](registry.toml) | 배포할 Git 플러그인과 npm·Python·HTTP MCP의 등록 정보 |
 | [common/config.toml](common/config.toml) | 모델, 추론 수준, 사용자 정책, Desktop 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
-| [skills](skills) | `create-readme`, `agent-desktop`, `agent-desktop-windows` 원본과 참조 문서 |
+| [skills](skills) | `create-readme`, `openspec-workflow`, `agent-desktop`, `agent-desktop-windows` 원본과 참조 문서 |
 | [hosts](hosts) | PC 이름, 운영체제 설정, 로컬 경로의 기본 규칙 |
 | `.local/<hostname>.toml` | 해당 PC에서만 사용하는 경로와 선택적 설정 덮어쓰기. Git 제외 |
 | [sources/dependencies.lock.json](sources/dependencies.lock.json) | 마지막으로 설치·검증한 외부 도구 버전, Git revision, 배포 해시 |
