@@ -83,7 +83,7 @@
     "integrity": "sha512-TsGwEAWogMOhuI8npa3o8Y3popwqBIHLdbn80KGUv6rSExvlmY1kYNALMfSZG+qbliH9gffc+CWC4JPlkoFshw==",
     "tarball": "https://registry.npmjs.org/@fission-ai/openspec/-/openspec-2.0.0.tgz"
   },
-  "registry_sha256": "7302e18ed1e17f215fd87b95e1ab5585144bceed3cfaa995d4ccbc796cbfbdd2",
+  "registry_sha256": "e5e7231870a64972e9646a6c5bec9be2fcce05f1bb7d2a824102c8dad51cf56b",
   "registrations": {
     "plugins": [
       {
@@ -104,7 +104,25 @@
         "enabled": true
       }
     ],
-    "mcp": []
+    "mcp": [
+      {
+        "name": "microsoft-learn",
+        "kind": "http",
+        "url": "https://learn.microsoft.com/api/mcp"
+      }
+    ]
   },
-  "mcp": []
+  "mcp": [
+    {
+      "name": "microsoft-learn",
+      "kind": "http",
+      "declaration": {
+        "name": "microsoft-learn",
+        "kind": "http",
+        "url": "https://learn.microsoft.com/api/mcp"
+      },
+      "declaration_sha256": "7722fe1ee047d8172b09946d5721d307f1fe98ca6f38045fcc1be26d55040f80",
+      "recipe": {}
+    }
+  ]
 }

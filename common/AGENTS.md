@@ -60,6 +60,26 @@ In repositories already indexed by CodeGraph (a `.codegraph/` directory exists a
   기존 프로젝트의 스택·배포 경로·repo-governance와 개발 규칙을 유지한다.
 <!-- context7-routing:end -->
 
+<!-- microsoft-learn-routing:start -->
+## Microsoft Learn
+
+- Microsoft .NET·ASP.NET Core·C#·Windows·PowerShell의 공식 API, 설정, 버전별 동작이나 코드 예제를 확인할 필요가 있으면 공식 `microsoft-learn` MCP를 자율적으로 선택한다.
+  사용자가 도구 이름을 명시적으로 호출할 필요는 없다.
+- 버전에 따라 답이 달라지면 실제 대상 프레임워크·런타임·운영체제 버전을 먼저 확인한다.
+  현대 .NET과 .NET Framework를 구분하고 대상에 맞는 공식 자료를 사용한다.
+- 알려진 파일의 직접 읽기·정확한 텍스트 검색·작은 기계적 수정에는 문서 조회를 선행 조건으로 두지 않는다.
+  .NET이 언급된다는 이유만으로 모든 작업에서 호출하지 않는다.
+- Context7과의 고정 호출 순서를 두지 않고 필요한 근거에 맞는 도구를 선택한다.
+  이미 충분한 근거가 있으면 같은 내용을 중복 조회하지 않는다.
+- 문서는 실행 중인 서버·컨테이너·Windows 서비스의 실제 상태를 대신하지 않는다.
+  실제 상태와 코드 동작은 해당 환경의 조회와 로컬 검사로 확인한다.
+- 연결·한도·도구 오류나 문서 부족이 있으면 가능한 공식 문서·소스·로컬 검사로 계속하고 미확인 범위를 알린다.
+  MCP 조회 실패를 작업의 차단 조건으로 두지 않는다.
+- 조회에는 필요한 기술 질문만 전달한다.
+  비공개 코드·인증 값·사용자 대화 전체를 전송하지 않는다.
+- 기존 프로젝트의 스택·배포 경로·repo-governance와 개발 규칙을 유지한다.
+<!-- microsoft-learn-routing:end -->
+
 <!-- taste-skill-routing:start -->
 ## Taste Skill 선택
 

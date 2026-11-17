@@ -32,6 +32,12 @@ Account records and authentication tokens remain outside Git.
 The [official Codex guide](https://context7.com/docs/clients/codex) instructs users to start a new thread after installation.
 Installation integrity and successful documentation retrieval are recorded separately in the [2026-11-17 deployment record](../docs/history/context7-2026-11-17.md).
 
+Microsoft Learn is registered as the official remote HTTP MCP endpoint `https://learn.microsoft.com/api/mcp`.
+Its connection declaration is recorded in `registry.toml` and the dependency lock; no upstream package or skill is copied into this repository.
+The [official developer reference](https://learn.microsoft.com/en-us/training/support/mcp-developer-reference) describes its transport and documentation tools.
+The server's tool catalog is discovered at connection time.
+Autonomous selection and version-aware use are configured in `common/AGENTS.md` without a fixed call order with Context7.
+
 `skills/openspec-workflow` is a Personal Harness adapter authored in this repository.
 It uses the official OpenSpec CLI's schema and instructions instead of distributing modified upstream workflow skills.
 The initial adapter was checked against `@fission-ai/openspec` 2.0.0 and the [official CLI reference](https://github.com/Fission-AI/OpenSpec/blob/main/docs/cli.md).

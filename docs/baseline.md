@@ -19,6 +19,8 @@
 - 버전별 라이브러리 API 확인이 필요하면 실제 프로젝트 의존성 버전을 먼저 확인하고 Context7을 명시적 호출 없이 선택한다.
 - 알려진 파일 읽기와 작은 기계적 수정에는 Context7을 선행 필수로 두지 않는다.
 - Context7이 미지원·로그인·한도·결과 부족으로 충분한 근거를 주지 못하면 공식 문서와 소스 검사로 계속한다.
+- .NET·ASP.NET Core·C#·Windows·PowerShell의 공식 자료가 필요하면 대상 버전을 확인하고 Microsoft Learn MCP를 명시적 호출 없이 선택한다.
+- 현대 .NET과 .NET Framework를 구분하고 Context7과의 고정 호출 순서나 중복 조회를 요구하지 않는다.
 - 스킬 이름을 명시하지 않아도 모델이 작업 목적에 맞는 도구를 선택한다.
 - 웹사이트 제작과 시각 디자인·리디자인·완성도 개선에 적합하면 `design-taste-frontend`를 선택한다.
 - 기존 저장소의 웹 개발 경로와 사용자가 지정한 배포 대상을 유지하고, 요청한 호스팅·게시 또는 기존 Site 유지보수에 Sites가 적합할 때 선택한다.
@@ -44,7 +46,7 @@
 | Multi-agent | `true` |
 | 자동 보관 | 1일 |
 | 로캘 | `ko-KR` |
-| MCP | 공통 CodeGraph 실행 인자와 각 PC의 실행 파일 위치 |
+| MCP | 공통 CodeGraph 실행 인자와 각 PC의 실행 파일 위치, registry의 Microsoft Learn 원격 HTTP 연결 |
 | 플러그인 | 공통 OpenAI 11개 |
 | 스킬 선택 | `computer-use` 비활성, `agent-desktop` 계열 활성 |
 
@@ -66,6 +68,7 @@
 | CodeGraph CLI | npm `@colbymchenry/codegraph`의 `latest` 배포와 integrity 확인 |
 | OpenSpec CLI | npm `@fission-ai/openspec`의 `latest` 배포와 integrity 확인 |
 | Context7 | 공식 `context7@context7-marketplace` 플러그인을 기존 설치기 지원으로 관리하며 `git-ref: master`를 정확한 commit과 콘텐츠 digest로 lock에 고정 |
+| Microsoft Learn MCP | `registry.toml`에서 공식 원격 HTTP `https://learn.microsoft.com/api/mcp`를 관리하며 별도 의존성 패키지를 설치하지 않음 |
 | Taste Skill | 원본 `taste-skill@taste-skill` 플러그인의 `design-taste-frontend`를 두 PC의 설치 대상으로 지정 |
 
 Context7의 원격 저장소는 [upstash/context7.git](https://github.com/upstash/context7.git)이다.
@@ -75,6 +78,11 @@ Context7의 원격 저장소는 [upstash/context7.git](https://github.com/upstas
 무인증 protocol 조회의 단일 성공은 계속되는 무인증 접근이나 두 PC 설치 완료의 근거로 사용하지 않는다.
 계정 정보와 토큰은 Git에서 제외한다.
 원본 플러그인 캐시와 프로젝트의 repo-governance는 유지한다.
+
+[Microsoft Learn MCP 공식 안내](https://learn.microsoft.com/en-us/training/support/mcp)의 공개 원격 서버를 사용한다.
+작은 기계적 수정에는 문서 조회를 필수로 두지 않는다.
+문서는 실제 서버 상태를 대신하지 않으며 연결 실패 시 공식 문서·소스·로컬 검사로 계속한다.
+조회에는 필요한 기술 질문만 전달하고 비공개 코드·인증 값·사용자 대화 전체는 전송하지 않는다.
 
 Taste Skill을 사용할 때도 기존 프레임워크, SSR·API·인증·데이터 흐름, 컴포넌트·디자인 토큰과 배포 경로를 유지한다.
 기존 저장소의 개발 규칙도 유지한다.

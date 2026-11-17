@@ -100,6 +100,8 @@ task install
 
 설치 도우미는 실행할 때 `registry.toml`에 등록된 플러그인과 MCP를 각 항목의 갱신 기준으로 조회한다.
 agent-desktop의 공식 최신 안정 릴리스와 CodeGraph·OpenSpec의 npm `latest` 배포도 조회한다.
+Microsoft Learn MCP는 `registry.toml`의 공식 원격 HTTP 연결을 적용하며 별도 의존성 패키지를 설치하지 않는다.
+공식 .NET·Windows 자료가 필요하면 명시적인 호출 없이 선택하며 자세한 기준은 [개발 도구 사용](docs/development-tools.md#microsoft-learn-선택과-연결-구성)에 있다.
 실제 설치에 사용할 commit과 배포 해시를 확정한 뒤 도구를 설치한다.
 설치와 검증을 마치면 그 결과를 `sources/dependencies.lock.json`에 기록한다.
 agent-desktop의 공식 스킬과 참조 문서도 같은 릴리스로 갱신한다.

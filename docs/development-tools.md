@@ -2,6 +2,7 @@
 
 CodeGraph는 코드의 관계를 찾고 OpenSpec는 요구사항과 변경 진행 상태를 남긴다.
 Context7은 라이브러리의 버전별 문서와 API를 확인할 때 사용한다.
+Microsoft Learn MCP는 .NET·Windows 계열의 공식 문서와 코드 예제를 확인할 때 사용한다.
 Taste Skill의 `design-taste-frontend`는 웹사이트 제작과 시각 디자인 개선에 사용한다.
 모델은 자연어로 요청받은 작업의 목적에 따라 적합한 도구를 선택한다.
 스킬 이름이나 슬래시 명령을 직접 입력할 필요는 없다.
@@ -11,6 +12,7 @@ Taste Skill의 `design-taste-frontend`는 웹사이트 제작과 시각 디자�
 | CodeGraph | 호출 관계, 영향 범위, 여러 모듈의 구조 탐색 | 해당 저장소에 `.codegraph/` 인덱스가 있음 |
 | OpenSpec | 기존 변경 이어가기, 지속적인 요구사항이 필요한 기능·구조 변경 | 해당 저장소에서 OpenSpec 도입을 요청했거나 이미 사용 중임 |
 | Context7 | 라이브러리·프레임워크의 버전별 문서, API·설정·마이그레이션 확인 | 공식 `context7@context7-marketplace` 플러그인의 MCP 도구 사용 가능 |
+| Microsoft Learn | .NET·ASP.NET Core·C#·Windows·PowerShell의 공식 API·설정·버전별 동작·코드 예제 확인 | 공식 원격 HTTP `microsoft-learn` MCP 도구 사용 가능 |
 | Taste Skill | 웹사이트 제작, 시각 디자인·리디자인·완성도 개선 | 원본 `taste-skill@taste-skill` 플러그인의 `design-taste-frontend` 사용 가능 |
 | Korean Typography | 한국어 웹·앱 UI의 서체·혼합 조판·줄바꿈·로딩 검토 | `korean-typography` 사용자 스킬 사용 가능 |
 | Taste Windows Runtime | 원본 Taste 브라우저 검사의 Windows 실행 호환 | `taste-windows-runtime` 사용자 스킬 사용 가능 |
@@ -28,12 +30,15 @@ flowchart TD
     C --> G[CodeGraph로 관계 탐색]
     C --> S[OpenSpec로 요구사항과 진행 상태 관리]
     C --> L[실제 의존성 버전 확인 후 Context7 조회]
+    C --> M[대상 버전 확인 후 Microsoft Learn 조회]
     C --> F[Taste Skill로 시각 디자인]
     G -->|인덱스가 없거나 부족함| D
     S --> I[요청 범위에 맞게 설계와 구현]
     D --> I
     G --> I
     L --> I
+    M --> I
+    M -->|연결·도구 오류·결과 부족| O
     L -->|미지원·인증·한도·결과 부족| O[공식 문서와 소스 검사]
     O --> I
     F --> I
@@ -64,6 +69,25 @@ Registry는 `git-ref: master`를 추적한다.
 선택 기준은 공통 사용자 지침에서 관리한다.
 원본 플러그인 파일과 캐시 및 프로젝트의 repo-governance는 보존한다.
 계정 정보와 인증 토큰은 각 PC에서 별도로 관리하며 Git에 포함하지 않는다.
+
+## Microsoft Learn 선택과 연결 구성
+
+Microsoft .NET·ASP.NET Core·C#·Windows·PowerShell의 공식 API, 설정, 버전별 동작이나 코드 예제가 필요하면 명시적인 호출 없이 `microsoft-learn` MCP를 선택한다.
+버전에 따라 답이 달라지면 실제 대상 프레임워크·런타임·운영체제 버전을 먼저 확인한다.
+현대 .NET과 .NET Framework의 자료를 구분한다.
+Context7과의 고정 호출 순서는 두지 않는다.
+이미 충분한 근거가 있으면 같은 내용을 중복 조회하지 않는다.
+알려진 파일 읽기와 작은 기계적 수정에는 조회를 선행 필수로 두지 않는다.
+
+두 PC의 관리 대상은 `registry.toml`에 등록하는 공식 원격 HTTP 서버 `https://learn.microsoft.com/api/mcp`다.
+공개 endpoint를 사용하며 별도 의존성 패키지나 사용자 스킬을 설치하지 않는다.
+연결 방식과 제공 도구는 [Microsoft Learn 공식 안내](https://learn.microsoft.com/en-us/training/support/mcp)를 참고한다.
+등록·적용과 실제 도구 조회의 성공 여부는 구분해서 확인한다.
+
+문서 조회 결과는 실행 중인 서버·컨테이너·Windows 서비스의 실제 상태를 대신하지 않는다.
+연결·도구 오류나 문서 부족이 있으면 공식 문서·소스·로컬 검사로 계속한다.
+조회에는 필요한 기술 질문만 전달하며 비공개 코드·인증 값·사용자 대화 전체는 전송하지 않는다.
+기존 프로젝트의 스택·배포 경로·repo-governance와 개발 규칙을 유지한다.
 
 ## Taste Skill 선택
 

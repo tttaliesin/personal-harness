@@ -1,5 +1,10 @@
 schema_version = 1
 
+[[mcp]]
+name = "microsoft-learn"
+kind = "http"
+url = "https://learn.microsoft.com/api/mcp"
+
 [[plugins]]
 name = "context7"
 marketplace = "context7-marketplace"

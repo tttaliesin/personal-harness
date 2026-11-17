@@ -114,7 +114,6 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(result.mcp[0]["env_vars"], [])
         self.assertEqual(result.mcp[1]["package"], "example-server")
         self.assertEqual(result.mcp[2], entries[2])
-        self.assertEqual(load_registry(installer.REPO / "registry.toml").mcp, ())
 
     def test_credential_errors_do_not_contain_values(self):
         secret = "credential-sentinel-123456"
