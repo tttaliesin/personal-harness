@@ -112,7 +112,7 @@ def normalize_mcp(spec: Mapping) -> dict:
     if not isinstance(spec, Mapping):
         raise ValueError("Invalid MCP fields")
     kind = spec.get("kind")
-    if kind not in ("npm", "python", "http"):
+    if kind not in ("npm", "python", "nuget", "http"):
         raise ValueError("Invalid MCP kind")
     common = {"name", "kind"}
     allowed = common | ({"url", "bearer_token_env_var"} if kind == "http"
@@ -135,7 +135,7 @@ def normalize_mcp(spec: Mapping) -> dict:
     if kind == "python":
         package = re.sub(r"[-_.]+", "-", package).lower()
     version = spec.get("version", "latest")
-    exact = r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?" if kind == "npm" else r"\d+(?:\.\d+)*(?:(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?(?:\+[a-zA-Z0-9.-]+)?"
+    exact = r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?" if kind in ("npm", "nuget") else r"\d+(?:\.\d+)*(?:(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?(?:\+[a-zA-Z0-9.-]+)?"
     if not isinstance(version, str) or (version != "latest" and not re.fullmatch(exact, version)):
         raise ValueError("Invalid MCP version; use latest or an exact version")
     args = spec.get("args", [])

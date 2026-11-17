@@ -115,6 +115,15 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(result.mcp[1]["package"], "example-server")
         self.assertEqual(result.mcp[2], entries[2])
 
+    def test_nuget_registration_preserves_official_identity_and_pins_version(self):
+        entry = {"name": "nuget", "kind": "nuget", "package": "NuGet.Mcp.Server",
+                 "version": "1.4.23", "entrypoint": "nuget-mcp-server"}
+        actual = self.load(mcp=[entry]).mcp[0]
+        self.assertEqual(actual, {**entry, "args": [], "env_vars": []})
+        for version in ("10.*", "[1.0,2.0)", "--version"):
+            with self.subTest(version=version), self.assertRaisesRegex(ValueError, "version"):
+                self.load(mcp=[{**entry, "version": version}])
+
     def test_credential_errors_do_not_contain_values(self):
         secret = "credential-sentinel-123456"
         specs = [{"plugins": [self.plugin(source=f"https://user:{secret}@github.com/example/plugins.git")]},

@@ -38,6 +38,14 @@ The [official developer reference](https://learn.microsoft.com/en-us/training/su
 The server's tool catalog is discovered at connection time.
 Autonomous selection and version-aware use are configured in `common/AGENTS.md` without a fixed call order with Context7.
 
+NuGet is registered from the official Microsoft `NuGet.Mcp.Server` package on [NuGet.org](https://www.nuget.org/packages/NuGet.Mcp.Server).
+Its exact base and Windows x64 payload packages and the isolated .NET 10 SDK archive are recorded with integrity hashes in the dependency lock.
+The SDK is obtained from Microsoft's official release metadata and its published SHA512 is checked before extraction.
+The original package payload and license are retained without modification in the managed installation.
+The harness does not add project SDK declarations or change target frameworks, global PATH, authentication or repo-governance.
+Package metadata is reference material and does not supersede repository or user constraints.
+See the [official NuGet MCP documentation](https://learn.microsoft.com/en-us/nuget/concepts/nuget-mcp-server).
+
 `skills/feature-sliced-design` contains the complete, unmodified skill directory from [feature-sliced/skills](https://github.com/feature-sliced/skills).
 The [official FSD documentation](https://fsd.how/docs/llms/) identifies it as an official community-driven skill and links its installation source.
 The exact source commit and every imported file hash are recorded in [feature-sliced-skill.json](feature-sliced-skill.json).

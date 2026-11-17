@@ -70,6 +70,7 @@
 | OpenSpec CLI | npm `@fission-ai/openspec`의 `latest` 배포와 integrity 확인 |
 | Context7 | 공식 `context7@context7-marketplace` 플러그인을 기존 설치기 지원으로 관리하며 `git-ref: master`를 정확한 commit과 콘텐츠 digest로 lock에 고정 |
 | Microsoft Learn MCP | `registry.toml`에서 공식 원격 HTTP `https://learn.microsoft.com/api/mcp`를 관리하며 별도 의존성 패키지를 설치하지 않음 |
+| NuGet MCP | 공식 `NuGet.Mcp.Server`의 Windows x64 패키지와 전용 .NET 10 실행 환경을 lock의 버전·해시로 고정해 stdio로 등록 |
 | Taste Skill | 원본 `taste-skill@taste-skill` 플러그인의 `design-taste-frontend`를 두 PC의 설치 대상으로 지정 |
 
 Context7의 원격 저장소는 [upstash/context7.git](https://github.com/upstash/context7.git)이다.

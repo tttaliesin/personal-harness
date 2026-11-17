@@ -19,6 +19,7 @@ import venv
 import zipfile
 
 import registry
+import nuget_packages
 from windows_paths import io_path
 
 
@@ -267,7 +268,8 @@ def _resolve_python(spec: dict) -> dict:
 
 def resolve(spec: dict) -> dict:
     declaration = copy.deepcopy(spec)
-    recipe = {"npm": _resolve_npm, "python": _resolve_python, "http": lambda _: {}}[spec["kind"]](spec)
+    recipe = {"npm": _resolve_npm, "python": _resolve_python,
+              "nuget": nuget_packages.resolve, "http": lambda _: {}}[spec["kind"]](spec)
     return {"name": spec["name"], "kind": spec["kind"], "declaration": declaration,
             "declaration_sha256": _sha(_json(declaration)), "recipe": recipe}
 
@@ -277,6 +279,8 @@ def _root(record: dict, state: Path) -> Path:
 
 
 def _launch(record: dict, root: Path) -> Path:
+    if record["kind"] == "nuget":
+        return nuget_packages.launch(record["recipe"], root)
     if record["kind"] == "npm":
         return root / _relative(record["recipe"]["bin"])
     name = _relative(record["recipe"]["console_script"])
@@ -431,7 +435,9 @@ def _validate_record(record: dict) -> None:
             raise ValueError("MCP package recipe version is missing")
         if declaration["version"] != "latest" and recipe["version"] != declaration["version"]:
             raise ValueError("MCP package recipe version differs from its declaration")
-        if record["kind"] == "python":
+        if record["kind"] == "nuget":
+            nuget_packages.validate(recipe, declaration)
+        elif record["kind"] == "python":
             _python_recipe(recipe, declaration)
         else:
             _fields(recipe, {"target", "package_json", "package_lock", "version", "bin", "bin_sha256"})
@@ -457,6 +463,9 @@ def preflight(record: dict) -> None:
     _validate_record(record)
     if record["kind"] == "http":
         return
+    if record["kind"] == "nuget":
+        nuget_packages.preflight(record["recipe"])
+        return
     context = _npm_tools()[1] if record["kind"] == "npm" else _python_context()
     if context != record["recipe"]["target"]:
         raise ValueError("MCP package target context changed; resolve an update for this runtime")
@@ -470,6 +479,8 @@ def configuration(record: dict, state: Path, *, node: str = "node") -> dict:
         if declaration.get("bearer_token_env_var"):
             result["bearer_token_env_var"] = declaration["bearer_token_env_var"]
         return result
+    if record["kind"] == "nuget":
+        return nuget_packages.configuration(record["recipe"], _root(record, state), state, record["name"])
     launch = _launch(record, _root(record, state))
     if record["kind"] == "npm":
         command, arguments = node, [str(launch)]
@@ -546,7 +557,9 @@ def install(record: dict, state: Path, *, guard) -> None:
     receipt = root / "receipt.json"
     guard(receipt, state)
     io_path(receipt).unlink(missing_ok=True)
-    if record["kind"] == "npm":
+    if record["kind"] == "nuget":
+        nuget_packages.install(recipe, root, state, guard)
+    elif record["kind"] == "npm":
         for name, data in (("package.json", recipe["package_json"]), ("package-lock.json", recipe["package_lock"])):
             path = root / name
             guard(path, state)

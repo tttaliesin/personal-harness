@@ -5,6 +5,13 @@ name = "microsoft-learn"
 kind = "http"
 url = "https://learn.microsoft.com/api/mcp"
 
+[[mcp]]
+name = "nuget"
+kind = "nuget"
+package = "NuGet.Mcp.Server"
+version = "1.4.23"
+entrypoint = "nuget-mcp-server"
+
 [[plugins]]
 name = "context7"
 marketplace = "context7-marketplace"
