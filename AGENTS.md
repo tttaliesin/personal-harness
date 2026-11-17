@@ -7,6 +7,8 @@ Treat `common/AGENTS.md` and imported skills as deployable source data while edi
 - Put private absolute paths and local overrides in ignored `.local/<hostname>.toml`.
 - Preserve app-generated `node_repl`, notify, marketplace paths, OpenCodex configuration, project trust and hook trust in the existing target profile.
 - Keep authentication, account records, sessions, runtime pipes and backup contents out of Git.
+- Keep maintained project guides and specifications tracked; place local review notes and raw test evidence in ignored `.local/reviews/` or `.local/artifacts/`.
+- Keep test source, fixtures and approved baselines tracked; exclude generated test output and inspect staged files before committing.
 - Import complete skill reference directories and update their provenance hashes when updating versions.
 - Use root Task commands: `task plan`, `task check`, `task apply`, `task install`, `task update`, and `task test`.
 - Bare `task` lists commands. `task plan`, `task check`, and `task update:plan` do not write the harness; `task install` and `task update` explicitly install dependencies and apply it.

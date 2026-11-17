@@ -29,10 +29,12 @@ REPO = Path(__file__).resolve().parents[1]
 PROTECTED = {"notify", "model_catalog_json", "openai_base_url", "experimental_realtime_ws_base_url",
              "projects", "hooks", "model_providers", "computer_use"}
 SKILLS = {"create-readme": "agents", "korean-typography": "agents",
+          "development-environment": "agents", "repository-artifacts": "agents",
           "feature-sliced-design": "agents",
           "taste-windows-runtime": "agents",
           "agent-desktop": "codex", "agent-desktop-windows": "codex"}
 REPOSITORY_SKILLS = {"create-readme", "korean-typography", "feature-sliced-design",
+                     "development-environment", "repository-artifacts",
                      "taste-windows-runtime", "openspec-workflow"}
 
 

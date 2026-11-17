@@ -12,6 +12,8 @@ Taste Skill의 `design-taste-frontend`는 웹사이트 제작과 시각 디자�
 |---|---|---|
 | CodeGraph | 호출 관계, 영향 범위, 여러 모듈의 구조 탐색 | 해당 저장소에 `.codegraph/` 인덱스가 있음 |
 | OpenSpec | 기존 변경 이어가기, 지속적인 요구사항이 필요한 기능·구조 변경 | 해당 저장소에서 OpenSpec 도입을 요청했거나 이미 사용 중임 |
+| Development Environment | 실행·통합 테스트 환경 구성·보완과 필요한 외부 경계 시뮬레이터 | 기존 저장소 스택을 보존하는 `development-environment` 스킬 |
+| Repository Artifacts | 공유 문서·로컬 검토 자료·테스트 입력·실행 부산물 구분과 커밋 준비 | 저장소의 governance 계약을 우선하는 `repository-artifacts` 스킬 |
 | Context7 | 라이브러리·프레임워크의 버전별 문서, API·설정·마이그레이션 확인 | 공식 `context7@context7-marketplace` 플러그인의 MCP 도구 사용 가능 |
 | Microsoft Learn | .NET·ASP.NET Core·C#·Windows·PowerShell의 공식 API·설정·버전별 동작·코드 예제 확인 | 공식 원격 HTTP `microsoft-learn` MCP 도구 사용 가능 |
 | NuGet | 패키지 추가·업데이트·버전·호환성·의존성·피드 판단에 실제 피드·패키지 그래프 정보가 필요함 | 공식 `NuGet.Mcp.Server` MCP 도구 사용 가능 여부를 별도로 확인 |
@@ -25,6 +27,8 @@ Taste Skill의 `design-taste-frontend`는 웹사이트 제작과 시각 디자�
 구현을 요청하면 필요한 설계와 구현·검증을 같은 작업에서 이어갈 수 있다.
 사용자가 결정해야 할 중요한 모호함이나 실제 권한 경계가 있을 때만 해당 부분을 확인한다.
 기존 repo-governance와 저장소 자체의 개발 규칙은 유지한다.
+
+개발환경 구성과 공유·로컬 파일 판단의 상세 기준은 [개발환경과 저장소 산출물](repository-workflows.md)에 있다.
 
 ```mermaid
 flowchart TD

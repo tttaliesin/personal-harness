@@ -144,6 +144,30 @@ Steiger는 FSD 저장소별 구조 검사기로, ArchUnitNET은 C# 저장소별 
   Taste Skill 원본과 repo-governance는 수정하지 않는다.
 <!-- korean-typography:end -->
 
+<!-- development-environment-routing:start -->
+## 개발환경 구성
+
+- 실행·통합 테스트 환경을 구성하거나 보완할 때 `development-environment`를 자율적으로 선택한다.
+  명시적 호출은 필요하지 않으며 기존 환경으로 충분한 수정에는 환경 구성을 선행하지 않는다.
+- 기존 스택·런타임 버전·아키텍처·명령 실행기·배포 경로와 저장소 개발 규칙을 유지한다.
+  Compose·infra·시뮬레이터는 필요한 경계에 맞춰 선택하며 모든 저장소의 필수 레이어나 검사로 만들지 않는다.
+- 저장소의 채택된 repo-governance 계약이 정한 경로와 제약을 우선한다.
+  이 지침은 플러그인 변경이나 기존 프로젝트 마이그레이션을 허용하지 않는다.
+<!-- development-environment-routing:end -->
+
+<!-- repository-artifacts-routing:start -->
+## 공유 문서와 로컬 산출물
+
+- 저장소 문서·검토 파일·테스트 산출물을 만들거나 커밋을 준비할 때 `repository-artifacts`를 자율적으로 선택한다.
+  단순 조회·설명에 별도 문서나 감사를 요구하지 않는다.
+- 지속적으로 공유할 문서·명세·테스트 소스·fixture·승인된 기준 데이터는 기존 저장소 규약에 따라 추적한다.
+  공유가 요청되지 않은 검토 초안·원시 로그·실행 부산물은 실제 Git 제외가 확인된 로컬 경로에 둔다.
+- 기존 repo-governance의 문서 경로·추적 제약을 우선하고 기존 추적 문서를 일괄 이동하지 않는다.
+  Git 원격 포함 여부는 실제 추적·staged 내용으로 확인하며 패키지 제외 설정으로 대신하지 않는다.
+- 이 스킬 설치를 개별 저장소의 repo-governance 채택으로 간주하지 않는다.
+  채택된 계약의 차단 조건은 공통 기본값으로 우회하지 않는다.
+<!-- repository-artifacts-routing:end -->
+
 <!-- task-tool-routing:start -->
 ## Task-based routing for Sites and browsers
 

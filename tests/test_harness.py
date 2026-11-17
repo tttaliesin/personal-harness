@@ -178,6 +178,9 @@ class FakeRepository:
         self.skill_files = {
             ("create-readme", "SKILL.md"): b"# README skill\n",
             ("create-readme", "references/guide.md"): "# 사용 지침\n".encode(),
+            ("development-environment", "SKILL.md"): b"# Development environment\n",
+            ("development-environment", "references/runtime-patterns.md"): b"# Runtime boundaries\n",
+            ("repository-artifacts", "SKILL.md"): b"# Repository artifacts\n",
             ("korean-typography", "SKILL.md"): "# 한국어 타이포그래피\n".encode(),
             ("korean-typography", "references/fonts.md"): "# 글꼴 선택\n".encode(),
             ("korean-typography", "references/layout/wrapping.md"): "# 한글 줄바꿈\r\n".encode(),
@@ -288,7 +291,8 @@ class PersistentStateTests(unittest.TestCase):
                 expected = payload if skill in harness.REPOSITORY_SKILLS else files[f"skills/{skill}/{relative}"]
                 with self.subTest(skill=skill, relative=relative):
                     self.assertEqual(fixture.skill_target(skill, relative).read_bytes(), expected)
-            for skill in ("korean-typography", "taste-windows-runtime", "feature-sliced-design"):
+            for skill in ("korean-typography", "taste-windows-runtime", "feature-sliced-design",
+                          "development-environment", "repository-artifacts"):
                 with self.subTest(agents_skill=skill):
                     self.assertTrue((fixture.home / ".agents/skills" / skill / "SKILL.md").is_file())
                     self.assertFalse((fixture.codex / "skills" / skill).exists())
@@ -1099,7 +1103,8 @@ class BuildPlanTests(TemporaryHarnessTestCase):
         self.assertEqual(plan.missing, [])
         self.assertEqual({change.path for change in plan.changes}, self.fixture.expected_targets())
         self.assertEqual(len(plan.changes), len(self.fixture.expected_targets()))
-        for skill in ("korean-typography", "taste-windows-runtime", "feature-sliced-design"):
+        for skill in ("korean-typography", "taste-windows-runtime", "feature-sliced-design",
+                      "development-environment", "repository-artifacts"):
             with self.subTest(agents_skill=skill):
                 target = self.fixture.home / ".agents/skills" / skill
                 self.assertIn(target / "SKILL.md", {change.path for change in plan.changes})

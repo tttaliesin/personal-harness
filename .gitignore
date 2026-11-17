@@ -5,6 +5,12 @@
 .task/
 .codegraph/
 
+# Generated test output; test source and fixtures remain tracked.
+/test-results/
+/playwright-report/
+/coverage/
+/artifacts/test/
+
 # Python caches.
 __pycache__/
 *.pyc

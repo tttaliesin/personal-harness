@@ -61,6 +61,10 @@ The initial adapter was checked against `@fission-ai/openspec` 2.0.0 and the [of
 `skills/korean-typography` is authored in this repository for Korean web typography.
 Its references link to original font publishers and W3C layout/CSS guidance.
 It distributes no font binaries and does not modify Taste Skill or other upstream packages.
+
+`skills/development-environment` and `skills/repository-artifacts` are authored in this repository.
+They provide task-based development environment and artifact disposition guidance while deferring to adopted repository governance.
+They contain no third-party binaries, runtime installers, hooks, or changes to repo-governance.
 pstack and EGM were removed from managed dependencies on 2026-11-16.
 The original pstack import used the upstream tag for Roylabs' installed version because the exact original checkout commit was unavailable.
 
