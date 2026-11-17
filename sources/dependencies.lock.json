@@ -8,6 +8,26 @@
   },
   "plugins": [
     {
+      "name": "context7",
+      "marketplace": "context7-marketplace",
+      "manifest": "plugins/codex/context7/.codex-plugin/plugin.json",
+      "source": "https://github.com/upstash/context7.git",
+      "ref": "27ef14ca41a57563891135cad663732d43203a8b",
+      "version": "1.0.2",
+      "ref_basis": "Registry Git ref",
+      "content_sha256": "ff7c6095e8effa93b876fc2f326dd21b7784063f034be7ce1b5fd56b72ea1fdd",
+      "declaration": {
+        "name": "context7",
+        "marketplace": "context7-marketplace",
+        "source": "https://github.com/upstash/context7.git",
+        "channel": "git-ref",
+        "manifest": "plugins/codex/context7/.codex-plugin/plugin.json",
+        "enabled": true,
+        "ref": "master"
+      },
+      "declaration_sha256": "b02ff2650a1f319e361c05199c634b19a9268d430af873fa50ed249cf74d2092"
+    },
+    {
       "name": "taste-skill",
       "marketplace": "taste-skill",
       "manifest": ".codex-plugin/plugin.json",
@@ -63,9 +83,18 @@
     "integrity": "sha512-TsGwEAWogMOhuI8npa3o8Y3popwqBIHLdbn80KGUv6rSExvlmY1kYNALMfSZG+qbliH9gffc+CWC4JPlkoFshw==",
     "tarball": "https://registry.npmjs.org/@fission-ai/openspec/-/openspec-2.0.0.tgz"
   },
-  "registry_sha256": "441ac786f3827b454035e00872ea67469202977afc09b7c278b19319fe7cc175",
+  "registry_sha256": "7302e18ed1e17f215fd87b95e1ab5585144bceed3cfaa995d4ccbc796cbfbdd2",
   "registrations": {
     "plugins": [
+      {
+        "name": "context7",
+        "marketplace": "context7-marketplace",
+        "source": "https://github.com/upstash/context7.git",
+        "channel": "git-ref",
+        "manifest": "plugins/codex/context7/.codex-plugin/plugin.json",
+        "enabled": true,
+        "ref": "master"
+      },
       {
         "name": "taste-skill",
         "marketplace": "taste-skill",

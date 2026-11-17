@@ -1,6 +1,15 @@
 schema_version = 1
 
 [[plugins]]
+name = "context7"
+marketplace = "context7-marketplace"
+source = "https://github.com/upstash/context7.git"
+channel = "git-ref"
+ref = "master"
+manifest = "plugins/codex/context7/.codex-plugin/plugin.json"
+enabled = true
+
+[[plugins]]
 name = "taste-skill"
 marketplace = "taste-skill"
 source = "https://github.com/Leonxlnx/taste-skill.git"

@@ -16,6 +16,9 @@
 - 공식 agent-desktop CLI를 기본 데스크톱 조작 도구로 사용한다.
 - 인덱스가 있는 저장소에서는 호출 관계·구조 탐색에 CodeGraph를 선택하고, 알려진 파일 읽기와 텍스트 검색은 바로 수행한다.
 - 기존 OpenSpec 변경과 지속적인 명세가 필요한 기능·구조 변경에는 `openspec-workflow`를 선택하고, 구현 요청은 설계 이후에도 이어서 수행한다.
+- 버전별 라이브러리 API 확인이 필요하면 실제 프로젝트 의존성 버전을 먼저 확인하고 Context7을 명시적 호출 없이 선택한다.
+- 알려진 파일 읽기와 작은 기계적 수정에는 Context7을 선행 필수로 두지 않는다.
+- Context7이 미지원·로그인·한도·결과 부족으로 충분한 근거를 주지 못하면 공식 문서와 소스 검사로 계속한다.
 - 스킬 이름을 명시하지 않아도 모델이 작업 목적에 맞는 도구를 선택한다.
 - 웹사이트 제작과 시각 디자인·리디자인·완성도 개선에 적합하면 `design-taste-frontend`를 선택한다.
 - 기존 저장소의 웹 개발 경로와 사용자가 지정한 배포 대상을 유지하고, 요청한 호스팅·게시 또는 기존 Site 유지보수에 Sites가 적합할 때 선택한다.
@@ -62,7 +65,16 @@
 | agent-desktop CLI | GitHub 최신 안정 릴리스의 Windows x64 배포물과 실행 파일 SHA256 확인 |
 | CodeGraph CLI | npm `@colbymchenry/codegraph`의 `latest` 배포와 integrity 확인 |
 | OpenSpec CLI | npm `@fission-ai/openspec`의 `latest` 배포와 integrity 확인 |
+| Context7 | 공식 `context7@context7-marketplace` 플러그인을 기존 설치기 지원으로 관리하며 `git-ref: master`를 정확한 commit과 콘텐츠 digest로 lock에 고정 |
 | Taste Skill | 원본 `taste-skill@taste-skill` 플러그인의 `design-taste-frontend`를 두 PC의 설치 대상으로 지정 |
+
+Context7의 원격 저장소는 [upstash/context7.git](https://github.com/upstash/context7.git)이다.
+현재 확인한 플러그인 manifest 버전은 `1.0.2`다.
+플러그인은 hosted endpoint `https://mcp.context7.com/mcp`를 사용하므로 로컬 MCP 서버 프로세스를 추가하지 않는다.
+설치 후에는 [공식 안내](https://context7.com/docs/clients/codex)에 따라 새 스레드에서 스킬과 도구를 로드한다.
+무인증 protocol 조회의 단일 성공은 계속되는 무인증 접근이나 두 PC 설치 완료의 근거로 사용하지 않는다.
+계정 정보와 토큰은 Git에서 제외한다.
+원본 플러그인 캐시와 프로젝트의 repo-governance는 유지한다.
 
 Taste Skill을 사용할 때도 기존 프레임워크, SSR·API·인증·데이터 흐름, 컴포넌트·디자인 토큰과 배포 경로를 유지한다.
 기존 저장소의 개발 규칙도 유지한다.

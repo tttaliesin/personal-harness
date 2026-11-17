@@ -43,6 +43,23 @@ In repositories already indexed by CodeGraph (a `.codegraph/` directory exists a
 - An authorized implementation request can proceed through planning, implementation, and verification in one task. Pause for a material unresolved decision or an actual authorization boundary, not merely because a proposal was written.
 <!-- openspec-routing:end -->
 
+<!-- context7-routing:start -->
+## Context7
+
+- 라이브러리·프레임워크의 API, 설정, 버전별 동작이나 코드 예제를 확인할 필요가 있으면 공식 `context7@context7-marketplace`를 자율적으로 선택한다.
+  사용자가 스킬 이름이나 `use context7`를 입력할 필요는 없다.
+- 실제 의존성·lock과 작업 대상 버전을 먼저 확인하고 공식 라이브러리와 해당 버전의 자료를 우선한다.
+  지원하지 않는 버전의 자료를 현재 프로젝트에 맞는 근거로 단정하지 않는다.
+- 알려진 파일의 직접 읽기·정확한 텍스트 검색·작은 기계적 수정에는 Context7 조회를 선행 조건으로 두지 않는다.
+  프레임워크 이름이 등장한다는 이유만으로 모든 작업에서 호출하지 않는다.
+- 인증·한도·연결 실패나 문서 부족이 있으면 가능한 공식 문서·소스·로컬 검사로 계속하고 미확인 범위를 알린다.
+  Context7 자료는 실제 코드 검증을 대신하지 않는다.
+- 조회에는 필요한 기술 질문만 전달한다.
+  인증 값·비공개 코드·사용자 대화 전체를 보내지 않으며 별도 요청 없는 문서 평가·피드백 전송은 수행하지 않는다.
+- 원본 플러그인 파일과 캐시는 수정하지 않는다.
+  기존 프로젝트의 스택·배포 경로·repo-governance와 개발 규칙을 유지한다.
+<!-- context7-routing:end -->
+
 <!-- taste-skill-routing:start -->
 ## Taste Skill 선택
 

@@ -18,6 +18,20 @@ Taste Skill is registered from [Leonxlnx/taste-skill](https://github.com/Leonxln
 The official CLI installs its complete source, including skill references, scripts, assets and MIT license.
 The selected stable release, exact commit and whole-plugin source digest are recorded in the dependency lock.
 The harness does not edit upstream plugin files; its task selection and existing-project preservation rules live in `common/AGENTS.md`.
+
+Context7 is registered from the official [upstash/context7.git](https://github.com/upstash/context7.git) repository as `context7@context7-marketplace`.
+The registry tracks `master` through `git-ref`; the existing installer locks the resolved exact commit and content digest.
+The currently verified [Codex plugin manifest](https://github.com/upstash/context7/blob/master/plugins/codex/context7/.codex-plugin/plugin.json) version is `1.0.2`.
+The official [marketplace catalog](https://github.com/upstash/context7/blob/master/.agents/plugins/marketplace.json) points to `plugins/codex/context7`.
+The plugin connects to the hosted endpoint `https://mcp.context7.com/mcp` rather than adding a local MCP server process.
+Its bundled skill supports autonomous selection for library documentation and version-specific API checks.
+Harness routing first checks the project's actual dependency version and does not require a lookup before known direct reads or small mechanical edits.
+Unsupported queries, authentication requirements, rate limits or insufficient results fall back to official documentation and source inspection.
+The harness preserves upstream plugin files, caches and project governance.
+Account records and authentication tokens remain outside Git.
+The [official Codex guide](https://context7.com/docs/clients/codex) instructs users to start a new thread after installation.
+Installation integrity and successful documentation retrieval are recorded separately in the [2026-11-17 deployment record](../docs/history/context7-2026-11-17.md).
+
 `skills/openspec-workflow` is a Personal Harness adapter authored in this repository.
 It uses the official OpenSpec CLI's schema and instructions instead of distributing modified upstream workflow skills.
 The initial adapter was checked against `@fission-ai/openspec` 2.0.0 and the [official CLI reference](https://github.com/Fission-AI/OpenSpec/blob/main/docs/cli.md).
