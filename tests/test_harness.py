@@ -181,6 +181,10 @@ class FakeRepository:
             ("korean-typography", "SKILL.md"): "# 한국어 타이포그래피\n".encode(),
             ("korean-typography", "references/fonts.md"): "# 글꼴 선택\n".encode(),
             ("korean-typography", "references/layout/wrapping.md"): "# 한글 줄바꿈\r\n".encode(),
+            ("feature-sliced-design", "SKILL.md"): b"# Feature-Sliced Design\n",
+            ("feature-sliced-design", "references/layers.md"): b"# Layers\r\n",
+            ("feature-sliced-design", "references/examples/imports.md"): b"# Import boundaries\n",
+            ("feature-sliced-design", "evals/evals.json"): b'{"evals": []}\n',
             ("taste-windows-runtime", "SKILL.md"): b"# Taste Windows runtime\n",
             ("taste-windows-runtime", "scripts/run.mjs"): b"import './preload.mjs';\r\n",
             ("taste-windows-runtime", "scripts/preload.mjs"): b"export const runtime = 'windows';\n",
@@ -284,7 +288,7 @@ class PersistentStateTests(unittest.TestCase):
                 expected = payload if skill in harness.REPOSITORY_SKILLS else files[f"skills/{skill}/{relative}"]
                 with self.subTest(skill=skill, relative=relative):
                     self.assertEqual(fixture.skill_target(skill, relative).read_bytes(), expected)
-            for skill in ("korean-typography", "taste-windows-runtime"):
+            for skill in ("korean-typography", "taste-windows-runtime", "feature-sliced-design"):
                 with self.subTest(agents_skill=skill):
                     self.assertTrue((fixture.home / ".agents/skills" / skill / "SKILL.md").is_file())
                     self.assertFalse((fixture.codex / "skills" / skill).exists())
@@ -1095,7 +1099,7 @@ class BuildPlanTests(TemporaryHarnessTestCase):
         self.assertEqual(plan.missing, [])
         self.assertEqual({change.path for change in plan.changes}, self.fixture.expected_targets())
         self.assertEqual(len(plan.changes), len(self.fixture.expected_targets()))
-        for skill in ("korean-typography", "taste-windows-runtime"):
+        for skill in ("korean-typography", "taste-windows-runtime", "feature-sliced-design"):
             with self.subTest(agents_skill=skill):
                 target = self.fixture.home / ".agents/skills" / skill
                 self.assertIn(target / "SKILL.md", {change.path for change in plan.changes})

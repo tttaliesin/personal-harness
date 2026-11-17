@@ -13,6 +13,7 @@ Taste Skill의 `design-taste-frontend`는 웹사이트 제작과 시각 디자�
 | OpenSpec | 기존 변경 이어가기, 지속적인 요구사항이 필요한 기능·구조 변경 | 해당 저장소에서 OpenSpec 도입을 요청했거나 이미 사용 중임 |
 | Context7 | 라이브러리·프레임워크의 버전별 문서, API·설정·마이그레이션 확인 | 공식 `context7@context7-marketplace` 플러그인의 MCP 도구 사용 가능 |
 | Microsoft Learn | .NET·ASP.NET Core·C#·Windows·PowerShell의 공식 API·설정·버전별 동작·코드 예제 확인 | 공식 원격 HTTP `microsoft-learn` MCP 도구 사용 가능 |
+| FSD | 기존 FSD 저장소의 파일 배치·레이어·슬라이스·공개 API·import 경계 판단 | 저장소의 FSD 채택이 확인되고 공식 `feature-sliced-design` 스킬 사용 가능 |
 | Taste Skill | 웹사이트 제작, 시각 디자인·리디자인·완성도 개선 | 원본 `taste-skill@taste-skill` 플러그인의 `design-taste-frontend` 사용 가능 |
 | Korean Typography | 한국어 웹·앱 UI의 서체·혼합 조판·줄바꿈·로딩 검토 | `korean-typography` 사용자 스킬 사용 가능 |
 | Taste Windows Runtime | 원본 Taste 브라우저 검사의 Windows 실행 호환 | `taste-windows-runtime` 사용자 스킬 사용 가능 |
@@ -31,6 +32,10 @@ flowchart TD
     C --> S[OpenSpec로 요구사항과 진행 상태 관리]
     C --> L[실제 의존성 버전 확인 후 Context7 조회]
     C --> M[대상 버전 확인 후 Microsoft Learn 조회]
+    C --> A{기존 FSD 저장소의 구조 작업인가?}
+    A -->|예| K[공식 FSD Skill 선택]
+    A -->|아니오·불확실| D
+    K --> I
     C --> F[Taste Skill로 시각 디자인]
     G -->|인덱스가 없거나 부족함| D
     S --> I[요청 범위에 맞게 설계와 구현]
@@ -88,6 +93,26 @@ Context7과의 고정 호출 순서는 두지 않는다.
 연결·도구 오류나 문서 부족이 있으면 공식 문서·소스·로컬 검사로 계속한다.
 조회에는 필요한 기술 질문만 전달하며 비공개 코드·인증 값·사용자 대화 전체는 전송하지 않는다.
 기존 프로젝트의 스택·배포 경로·repo-governance와 개발 규칙을 유지한다.
+
+## FSD 선택과 저장소별 아키텍처 검사
+
+FSD 채택이 저장소 지침·설계 문서·기존 설정으로 확인된 저장소의 구조 작업에서 공식 `feature-sliced-design`을 명시적 호출 없이 선택한다.
+React나 일반 프런트엔드 작업, `pages`·`shared`·`features` 폴더 이름만으로 선택하지 않는다.
+채택 여부가 불확실하면 기존 구조를 유지한다.
+기존 FSD 버전·예외·프레임워크·라우팅·SSR·API·배포 규칙과 repo-governance를 우선한다.
+스킬 사용만으로 FSD 도입·전환·기존 레이어 제거를 시작하지 않는다.
+
+[FSD 공식 문서](https://fsd.how/docs/llms/)가 직접 안내하는 [feature-sliced/skills](https://github.com/feature-sliced/skills)의 원본을 사용한다.
+정확한 commit과 참조·평가 파일을 포함한 모든 파일의 해시는 [출처 기록](../sources/feature-sliced-skill.json)에 있다.
+원본을 고치지 않고 상위 사용자 지침에서 선택 범위를 제한한다.
+공식 배포 여부는 모델 답변 품질 인증과 구분한다.
+원본 CI는 형식·참조를 검사하며 의미적 답변 정확도는 별도 평가 대상이다.
+
+Steiger는 FSD 프로젝트의 구조·import 검사에, ArchUnitNET은 C# 프로젝트의 의존성 규칙 테스트에 사용한다.
+각 저장소에서 도입 여부·버전·규칙·실행 명령과 시점을 정한다.
+기존 검사 명령이 있으면 해당 저장소의 작업 범위에 맞게 사용한다.
+하네스 전역 설치·자동 hook·모든 작업의 필수 검사는 추가하지 않는다.
+이 스킬 설치는 두 검사 도구의 설치나 프로젝트 설정 변경을 포함하지 않는다.
 
 ## Taste Skill 선택
 

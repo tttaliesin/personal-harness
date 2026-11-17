@@ -159,10 +159,11 @@ task install -- -Locked
 | [common/AGENTS.md](common/AGENTS.md) | 전역 사용자 지침. `${CODEX_HOME}`은 적용 대상 PC에서 치환 |
 | [registry.toml](registry.toml) | 배포할 Git 플러그인과 npm·Python·HTTP MCP의 등록 정보 |
 | [common/config.toml](common/config.toml) | 모델, 추론 수준, 사용자 정책, Desktop 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
-| [skills](skills) | `create-readme`, `openspec-workflow`, `korean-typography`, `taste-windows-runtime`, `agent-desktop` 계열 원본과 참조 문서 |
+| [skills](skills) | `create-readme`, `openspec-workflow`, `korean-typography`, `taste-windows-runtime`, 공식 `feature-sliced-design`, `agent-desktop` 계열 원본과 참조 문서 |
 | [hosts](hosts) | PC 이름, 운영체제 설정, 로컬 경로의 기본 규칙 |
 | `.local/<hostname>.toml` | 해당 PC에서만 사용하는 경로와 선택적 설정 덮어쓰기. Git 제외 |
 | [sources/dependencies.lock.json](sources/dependencies.lock.json) | 마지막으로 설치·검증한 외부 도구 버전, Git revision, 배포 해시 |
+| [sources/feature-sliced-skill.json](sources/feature-sliced-skill.json) | 공식 FSD 스킬의 출처, 고정 commit과 전체 파일 해시 |
 | [scripts](scripts) | 원격 설치 진입점과 Task가 사용하는 설치·적용 구현 |
 | [package.json](package.json) | Git 패키지의 실행 명령과 배포 파일 목록 |
 

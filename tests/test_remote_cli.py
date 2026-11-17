@@ -248,6 +248,12 @@ class RemoteCliTests(unittest.TestCase):
     def receipt(self, manager=None):
         return json.loads(((manager or self.manager) / "active.json").read_text(encoding="utf-8"))
 
+    def fsd_payload_files(self):
+        source = self.payload / "skills/feature-sliced-design"
+        self.assertTrue((source / "SKILL.md").is_file())
+        return {path.relative_to(self.payload).as_posix()
+                for path in source.rglob("*") if path.is_file()}
+
     def legacy_source(self, change=None, pre_registry=True):
         hashes = dict([call for call in self.calls() if call["kind"] == "wrapper"][-1]["hashes"])
         content = {name: (self.payload / name).read_bytes() for name in hashes}
@@ -309,6 +315,10 @@ class RemoteCliTests(unittest.TestCase):
         self.assertFalse((self.manager / "releases").exists())
         for name in ("skills/agent-desktop/references/commands-system.md", "sources/agent-desktop-LICENSE"):
             self.assertIn(name, wrapper["hashes"])
+        for name in self.fsd_payload_files():
+            with self.subTest(fsd_payload=name):
+                self.assertEqual(wrapper["hashes"][name],
+                                 hashlib.sha256((self.payload / name).read_bytes()).hexdigest())
         for name in ("scripts/test.ps1", "AGENTS.md", "Taskfile.yml", "__pycache__"):
             self.assertNotIn(name, wrapper["hashes"])
 
@@ -1104,6 +1114,7 @@ class RemoteCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         package = json.loads(result.stdout)[0]
         files = {item["path"] for item in package["files"]}
+        self.assertTrue(self.fsd_payload_files().issubset(files))
         for name in ("skills/agent-desktop/references/commands-system.md", "skills/agent-desktop-windows/references/troubleshooting.md",
                      "sources/agent-desktop-LICENSE", "docs/deployment.md", "scripts/bootstrap.ps1",
                      "registry.toml", "scripts/registry.py", "scripts/mcp_packages.py", "scripts/windows_paths.py", "scripts/share.py"):

@@ -62,6 +62,7 @@
 | `openspec-workflow` | 저장소에서 작성한 연동 스킬을 `~/.agents/skills/openspec-workflow`에 복사 |
 | `korean-typography` | 한글 웹·앱 UI 지침과 참조 문서를 `~/.agents/skills/korean-typography`에 복사 |
 | `taste-windows-runtime` | 원본 Taste 브라우저 검사에만 적용하는 Windows 실행기를 `~/.agents/skills/taste-windows-runtime`에 복사 |
+| `feature-sliced-design` | 공식 FSD 원본과 참조·평가 디렉터리 전체를 `~/.agents/skills/feature-sliced-design`에 복사하며 이미 FSD를 쓰는 저장소에서만 자율 선택 |
 | `agent-desktop` | 설치한 최신 안정 릴리스의 공식 스킬과 참조 문서를 Codex 홈의 `skills`에 복사 |
 | `agent-desktop-windows` | 같은 릴리스의 Windows 스킬과 참조 문서를 복사 |
 | agent-desktop CLI | GitHub 최신 안정 릴리스의 Windows x64 배포물과 실행 파일 SHA256 확인 |
@@ -97,6 +98,9 @@ Taste Skill을 사용할 때도 기존 프레임워크, SSR·API·인증·데이
 대화가 한국어라는 이유만으로 결과물의 언어를 바꾸지 않는다.
 
 초기 스킬 파일 11개의 SHA256은 [Roylabs 원본 기록](../sources/roylabs-2026-11-12.json)에 있다.
+공식 FSD 스킬의 고정 commit과 전체 파일 해시는 [FSD 출처 기록](../sources/feature-sliced-skill.json)에 있다.
+FSD 스킬은 배포 소스에 포함된 스킬로 등록하며 Git 플러그인·MCP용 `registry.toml`에 가짜 플러그인 항목을 추가하지 않는다.
+Steiger와 ArchUnitNET의 도입은 저장소별로 결정하며 하네스 전역 의존성이나 자동 hook으로 등록하지 않는다.
 현재 설치 결과와 버전 정보는 [dependencies.lock.json](../sources/dependencies.lock.json)에 기록한다.
 스킬에 포함된 문서를 일부만 복사하지 않고 해당 디렉터리 전체를 관리한다.
 

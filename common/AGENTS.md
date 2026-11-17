@@ -80,6 +80,24 @@ In repositories already indexed by CodeGraph (a `.codegraph/` directory exists a
 - 기존 프로젝트의 스택·배포 경로·repo-governance와 개발 규칙을 유지한다.
 <!-- microsoft-learn-routing:end -->
 
+<!-- fsd-routing:start -->
+## Feature-Sliced Design
+
+- 저장소 지침·설계 문서·기존 설정으로 FSD 채택이 확인된 저장소에서만 공식 `feature-sliced-design` 스킬을 자율적으로 선택한다.
+  해당 저장소의 파일 배치·레이어·슬라이스·공개 API·import 경계를 다룰 때 사용하며 명시적 스킬 호출은 필요하지 않다.
+- React·프런트엔드 작업이라는 이유나 `pages`·`shared`·`features` 폴더 이름만으로 FSD 채택을 추정하지 않는다.
+  FSD를 쓰지 않거나 채택 여부가 불확실하면 기존 구조를 유지한다.
+- 기존 저장소의 FSD 버전·합의된 예외·프레임워크·라우팅·SSR·API·배포 경로와 repo-governance를 포함한 개발 규칙을 우선한다.
+  스킬 선택은 FSD 신규 도입·마이그레이션·기존 레이어 제거의 권한을 뜻하지 않는다.
+- 공식 원본과 참조 파일을 수정하지 않고 작업에 필요한 참조만 읽는다.
+  요청 범위 안에서 설계·구현·검증을 이어가며 별도 필수 승인 단계를 추가하지 않는다.
+
+Steiger는 FSD 저장소별 구조 검사기로, ArchUnitNET은 C# 저장소별 아키텍처 테스트 도구로 다룬다.
+도입·버전·검사 규칙·실행 시점은 각 저장소의 요청 범위와 개발 규칙에 따른다.
+이 하네스는 둘을 전역 설치하거나 자동 hook·모든 작업의 필수 검사로 등록하지 않는다.
+스킬의 권장 명령만으로 의존성 설치나 프로젝트 설정 변경을 시작하지 않는다.
+<!-- fsd-routing:end -->
+
 <!-- taste-skill-routing:start -->
 ## Taste Skill 선택
 
