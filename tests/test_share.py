@@ -493,11 +493,13 @@ class ShareTests(unittest.TestCase):
         api.assert_not_called()
 
     def test_managed_stdio_discards_lock_args_and_preserves_version_policy(self):
-        for kind in ("npm", "python"):
+        for kind in ("npm", "python", "nuget"):
             for version in ("latest", "1.2.3"):
                 with self.subTest(kind=kind, version=version):
-                    spec = normalize_mcp({"name": "service", "kind": kind, "package": "fixture-package",
-                        "entrypoint": "server", "version": version, "args": ["--config", "./" + self.secret]})
+                    spec = normalize_mcp({"name": "service", "kind": kind,
+                        "package": "NuGet.Mcp.Server" if kind == "nuget" else "fixture-package",
+                        "entrypoint": "nuget-mcp-server" if kind == "nuget" else "server",
+                        "version": version, "args": ["--config", "./" + self.secret]})
                     launch = {"command": "node" if kind == "npm" else str(self.state / "python.exe"),
                               "args": [str(self.state / "server-script")]}
                     self.config["mcp_servers"] = {"service": {**launch, "args": launch["args"] + spec["args"]}}
@@ -511,6 +513,19 @@ class ShareTests(unittest.TestCase):
                     self.assertEqual(code, 0)
                     uploaded = parse_registry(base64.b64decode(self.uploads[0][1]["content"]).decode())
                     self.assertEqual(uploaded.mcp[0], {**spec, "args": []})
+
+    def test_nuget_public_validation_uses_official_adapter_instead_of_pypi(self):
+        spec = normalize_mcp({"name": "nuget", "kind": "nuget", "package": "NuGet.Mcp.Server",
+                              "version": "1.4.23", "entrypoint": "nuget-mcp-server"})
+        candidate = share.Ready("mcp:nuget", spec)
+        with patch.object(share.mcp_packages.nuget_packages, "resolve", return_value={}) as resolve, \
+                patch.object(share.urllib.request, "urlopen", side_effect=AssertionError("Unexpected package registry")):
+            share.verify_public_plugins([candidate])
+            resolve.assert_called_once_with(spec)
+        with patch.object(share.mcp_packages.nuget_packages, "resolve", side_effect=ValueError(self.secret)):
+            with self.assertRaises(share.ShareError) as error:
+                share.verify_public_plugins([candidate])
+            self.assertNotIn(self.secret, str(error.exception))
 
     def test_existing_public_args_survive_merge_and_match_preview(self):
         self.npm()

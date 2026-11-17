@@ -467,6 +467,12 @@ def verify_public_plugins(selected: list[Ready]) -> None:
         if not candidate.id.startswith("plugin:"):
             if spec["kind"] == "http":
                 continue
+            if spec["kind"] == "nuget":
+                try:
+                    mcp_packages.nuget_packages.resolve(spec)
+                except (OSError, ValueError, KeyError):
+                    raise ShareError("Selected NuGet MCP package could not be verified from its official public source.") from None
+                continue
             package = urllib.parse.quote(spec["package"], safe="")
             version = spec["version"]
             if spec["kind"] == "npm":
