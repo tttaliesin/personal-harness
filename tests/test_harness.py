@@ -193,6 +193,8 @@ class FakeRepository:
             ("humanize-korean", "SKILL.md"): b"# Humanize Korean\n",
             ("humanize-korean", "references/roles/monolith.md"): b"# Run role\n",
             ("humanize-korean", "scripts/verify_gates.py"): b"# Portable verifier\n",
+            ("humanize-windows-runtime", "SKILL.md"): b"# Windows editor runtime\n",
+            ("humanize-windows-runtime", "scripts/prepare.ps1"): b"# Shared run preparation\n",
             ("taste-windows-runtime", "SKILL.md"): b"# Taste Windows runtime\n",
             ("taste-windows-runtime", "scripts/run.mjs"): b"import './preload.mjs';\r\n",
             ("taste-windows-runtime", "scripts/preload.mjs"): b"export const runtime = 'windows';\n",

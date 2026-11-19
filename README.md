@@ -161,7 +161,7 @@ task install -- -Locked
 | [common/AGENTS.md](common/AGENTS.md) | 전역 사용자 지침. `${CODEX_HOME}`은 적용 대상 PC에서 치환 |
 | [registry.toml](registry.toml) | 배포할 Git 플러그인과 npm·Python·HTTP MCP의 등록 정보 |
 | [common/config.toml](common/config.toml) | 모델, 추론 수준, 사용자 정책, Desktop 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
-| [skills](skills) | `create-readme`, `openspec-workflow`, `development-environment`, `repository-artifacts`, `korean-typography`, `ste-ko`, `humanize-korean`, `taste-windows-runtime`, 공식 `feature-sliced-design`, `agent-desktop` 계열 원본과 참조 문서 |
+| [skills](skills) | `create-readme`, `openspec-workflow`, `development-environment`, `repository-artifacts`, `korean-typography`, `ste-ko`, `humanize-korean`, `humanize-windows-runtime`, `taste-windows-runtime`, 공식 `feature-sliced-design`, `agent-desktop` 계열 원본과 참조 문서 |
 | [docs/repository-workflows.md](docs/repository-workflows.md) | 개발환경·문서·테스트 산출물의 자율 판단과 저장소 governance 역할 경계 |
 | [hosts](hosts) | PC 이름, 운영체제 설정, 로컬 경로의 기본 규칙 |
 | `.local/<hostname>.toml` | 해당 PC에서만 사용하는 경로와 선택적 설정 덮어쓰기. Git 제외 |

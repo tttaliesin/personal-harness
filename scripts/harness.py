@@ -31,12 +31,12 @@ PROTECTED = {"notify", "model_catalog_json", "openai_base_url", "experimental_re
 SKILLS = {"create-readme": "agents", "korean-typography": "agents",
           "development-environment": "agents", "repository-artifacts": "agents",
           "feature-sliced-design": "agents",
-          "ste-ko": "agents", "humanize-korean": "agents",
+          "ste-ko": "agents", "humanize-korean": "agents", "humanize-windows-runtime": "agents",
           "taste-windows-runtime": "agents",
           "agent-desktop": "codex", "agent-desktop-windows": "codex"}
 REPOSITORY_SKILLS = {"create-readme", "korean-typography", "feature-sliced-design",
                      "development-environment", "repository-artifacts",
-                     "ste-ko", "humanize-korean",
+                     "ste-ko", "humanize-korean", "humanize-windows-runtime",
                      "taste-windows-runtime", "openspec-workflow"}
 
 

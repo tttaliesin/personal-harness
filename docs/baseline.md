@@ -65,6 +65,7 @@
 | `korean-typography` | 한글 웹·앱 UI 지침과 참조 문서를 `~/.agents/skills/korean-typography`에 복사 |
 | `ste-ko` | 각 PC의 `~/.agents/skills/ste-ko`에 한국어 개발 문서 지침과 STE-KO 원본 규격을 복사 |
 | `humanize-korean` | `~/.agents/skills/humanize-korean`에 im-not-ai의 Codex용 원본 스킬·참조·실행 스크립트를 복사 |
+| `humanize-windows-runtime` | Windows 윤문에 필요한 작업 폴더와 Python 경로를 고정하는 실행 보조 |
 | `taste-windows-runtime` | 원본 Taste 브라우저 검사에만 적용하는 Windows 실행기를 `~/.agents/skills/taste-windows-runtime`에 복사 |
 | `feature-sliced-design` | 공식 FSD 원본과 참조·평가 디렉터리 전체를 `~/.agents/skills/feature-sliced-design`에 복사하며 이미 FSD를 쓰는 저장소에서만 자율 선택 |
 | `agent-desktop` | 설치한 최신 안정 릴리스의 공식 스킬과 참조 문서를 Codex 홈의 `skills`에 복사 |
@@ -104,6 +105,7 @@ Taste Skill을 사용할 때도 기존 프레임워크, SSR·API·인증·데이
 
 한국어 개발 문서는 STE-KO의 문서 규칙으로 작성한다.
 윤문이 필요한 문서에는 `humanize-korean`을 자율적으로 선택하고, 변경한 부분의 주체·조건·예외와 의무·허용·금지를 원문과 대조한다.
+Windows에서는 준비 단계가 반환한 작업 폴더의 절대 경로를 윤문과 검증 단계에 전달한다.
 이 흐름의 배포 목록에서 STE80을 제외한다.
 스킬 출처와 고정 버전은 [한국어 개발 문서 출처 기록](../sources/korean-development-writing.json)에서 확인할 수 있다.
 

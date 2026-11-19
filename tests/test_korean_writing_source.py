@@ -2,7 +2,9 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -63,3 +65,59 @@ class KoreanWritingSourceTests(unittest.TestCase):
                     self.assertEqual(gate.returncode, expected, gate.stdout + gate.stderr)
                     report = json.loads(gate.stdout[gate.stdout.index(b"{"):])
                     self.assertEqual(len(report["modality"]["lost_pairs"]), expected)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows PowerShell workflow")
+    def test_preparation_and_verification_reuse_run_directory_across_process_temp_changes(self):
+        powershell = shutil.which("powershell.exe")
+        self.assertIsNotNone(powershell)
+        skill = ROOT / "skills/humanize-korean"
+        prepare = ROOT / "skills/humanize-windows-runtime/scripts/prepare.ps1"
+        text = "릴리스 담당자는 테스트가 통과한 경우에만 배포 기록을 남겨야 한다."
+        command = (
+            "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\n"
+            "& $env:POLISH_TEST_SCRIPT -SkillRoot $env:POLISH_TEST_SKILL "
+            "-ScratchRoot $env:POLISH_TEST_SCRATCH -InputText $env:POLISH_TEST_SOURCE "
+            "-Genre report -Python $env:POLISH_TEST_PYTHON"
+        )
+        with tempfile.TemporaryDirectory(prefix="writing-runtime-") as temp:
+            workspace = Path(temp)
+            first = workspace / "#!sandbox.{a}" / "Temp"
+            second = workspace / "#!sandbox.{b}" / "Temp"
+            first.mkdir(parents=True)
+            second.mkdir(parents=True)
+            shared = workspace / "shared run files"
+            environment = {
+                **os.environ, "POLISH_TEST_SCRIPT": str(prepare), "POLISH_TEST_SKILL": str(skill),
+                "POLISH_TEST_SOURCE": text, "POLISH_TEST_PYTHON": sys.executable,
+                "TEMP": str(first), "TMP": str(first),
+            }
+
+            def prepare_in(root):
+                return subprocess.run(
+                    [powershell, "-NoProfile", "-NonInteractive", "-Command", command],
+                    env={**environment, "POLISH_TEST_SCRATCH": str(root)},
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=25,
+                )
+
+            rejected = prepare_in(first / "invalid")
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertFalse((first / "invalid").exists())
+
+            prepared = prepare_in(shared)
+            self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
+            result = json.loads(prepared.stdout.decode("utf-8-sig"))
+            run = Path(result["runDir"])
+            self.assertEqual(run.parent.resolve(), shared.resolve())
+            self.assertIn(result["route"], {"light", "standard", "heavy"})
+            before = run / "01_input.txt"
+            self.assertIn(text, (run / "01_input_with_metrics.txt").read_text(encoding="utf-8"))
+            self.assertEqual(before.read_text(encoding="utf-8"), text)
+            after = run / "final.md"
+            after.write_text(text, encoding="utf-8")
+            gate = subprocess.run(
+                [result["python"], "-B", "-X", "utf8", str(skill / "scripts/verify_gates.py"),
+                 "--before", str(before), "--after", str(after), "--genre", "report", "--json"],
+                cwd=second, env={**os.environ, "TEMP": str(second), "TMP": str(second)},
+                capture_output=True, timeout=25,
+            )
+            self.assertEqual(gate.returncode, 0, gate.stdout + gate.stderr)

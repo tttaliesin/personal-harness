@@ -10,3 +10,9 @@
 
 - [x] 2.1 Apply both skills and the marked instruction block to Homelab and Roylabs. Verify the same block and exact file bytes on both hosts.
 - [x] 2.2 Confirm both skills are enabled in each host's App Server catalog. Run the installed native editor checks for an unchanged clause and a weakened obligation. Verify unchanged configuration, protected hook files, and 53 installed repo-governance files on Roylabs.
+
+## 3. Keep Windows editor work files across calls
+
+- [x] 3.1 Add a Windows preparation helper and route editor runs to an absolute shared directory.
+- [x] 3.2 Verify separate processes with different temporary directories. Run `task test` with 307 passes and two platform skips.
+- [x] 3.3 Deploy both PCs and send the same editing request in fresh Desktop conversations. Verify the shared run path, first-attempt preparation and gate success, and preservation of the source rules in both final texts.

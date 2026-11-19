@@ -40,3 +40,12 @@ It SHALL exclude STE80 from this workflow and keep editor artefacts local.
 
 - **WHEN** the document needs no polishing
 - **THEN** the agent completes the work without the editor workflow.
+
+### Requirement: Shared Windows editor run directory
+
+The Windows execution helper SHALL allocate a run under the selected shared scratch directory and pass its absolute path to the original editor.
+
+#### Scenario: Preparing and verifying in separate Desktop calls
+
+- **WHEN** a preparation call and a verification call have different process temporary directories
+- **THEN** both calls use the same run directory and the verification call can read the prepared source and candidate.

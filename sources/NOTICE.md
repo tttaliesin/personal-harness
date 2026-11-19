@@ -62,6 +62,8 @@ The adapter selects STE-KO's document rules for Korean development documents.
 The installer resolves the upstream reference link and script launchers by copying the referenced files from the pinned commit.
 Both MIT licenses, exact upstream revisions, and file hashes are recorded with the [Korean writing sources](korean-development-writing.json).
 The common routing selects the Korean editor when a draft needs polishing and compares changed clauses with the original.
+`skills/humanize-windows-runtime` supplies repository-authored Windows preparation for the upstream package.
+It allocates a shared run path and passes it to the original script.
 
 `skills/openspec-workflow` is a Personal Harness adapter authored in this repository.
 It uses the official OpenSpec CLI's schema and instructions instead of distributing modified upstream workflow skills.

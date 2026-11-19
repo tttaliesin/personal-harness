@@ -250,7 +250,7 @@ class RemoteCliTests(unittest.TestCase):
 
     def imported_skill_payload_files(self):
         files = set()
-        for name in ("feature-sliced-design", "ste-ko", "humanize-korean"):
+        for name in ("feature-sliced-design", "ste-ko", "humanize-korean", "humanize-windows-runtime"):
             source = self.payload / "skills" / name
             self.assertTrue((source / "SKILL.md").is_file())
             files.update(path.relative_to(self.payload).as_posix()

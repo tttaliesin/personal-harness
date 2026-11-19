@@ -11,6 +11,7 @@ Both Windows hosts already have Codex profiles that retain their own settings an
 - Deploy the pinned upstream Codex copy-install payload for `humanize-korean`. Materialize the reference tree and runtime scripts as regular files so the bundle works outside the source checkout.
 - Use the common instructions to select the editor only for needed Korean document polishing. Compare changed clauses with the draft before adopting them.
 - Keep upstream scratch files under an existing Git-excluded workspace or outside the repository. Run the bundled Python scripts natively on Windows.
+- Allocate the run on a shared, writable filesystem path. Pass the resulting absolute run directory and interpreter through preparation, editing, and verification. Each Desktop process can have a separate temporary directory.
 - Apply the new skill directories and the marked writing block to the hosts. Preserve the existing Codex configuration and other instructions when they have independent changes.
 
 ## Verification
