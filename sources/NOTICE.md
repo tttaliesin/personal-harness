@@ -55,6 +55,14 @@ The methodology version 2.1 is not a package release number.
 Autonomous selection is limited to repositories already adopting FSD by `common/AGENTS.md`.
 Steiger and ArchUnitNET remain per-repository tools rather than global harness dependencies.
 
+`skills/ste-ko` is a document-scoped adapter for [beamonic/ste-ko](https://github.com/beamonic/ste-ko).
+It carries the original specification, dictionary, task reference, and supporting documentation under the upstream MIT license.
+The adapter selects STE-KO's document rules for Korean development documents.
+`skills/humanize-korean` contains the original Codex entrypoint and the complete portable copy-install payload from [epoko77-ai/im-not-ai](https://github.com/epoko77-ai/im-not-ai).
+The installer resolves the upstream reference link and script launchers by copying the referenced files from the pinned commit.
+Both MIT licenses, exact upstream revisions, and file hashes are recorded with the [Korean writing sources](korean-development-writing.json).
+The common routing selects the Korean editor when a draft needs polishing and compares changed clauses with the original.
+
 `skills/openspec-workflow` is a Personal Harness adapter authored in this repository.
 It uses the official OpenSpec CLI's schema and instructions instead of distributing modified upstream workflow skills.
 The initial adapter was checked against `@fission-ai/openspec` 2.0.0 and the [official CLI reference](https://github.com/Fission-AI/OpenSpec/blob/main/docs/cli.md).

@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "imported_on": "2026-11-19",
+  "skills": {
+    "ste-ko": {
+      "source": "https://github.com/beamonic/ste-ko",
+      "source_commit": "ed98bcb249c6a5b129e983a5df8a761b520e0bb3",
+      "upstream_version": "0.5.0",
+      "license": "MIT",
+      "files": {
+        "LICENSE": {
+          "upstream_path": "LICENSE",
+          "sha256": "d5032e5a85f31c00b48353e5e35f715179b56d2d21e79d851d07b27a6e489bea"
+        },
+        "references/README.md": {
+          "upstream_path": "README.md",
+          "sha256": "d5361eccdd201cad7ac2e6ed03edbdf65dd5c08aec7e0af1c20f8c74c5855b02"
+        },
+        "references/SPEC.md": {
+          "upstream_path": "SPEC.md",
+          "sha256": "d15b086b487f9ce624093764d4f17f9fd6414c0479628984180878d3f99bf282"
+        },
+        "references/benchmarks/corpus-2026-08.md": {
+          "upstream_path": "benchmarks/corpus-2026-08.md",
+          "sha256": "c0843b394442e394f8fa593f54fb0aaf69bbdb7db679a43b6874234191aca8da"
+        },
+        "references/dictionary.md": {
+          "upstream_path": "dictionary.md",
+          "sha256": "0df4805d050749642f017c8e4790f2c918c5950f6c7b5d8b2030e98e5386e1dc"
+        },
+        "references/tasks.md": {
+          "upstream_path": "tasks.md",
+          "sha256": "a1e7d938a9ff0ea1f6ed4ae8720a2f227a027db4a028fd835fec79df97d274ec"
+        }
+      }
+    },
+    "humanize-korean": {
+      "source": "https://github.com/epoko77-ai/im-not-ai",
+      "source_commit": "c07df14d9f68da482ff5183591808a7d132d4a71",
+      "upstream_version": "v2.4.7",
+      "license": "MIT",
+      "files": {
+        "LICENSE": {
+          "upstream_path": "LICENSE",
+          "sha256": "4cc7e8c439fe42f09d98457599c129ea6df9e5d0e622750d75952b441a38343f"
+        },
+        "SKILL.md": {
+          "upstream_path": "codex/skills/humanize-korean/SKILL.md",
+          "sha256": "bd3494baca18a1a911372a257a6c993b169b4b0bc51ec589f3a24912770caeab"
+        },
+        "agents/openai.yaml": {
+          "upstream_path": "codex/skills/humanize-korean/agents/openai.yaml",
+          "sha256": "1af1a6a40a9f0f28f1447f3897fee425c63b59bd0244854e4ac1c158af37d1f6"
+        },
+        "references/ai-tell-taxonomy.md": {
+          "upstream_path": "skills/humanize-korean/references/ai-tell-taxonomy.md",
+          "sha256": "9eebe2a51a46a51edef3c041e3db6a1f8005d239e31ece0f503df277ceeaa729"
+        },
+        "references/baseline.json": {
+          "upstream_path": "skills/humanize-korean/references/baseline.json",
+          "sha256": "6b64904daa27c3f759f39a664bf8e7e6c2ea1f9dcacd6d457e97b10f60f43dc5"
+        },
+        "references/baseline_v2.json": {
+          "upstream_path": "skills/humanize-korean/references/baseline_v2.json",
+          "sha256": "b5f1725bd02fb4cc40eece68c5b8f1d7c7655775743196d8fd0bc5978f2ed916"
+        },
+        "references/design-notes.md": {
+          "upstream_path": "skills/humanize-korean/references/design-notes.md",
+          "sha256": "afd1bbae1c508ab774b1cee1735f50f7c5bde042d84811cb1e3205b61be91a12"
+        },
+        "references/diagnosis-rules.md": {
+          "upstream_path": "skills/humanize-korean/references/diagnosis-rules.md",
+          "sha256": "82d96d7b716a581bf1c57fe9382df960c78dafbfb0b1e65854871fc1c85481a4"
+        },
+        "references/empirical-validation.md": {
+          "upstream_path": "skills/humanize-korean/references/empirical-validation.md",
+          "sha256": "9c6c43a7de27b6ea6f3c3789e7c39e78009a2a1e93c891858f8d5942c7043216"
+        },
+        "references/lexicon.json": {
+          "upstream_path": "skills/humanize-korean/references/lexicon.json",
+          "sha256": "ae09a6b6ef88eacd086ae8a4adf2aa58fc1eb2e744acb48d2627de8e40abf1af"
+        },
+        "references/metrics.py": {
+          "upstream_path": "skills/humanize-korean/references/metrics.py",
+          "sha256": "4b12b3fcabb48c9d92ec8a051954650750e0199b6e6821ee0b2686575644ebe8"
+        },
+        "references/metrics_v2.py": {
+          "upstream_path": "skills/humanize-korean/references/metrics_v2.py",
+          "sha256": "6e3ddb40e2789ab37e95ef0bd5974a8fbeb2678919c17ee9afe16e8ae66ca341"
+        },
+        "references/quick-rules.footer.md": {
+          "upstream_path": "skills/humanize-korean/references/quick-rules.footer.md",
+          "sha256": "a5468d492216c90b349bbe0c74926b6660ca28bd946b8d8c470d1ed8b419cbf3"
+        },
+        "references/quick-rules.header.md": {
+          "upstream_path": "skills/humanize-korean/references/quick-rules.header.md",
+          "sha256": "7d52500806a7b5c014ed71bf7770ed3e743faf9d66be274f147360f2556c5ed4"
+        },
+        "references/quick-rules.md": {
+          "upstream_path": "skills/humanize-korean/references/quick-rules.md",
+          "sha256": "7a8e66c7b9326c1df7413f7a5662d69e89907591e16ba740e5746bf01f544b85"
+        },
+        "references/rewriting-playbook.md": {
+          "upstream_path": "skills/humanize-korean/references/rewriting-playbook.md",
+          "sha256": "1f949bb902e6d22027a297c7e820df54a0c14e304e451a607249704dd5e0b381"
+        },
+        "references/roles/diagnostician.md": {
+          "upstream_path": "skills/humanize-korean/references/roles/diagnostician.md",
+          "sha256": "befa064a7a6d1f350ffb6bbc4ffac333d4ad4e14ac834b026cccb94828f97a3b"
+        },
+        "references/roles/finalizer.md": {
+          "upstream_path": "skills/humanize-korean/references/roles/finalizer.md",
+          "sha256": "4eb684b62fce50d78b29bcb28f6a07c5e501398d0af03e1d2cb52b6dec1a02a3"
+        },
+        "references/roles/monolith.md": {
+          "upstream_path": "skills/humanize-korean/references/roles/monolith.md",
+          "sha256": "a0a4979636066f24da68d0f70eadcdd7a6dbe23d4a9ccd6a4987ee83f1abe158"
+        },
+        "references/scholarship.md": {
+          "upstream_path": "skills/humanize-korean/references/scholarship.md",
+          "sha256": "e83346a5b0147a923b725295cbee6b7fa3b22020840b5eee95c35f615b182e64"
+        },
+        "references/taxonomy-candidates.md": {
+          "upstream_path": "skills/humanize-korean/references/taxonomy-candidates.md",
+          "sha256": "7b959a5156cfac19d171206ee4d124afd9148eb840b05b38e9118b042f4fa9d8"
+        },
+        "references/web-service-spec.md": {
+          "upstream_path": "skills/humanize-korean/references/web-service-spec.md",
+          "sha256": "be887c5e60b9a37e63a4aa8156ada0da4298098a51451925a3a22b9a37e25f6a"
+        },
+        "scripts/checks.py": {
+          "upstream_path": "scripts/checks.py",
+          "sha256": "914ad098bea3bbc29a4fb68bd5e009b2781e33d19995dbccef5f6b2d93c01b9b"
+        },
+        "scripts/console.py": {
+          "upstream_path": "scripts/console.py",
+          "sha256": "88615f82f30262a1411ea61ab1ecd29c19b52a841d8fcdcc486c970ec4eb5336"
+        },
+        "scripts/lexical_layer.py": {
+          "upstream_path": "scripts/lexical_layer.py",
+          "sha256": "c5daa29fe42f03458e0b8e6fe53eae5af81611ab3768e798d2cfe203eac9f7fc"
+        },
+        "scripts/prepare_monolith_input.py": {
+          "upstream_path": "scripts/prepare_monolith_input.py",
+          "sha256": "9909186f04dae96f5ba83a43f051a1b21bbb175d04128545e34f1b0a7ba627d3"
+        },
+        "scripts/reassemble_chunks.py": {
+          "upstream_path": "scripts/reassemble_chunks.py",
+          "sha256": "03fafb4c92927344a1fd2b626fb90e16a6b3eaf53f0d1d7e5b6e31cf1773fb64"
+        },
+        "scripts/restore_modality.py": {
+          "upstream_path": "scripts/restore_modality.py",
+          "sha256": "232fb765e137193135ea8b496438941b13cb5833265b986d9350f6700d9eb7a2"
+        },
+        "scripts/sanitize_text.py": {
+          "upstream_path": "scripts/sanitize_text.py",
+          "sha256": "5b7b93d6c5655db31bf489af835575aa12cf8149410d66f604186457ce78dabb"
+        },
+        "scripts/strip_injected_commas.py": {
+          "upstream_path": "scripts/strip_injected_commas.py",
+          "sha256": "52af7878a1fc361333f2c2f2a5f1b20b1a3b559d761afbfa1419de11177462cd"
+        },
+        "scripts/verify_change_rate.py": {
+          "upstream_path": "scripts/verify_change_rate.py",
+          "sha256": "598367e230a73266e7329d622e41e1dbd37d25e53ee76728adc76dbe9649f7a1"
+        },
+        "scripts/verify_gates.py": {
+          "upstream_path": "scripts/verify_gates.py",
+          "sha256": "675b4b4995997b654c7ad5826348258d3420fdaf6e130a44898398064133794c"
+        }
+      }
+    }
+  }
+}

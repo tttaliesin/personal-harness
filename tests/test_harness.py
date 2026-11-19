@@ -188,6 +188,11 @@ class FakeRepository:
             ("feature-sliced-design", "references/layers.md"): b"# Layers\r\n",
             ("feature-sliced-design", "references/examples/imports.md"): b"# Import boundaries\n",
             ("feature-sliced-design", "evals/evals.json"): b'{"evals": []}\n',
+            ("ste-ko", "SKILL.md"): b"# STE-KO document guidance\n",
+            ("ste-ko", "references/SPEC.md"): b"# Upstream document rules\n",
+            ("humanize-korean", "SKILL.md"): b"# Humanize Korean\n",
+            ("humanize-korean", "references/roles/monolith.md"): b"# Run role\n",
+            ("humanize-korean", "scripts/verify_gates.py"): b"# Portable verifier\n",
             ("taste-windows-runtime", "SKILL.md"): b"# Taste Windows runtime\n",
             ("taste-windows-runtime", "scripts/run.mjs"): b"import './preload.mjs';\r\n",
             ("taste-windows-runtime", "scripts/preload.mjs"): b"export const runtime = 'windows';\n",
@@ -292,7 +297,7 @@ class PersistentStateTests(unittest.TestCase):
                 with self.subTest(skill=skill, relative=relative):
                     self.assertEqual(fixture.skill_target(skill, relative).read_bytes(), expected)
             for skill in ("korean-typography", "taste-windows-runtime", "feature-sliced-design",
-                          "development-environment", "repository-artifacts"):
+                          "development-environment", "repository-artifacts", "ste-ko", "humanize-korean"):
                 with self.subTest(agents_skill=skill):
                     self.assertTrue((fixture.home / ".agents/skills" / skill / "SKILL.md").is_file())
                     self.assertFalse((fixture.codex / "skills" / skill).exists())
@@ -1104,7 +1109,7 @@ class BuildPlanTests(TemporaryHarnessTestCase):
         self.assertEqual({change.path for change in plan.changes}, self.fixture.expected_targets())
         self.assertEqual(len(plan.changes), len(self.fixture.expected_targets()))
         for skill in ("korean-typography", "taste-windows-runtime", "feature-sliced-design",
-                      "development-environment", "repository-artifacts"):
+                      "development-environment", "repository-artifacts", "ste-ko", "humanize-korean"):
             with self.subTest(agents_skill=skill):
                 target = self.fixture.home / ".agents/skills" / skill
                 self.assertIn(target / "SKILL.md", {change.path for change in plan.changes})

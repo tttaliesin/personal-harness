@@ -144,6 +144,16 @@ Steiger는 FSD 저장소별 구조 검사기로, ArchUnitNET은 C# 저장소별 
   Taste Skill 원본과 repo-governance는 수정하지 않는다.
 <!-- korean-typography:end -->
 
+<!-- korean-development-writing:start -->
+## 한국어 개발 문서
+
+- 한국어 README·기술 명세·운영 절차·개발 규약을 작성하거나 본문을 고칠 때 STE-KO의 문서 규칙을 적용한다. `ste-ko`를 자율적으로 선택하며 대화 언어만으로 문서의 언어를 바꾸지 않는다.
+- 문서 초안에 번역투나 기계적인 반복이 남아 윤문이 필요할 때 `im-not-ai`의 `humanize-korean`을 자율적으로 선택한다. 스킬 이름을 입력할 필요는 없다. 일반 대화·코드 작업·맞춤법 수정과 이미 자연스러운 문서는 이 윤문 단계를 거치지 않는다.
+- 수정 전후를 대조한다. 주체·행동·조건·예외와 의무·허용·금지의 범위를 유지한다. 수치·단위·명령·식별자는 원문대로 둔다. 의미가 달라졌거나 확인할 수 없는 구간은 윤문 전 표현을 사용한다.
+- 윤문 스크립트에는 BOM 없는 UTF-8 작업본을 준다. 실행 산출물은 Git에서 제외가 확인된 로컬 경로나 저장소 밖 임시 경로에 둔다. Windows에서는 PowerShell에서 설치된 스킬의 절대 경로를 확인하고 기존 Python 실행 파일에 `-B` 옵션을 전달한다.
+- 기존 문서 규약과 채택된 repo-governance를 우선한다. 한국어 문서에 STE80을 적용하지 않는다.
+<!-- korean-development-writing:end -->
+
 <!-- development-environment-routing:start -->
 ## 개발환경 구성
 
