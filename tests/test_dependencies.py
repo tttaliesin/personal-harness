@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "installer"))
 import install_dependencies as installer
 import tomlkit
 
@@ -157,20 +157,22 @@ class DependencyTests(unittest.TestCase):
     def test_locked_preview_creates_nothing_and_never_installs_or_downloads(self):
         with TemporaryDirectory() as directory:
             repo = Path(directory)
-            sources = repo / "sources"
-            sources.mkdir()
-            sources.joinpath("dependencies.lock.json").write_bytes(
-                installer.REPO.joinpath("sources/dependencies.lock.json").read_bytes())
+            dependencies = repo / "dependencies"
+            dependencies.mkdir()
+            dependencies.joinpath("dependencies.lock.json").write_bytes(
+                installer.REPO.joinpath("dependencies/dependencies.lock.json").read_bytes())
             repo.joinpath("registry.toml").write_bytes(installer.REPO.joinpath("registry.toml").read_bytes())
+            repo.joinpath("package.json").write_bytes(installer.REPO.joinpath("package.json").read_bytes())
             before = set(repo.rglob("*"))
             with patch.object(installer, "REPO", repo), patch.object(installer, "find_codex", return_value=None), \
                     patch.object(installer, "install_agent") as agent, \
                     patch.object(installer, "install_codegraph") as graph, \
                     patch.object(installer, "install_openspec") as openspec, \
                     patch.object(installer, "install_plugins") as plugins, \
+                    patch.object(installer.mcp_packages, "install") as mcp, \
                     patch.object(installer.urllib.request, "urlopen") as network, redirect_stdout(io.StringIO()):
                 self.assertEqual(installer.main(["--host", "homelab-desktop", "--locked", "--codex-home", str(repo / "fake-home")]), 0)
-                for call in (agent, graph, openspec, plugins, network):
+                for call in (agent, graph, openspec, plugins, mcp, network):
                     call.assert_not_called()
             self.assertEqual(before, set(repo.rglob("*")))
 

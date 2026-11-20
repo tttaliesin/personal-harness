@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from tempfile import TemporaryDirectory
 import unittest
 
@@ -23,12 +24,12 @@ class TaskCommandTests(unittest.TestCase):
         temporary = TemporaryDirectory(prefix="root-task-")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name) / "repository's root with spaces"
-        self.scripts = self.root / "scripts"
-        self.scripts.mkdir(parents=True)
+        self.installer = self.root / "installer"
+        self.installer.mkdir(parents=True)
         shutil.copy2(ROOT / "Taskfile.yml", self.root)
-        for name in ("harness.ps1", "update-dependencies.ps1", "test.ps1"):
-            (self.scripts / name).write_text(PARAMETERS, encoding="utf-8")
-        self.calls = self.scripts / "calls.jsonl"
+        for name in ("harness.ps1", "update-dependencies.ps1"):
+            (self.installer / name).write_text(PARAMETERS, encoding="utf-8")
+        self.calls = self.installer / "calls.jsonl"
 
     def run_task(self, *arguments, cwd=None, environment=None):
         return subprocess.run([TASK, *arguments], cwd=cwd or self.root, env=environment,
@@ -77,17 +78,42 @@ class TaskCommandTests(unittest.TestCase):
                 self.assertTrue(record["locked"])
                 self.assertEqual(record["codex"], "D:/O'Brien/Codex App/codex.exe")
 
-    def test_check_apply_and_test_reach_the_expected_script_and_preserve_failure(self):
-        for command in ("check", "apply", "test"):
+    def test_check_and_apply_reach_harness_and_preserve_failure(self):
+        for command in ("check", "apply"):
             with self.subTest(command=command):
                 completed = self.run_task(command)
                 self.assertEqual(completed.returncode, 0, completed.stderr)
                 record = self.records()[-1]
-                self.assertEqual(record["script"], "test.ps1" if command == "test" else "harness.ps1")
+                self.assertEqual(record["script"], "harness.ps1")
                 self.assertEqual(record["python"], str(self.root / ".venv/Scripts/python.exe"))
         environment = dict(os.environ, HARNESS_TASK_TEST_EXIT="23")
         completed = self.run_task("--exit-code", "check", environment=environment)
         self.assertEqual(completed.returncode, 23, completed.stderr)
+
+    def test_test_runs_python_from_repository_root_and_preserves_failure(self):
+        tests = self.root / "tests"
+        tests.mkdir()
+        (tests / "test_fixture.py").write_text(
+            """from pathlib import Path
+import unittest
+
+class FixtureTest(unittest.TestCase):
+    def test_repository_root(self):
+        self.assertEqual(Path.cwd(), Path(__file__).resolve().parents[1])
+
+    def test_nonzero_exit(self):
+        self.fail("fixture failure")
+""",
+            encoding="utf-8",
+        )
+        arguments = ("test", f"PYTHON={sys.executable}", "--", "-k")
+        passed = self.run_task(*arguments, "test_repository_root", cwd=tests)
+        self.assertEqual(passed.returncode, 0, passed.stderr)
+        self.assertIn("Ran 1 test", passed.stderr)
+        failed = self.run_task("--exit-code", *arguments, "test_nonzero_exit", cwd=tests)
+        self.assertEqual(failed.returncode, 1, failed.stderr)
+        self.assertIn("fixture failure", failed.stderr)
+        self.assertEqual(self.records(), [])
 
 
 if __name__ == "__main__":

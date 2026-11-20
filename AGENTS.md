@@ -1,9 +1,12 @@
 # Personal Harness repository
 
 This repository manages the user's Codex harness, using roylabs-desktop as the baseline.
-Treat `common/AGENTS.md` and imported skills as deployable source data while editing the installer.
+Treat `common/AGENTS.md` and registered skills as deployable source data while editing the installer.
 
-- Keep portable policies in `common` and host metadata in `hosts`.
+- Keep shared policies and Windows defaults in `common` and supported host names in `package.json`.
+- Register standalone skills in `registry.toml` and keep each skill's references beside its `SKILL.md`.
+- Place maintained skills in `skills`, imported snapshots in `dependencies` and installation code in `installer`.
+- Keep Agent Desktop's verified skill directories and license at their existing paths.
 - Put private absolute paths and local overrides in ignored `.local/<hostname>.toml`.
 - Preserve app-generated `node_repl`, notify, marketplace paths, OpenCodex configuration, project trust and hook trust in the existing target profile.
 - Keep authentication, account records, sessions, runtime pipes and backup contents out of Git.

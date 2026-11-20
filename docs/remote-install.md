@@ -40,14 +40,14 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 `--prefer-online`은 캐시에 있는 Git 참조의 최신성을 다시 확인하게 한다.
 업데이트는 명령을 실행할 때만 수행한다.
 
-호스트 프로필은 현재 PC 이름으로 선택한다.
-다른 프로필을 사용하려면 명시한다.
+설치기는 현재 PC 이름이 [package.json](../package.json)의 `supportedHosts`에 등록됐는지 확인한다.
+다른 호스트를 사용하려면 `--host`로 지정한다.
 
 ```powershell
 npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git install --host homelab-desktop
 ```
 
-지원하는 프로필은 `homelab-desktop`과 `roylabs-desktop`이다.
+지원하는 호스트는 `homelab-desktop`과 `roylabs-desktop`이다.
 Python이나 Codex를 자동으로 찾지 못하면 `--python 'D:/Python/python.exe'` 또는 `--codex 'D:/tools/codex.exe'`를 추가한다.
 WindowsApps의 Python 실행 별칭은 인터프리터로 사용하지 않는다.
 기록한 의존성 버전을 재현할 때는 `--locked`를 추가한다.
@@ -81,19 +81,23 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 |---|---|
 | `<설치 루트>/active.json` | 적용과 검증을 모두 마친 마지막 실행의 기록 |
 | `<상태 루트>/<hostname>.toml` | 해당 PC의 경로와 선택적 설정 덮어쓰기 |
-| `<상태 루트>/tools` | agent-desktop, CodeGraph와 등록된 MCP 패키지의 실행 파일 |
+| `<상태 루트>/tools` | Agent Desktop, CodeGraph, OpenSpec, 등록된 MCP 패키지의 실행 파일 |
 | `<상태 루트>/python` | 설치기용 Python 가상환경 |
-| `<상태 루트>/sources/dependencies.lock.json` | 실제로 설치한 버전과 commit, 배포 해시 |
-| `<상태 루트>/skills` | 같은 잠금에 대응하는 공식 desktop 스킬 원본 |
+| `<상태 루트>/sources/dependencies.lock.json` | 실제로 설치한 버전과 커밋, 배포 해시 |
+| `<상태 루트>/skills` | 같은 잠금에 대응하는 공식 Agent Desktop 스킬 원본 |
+| `<상태 루트>/sources/agent-desktop-LICENSE` | 같은 잠금에 대응하는 공식 Agent Desktop 라이선스 |
 | `<상태 루트>/source-backups` | 공식 스킬 원본 갱신 전 백업 |
+| `~/.agents/skills/<name>/` | `registry.toml`의 `[[skills]]`에 등록한 스킬 디렉터리의 파일 전체 |
 | `<Codex 홈>/harness-backups` | 공통 파일 적용 전 백업 |
 
 기본 상태 루트는 `<설치 루트>/state`다.
 도구와 가상환경은 npm 임시 캐시를 가리키지 않는다.
 기존 `releases/<해시>` 사본은 성공한 업데이트에서 원본과 사용 여부를 검사한 뒤 정리한다.
+이전 형식의 사본은 `scripts/`와 `sources/` 등 해당 배포에서 사용한 경로를 기준으로 검사한다.
 변경됐거나 실제 도구가 참조하는 사본은 삭제하지 않고 오류로 알린다.
 npm이 내려받은 압축 배포물 캐시는 npm의 일반 캐시 정책을 따른다.
-기존 상태 잠금이 있으면 새 소스에 들어 있는 초기 잠금으로 덮어쓰지 않는다.
+PC별 상태 잠금의 기본 초기값은 배포 소스의 [dependencies/dependencies.lock.json](../dependencies/dependencies.lock.json)이다.
+기존 상태 잠금이 있으면 설치기는 해당 파일을 사용한다.
 설치 대상은 현재 등록 목록으로 정하므로 기존 상태 잠금에 없던 새 항목도 일반 업데이트에 포함된다.
 인증, 계정, 세션, 프로젝트 신뢰와 앱이 생성한 런타임은 기존 Codex 프로필에 남는다.
 등록된 MCP의 인증 변수는 해당 PC에서 제공한다.
@@ -131,7 +135,9 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 ```
 
 기존 `<hostname>.toml`의 경로와 설정은 유지한다.
-상태 잠금이 아직 없으면 인접한 기존 저장소의 잠금을 초기값으로 사용한다.
+새 로컬 설정을 작성할 때는 [로컬 설정 예시](local.example.toml)를 참고한다.
+상태 잠금이 아직 없으면 설치기는 인접한 체크아웃의 `dependencies/dependencies.lock.json`을 초기값으로 사용한다.
+이전 체크아웃의 `sources/dependencies.lock.json`도 초기값으로 사용할 수 있다.
 원래 저장소의 잠금은 변경하지 않는다.
 새로 생성하는 도구 경로는 선택한 상태 루트 안에 기록한다.
 로컬 설정의 절대경로는 계속 해당 PC에서만 관리한다.

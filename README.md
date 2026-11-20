@@ -1,9 +1,9 @@
 # Personal Harness
 
-Roylabs Desktop의 Codex User Harness를 기준으로 사용자 지침, 스킬, 공통 설정을 관리한다.
-공통 설정을 각 PC의 기존 설정에 병합하고, 앱 경로와 실행 중 생성되는 값은 해당 PC에서 유지한다.
+Roylabs Desktop의 Codex User Harness를 기준으로 공통 지침과 설정을 각 PC의 기존 Codex 프로필에 병합한다.
+설치기는 등록한 스킬과 필요한 개발 도구도 각 PC에 배포한다.
 
-[한 명령으로 설치](docs/remote-install.md) · [관리 범위와 기준 구성](docs/baseline.md) · [개발 도구 사용](docs/development-tools.md) · [적용과 복구](docs/deployment.md) · [원본과 버전](sources/NOTICE.md)
+[한 명령으로 설치](docs/remote-install.md) · [관리 범위와 기준 구성](docs/baseline.md) · [개발 도구 사용](docs/development-tools.md) · [적용과 복구](docs/deployment.md) · [원본과 버전](dependencies/NOTICE.md)
 
 ## 시작하기
 
@@ -105,7 +105,7 @@ NuGet MCP는 공식 `NuGet.Mcp.Server`와 하네스 전용 .NET 실행 환경을
 기존 프로젝트의 .NET 버전과 전역 PATH를 유지하며 C# 패키지 작업에서 필요할 때 자율적으로 선택한다.
 공식 .NET·Windows 자료가 필요하면 명시적인 호출 없이 선택하며 자세한 기준은 [개발 도구 사용](docs/development-tools.md#microsoft-learn-선택과-연결-구성)에 있다.
 실제 설치에 사용할 commit과 배포 해시를 확정한 뒤 도구를 설치한다.
-설치와 검증을 마치면 그 결과를 `sources/dependencies.lock.json`에 기록한다.
+설치와 검증을 마치면 그 결과를 `dependencies/dependencies.lock.json`에 기록한다.
 agent-desktop의 공식 스킬과 참조 문서도 같은 릴리스로 갱신한다.
 생성한 PC 경로는 Git에서 제외되는 `.local/<hostname>.toml`에 저장한다.
 Codex 실행 파일을 찾지 못하면 `task install -- -Codex 'D:/tools/codex.exe'`로 지정한다.
@@ -124,7 +124,7 @@ task check
 적용 후 Codex를 재시작하거나 새 채팅에서 지침과 도구 구성을 확인한다.
 설치 과정에서 요구하는 hook 신뢰 승인은 해당 PC에서 처리한다.
 
-호스트는 현재 PC 이름으로 선택한다.
+설치기는 현재 PC 이름이 [package.json](package.json)의 `supportedHosts`에 등록됐는지 확인한다.
 다른 호스트나 Python 실행 파일은 Task 변수로 지정한다.
 
 ```powershell
@@ -133,43 +133,50 @@ task check PYTHON='D:/Python/python.exe'
 task plan -- -HomeDirectory 'D:/Test Profile'
 ```
 
-`--` 뒤의 인자는 내부 PowerShell 스크립트로 전달한다.
+계획·검사·적용·설치·갱신 명령은 `--` 뒤의 인자를 해당 PowerShell 스크립트로 전달한다.
 
 ## 최신 버전으로 갱신하기
 
+`task install`과 `task update`는 같은 설치·적용 절차를 사용한다.
+기록된 버전을 재현할 때는 `-Locked`를 사용한다.
+
 ```powershell
-# 최신 버전 조회만 수행한다.
-task update:plan
-
-# 최신 조회, 설치, 공통 구성 적용과 검증을 이어서 수행한다.
-task update
-
-# 기록된 버전을 재현할 때만 -Locked를 사용한다.
 task install -- -Locked
 ```
 
-`task install`과 `task update`는 같은 설치·적용 절차를 사용한다.
 갱신은 명령을 실행할 때만 수행한다.
 별도의 예약 작업이나 백그라운드 자동 업데이트는 등록하지 않는다.
 공식 최신 버전을 조회하지 못하면 오류로 종료하고 기존 버전으로 성공한 것처럼 처리하지 않는다.
 
-## 관리하는 파일
+## 저장소 구조
 
 | 위치 | 역할 |
 |---|---|
-| `Taskfile.yml` | 저장소 루트에서 사용하는 준비, 설치, 갱신, 적용과 검증 명령 |
 | [common/AGENTS.md](common/AGENTS.md) | 전역 사용자 지침. `${CODEX_HOME}`은 적용 대상 PC에서 치환 |
-| [registry.toml](registry.toml) | 배포할 Git 플러그인과 npm·Python·HTTP MCP의 등록 정보 |
-| [common/config.toml](common/config.toml) | 모델, 추론 수준, 사용자 정책, Desktop 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
-| [skills](skills) | `create-readme`, `openspec-workflow`, `development-environment`, `repository-artifacts`, `korean-typography`, `ste-ko`, `humanize-korean`, `humanize-windows-runtime`, `taste-windows-runtime`, 공식 `feature-sliced-design`, `agent-desktop` 계열 원본과 참조 문서 |
-| [docs/repository-workflows.md](docs/repository-workflows.md) | 개발환경·문서·테스트 산출물의 자율 판단과 저장소 governance 역할 경계 |
-| [hosts](hosts) | PC 이름, 운영체제 설정, 로컬 경로의 기본 규칙 |
+| [common/config.toml](common/config.toml) | 모델, 사용자 정책, Windows sandbox와 Desktop 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
 | `.local/<hostname>.toml` | 해당 PC에서만 사용하는 경로와 선택적 설정 덮어쓰기. Git 제외 |
-| [sources/dependencies.lock.json](sources/dependencies.lock.json) | 마지막으로 설치·검증한 외부 도구 버전, Git revision, 배포 해시 |
-| [sources/feature-sliced-skill.json](sources/feature-sliced-skill.json) | 공식 FSD 스킬의 출처, 고정 commit과 전체 파일 해시 |
-| [sources/korean-development-writing.json](sources/korean-development-writing.json) | STE-KO 규격과 im-not-ai Codex 스킬의 고정 commit 및 원본 파일 해시 |
-| [scripts](scripts) | 원격 설치 진입점과 Task가 사용하는 설치·적용 구현 |
-| [package.json](package.json) | Git 패키지의 실행 명령과 배포 파일 목록 |
+| [registry.toml](registry.toml) | 단독 스킬, 외부 플러그인과 MCP의 등록 정보 |
+| [skills/engineering/](skills/engineering) | `development-environment`, `openspec-workflow`, `repository-artifacts` |
+| [skills/writing/](skills/writing) | `create-readme`, STE-KO 원본 참조를 함께 둔 `ste-ko`, `humanize-windows-runtime` |
+| [skills/design/](skills/design) | `korean-typography`, `taste-windows-runtime` |
+| [dependencies/skills/](dependencies/skills) | `feature-sliced-design`과 `humanize-korean`의 외부 원본 디렉터리 전체 |
+| [skills/agent-desktop/](skills/agent-desktop), [skills/agent-desktop-windows/](skills/agent-desktop-windows) | 공식 릴리스에서 검증하고 Codex 홈의 `skills/`에 복사하는 스킬과 참조 문서 |
+| [sources/agent-desktop-LICENSE](sources/agent-desktop-LICENSE) | 공식 스킬 갱신 시 검증하는 Agent Desktop 라이선스 |
+| [dependencies/dependencies.lock.json](dependencies/dependencies.lock.json) | 체크아웃에서 설치하고 검증한 의존성의 버전, 커밋, 배포 해시 |
+| [dependencies/NOTICE.md](dependencies/NOTICE.md) | 외부 원본의 출처와 라이선스 안내 |
+| [dependencies/](dependencies)의 출처 JSON | 고정 커밋과 파일 해시 ([FSD](dependencies/feature-sliced-skill.json), [한국어 개발 문서](dependencies/korean-development-writing.json), [Roylabs 기준 구성](dependencies/roylabs-2026-11-12.json)) |
+| [installer/](installer) | Task와 원격 명령이 사용하는 설치·갱신·적용 구현 |
+| [bin/](bin) | `npx` 명령의 진입점 |
+| [Taskfile.yml](Taskfile.yml) | 저장소 루트에서 사용하는 준비, 설치, 갱신, 적용과 검증 명령 |
+| [package.json](package.json) | Git 패키지의 실행 명령, 배포 파일, 설치 대상 PC 이름 |
+| [docs/repository-workflows.md](docs/repository-workflows.md) | 개발환경·문서·테스트 산출물의 자율 판단과 저장소 governance 역할 경계 |
+
+단독 스킬을 배포하려면 `registry.toml`의 `[[skills]]`에 설치 폴더 이름 `name`과 저장소 루트 기준 경로 `path`를 적는다.
+설치기는 `path`가 가리키는 디렉터리의 파일 전체를 `~/.agents/skills/<name>/`에 복사한다.
+`upstream`에는 외부 스킬이나 함께 보관하는 외부 참조의 출처 URL을 기록할 수 있다.
+`requires`를 지정한 스킬은 잠금 파일에 해당 의존성이 있을 때 설치한다.
+`openspec-workflow`의 `requires`는 `openspec`이다.
+작업 중 스킬을 사용하는 기준은 `common/AGENTS.md`에서 관리한다.
 
 ```mermaid
 flowchart LR
@@ -177,15 +184,18 @@ flowchart LR
     I --> L[설치 결과와 공식 스킬 기록]
     L --> M[기존 사용자 설정에 병합]
     C[공통 지침과 설정] --> M
-    H[PC 프로필과 로컬 경로] --> M
+    H[PC 로컬 설정] --> M
     R[해당 PC의 Codex 런타임 설정] --> M
     M --> P[사전 검사와 적용 계획]
+    S[registry.toml에 등록한 단독 스킬] --> P
     P --> A[백업 후 적용]
+    A --> O[Codex 홈의 공통 지침과 설정 및 공식 Agent Desktop 스킬]
+    A --> D["사용자 홈의 .agents/skills/"]
 ```
 
-저장소에서 PC 경로를 바꾸려면 [hosts/local.example.toml](hosts/local.example.toml)을 `.local/<hostname>.toml`로 복사한다.
+저장소에서 PC 경로를 바꾸려면 [로컬 설정 예시](docs/local.example.toml)를 `.local/<hostname>.toml`로 복사한다.
 한 명령 설치에서는 같은 형식의 설정을 설치 상태 경로의 `<hostname>.toml`에 둔다.
-설정 병합 순서는 **현재 설정 → 공통 설정 → PC 프로필 → 로컬 덮어쓰기**다.
+설정 병합 순서는 **현재 설정 → 공통 설정 → 등록한 플러그인·MCP 설정 → PC 로컬 덮어쓰기**다.
 공통 파일에서 지정한 키만 덮어쓰며, 사용자 스킬의 선택 목록은 이름 또는 경로를 기준으로 병합한다.
 
 ## 검증
@@ -194,6 +204,8 @@ flowchart LR
 task test
 ```
 
+`Taskfile.yml`의 `test` 작업은 Python `unittest`를 직접 실행한다.
+`task test`는 `--` 뒤의 인자를 `unittest`에 전달한다.
 테스트는 임시 사용자 홈에서 설정 보존, 반복 적용, 백업과 실패 시 복구, 경로 보호를 확인한다.
 과거 적용·검증 이력은 저장소의 `docs/history/`에 보관한다.
 이력 문서는 설치 패키지에 포함하지 않는다.

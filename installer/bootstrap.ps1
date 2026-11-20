@@ -209,16 +209,31 @@ function Get-CapturedPayload([string]$Root, [string]$HostName, [switch]$Legacy, 
         $manifest.bin.'personal-harness' -cne 'bin/personal-harness.mjs') {
         throw 'Source package identity is not personal-harness.'
     }
+    if (-not $Legacy -and -not $Share) {
+        $targets = $manifest.PSObject.Properties['supportedHosts']
+        if ($null -eq $targets -or $targets.Value -isnot [array]) {
+            throw 'package.json must declare supportedHosts as an array.'
+        }
+        if ($HostName -cnotin $targets.Value) {
+            throw "Unknown bundled host '$HostName'. Select an install target from package.json with --host."
+        }
+    }
+    $previousLayout = $Legacy -and ($manifest.files -contains 'scripts')
+    $hasHostProfiles = $previousLayout -or ($Legacy -and ($manifest.files -contains 'hosts'))
+    $installerDirectory = if ($previousLayout) { 'scripts' } else { 'installer' }
+    $dependencyDirectory = if ($previousLayout) { 'sources' } else { 'dependencies' }
     $required = @('package.json', 'README.md', 'requirements.txt', 'bin/personal-harness.mjs',
-        'scripts/bootstrap.ps1', 'scripts/update-dependencies.ps1', 'scripts/install-dependencies.ps1',
-        'scripts/harness.ps1', 'scripts/install_dependencies.py', 'scripts/harness.py',
-        'common/AGENTS.md', 'common/config.toml', 'skills/create-readme/SKILL.md',
-        'skills/agent-desktop/SKILL.md', 'skills/agent-desktop-windows/SKILL.md',
-        'sources/agent-desktop-LICENSE', 'sources/dependencies.lock.json')
-    if (-not $Share) { $required += "hosts/$hostName.toml" }
-    if (-not $Legacy) { $required += 'scripts/share.py' }
+        "$installerDirectory/bootstrap.ps1", "$installerDirectory/update-dependencies.ps1",
+        "$installerDirectory/install-dependencies.ps1", "$installerDirectory/harness.ps1",
+        "$installerDirectory/install_dependencies.py", "$installerDirectory/harness.py",
+        'common/AGENTS.md', 'common/config.toml', "$dependencyDirectory/dependencies.lock.json",
+        'skills/agent-desktop/SKILL.md', 'skills/agent-desktop-windows/SKILL.md', 'sources/agent-desktop-LICENSE')
+    if ($previousLayout) { $required += 'skills/create-readme/SKILL.md' }
+    if ($hasHostProfiles) { $required += "hosts/$HostName.toml" }
+    if (-not $Legacy) { $required += "$installerDirectory/share.py" }
     if (-not $Legacy -or $manifest.files -contains 'registry.toml') {
-        $required += @('registry.toml', 'scripts/registry.py', 'scripts/mcp_packages.py', 'scripts/windows_paths.py')
+        $required += @('registry.toml', "$installerDirectory/registry.py",
+            "$installerDirectory/mcp_packages.py", "$installerDirectory/windows_paths.py")
     }
     $paths = @('package.json', 'README.md')
     $exclusions = @()
@@ -230,9 +245,13 @@ function Get-CapturedPayload([string]$Root, [string]$HostName, [switch]$Legacy, 
         }
         $exclusions += $pattern
     }
+    $allowed = @('bin', $installerDirectory, 'common', 'skills', $dependencyDirectory,
+        'docs', 'requirements.txt', 'registry.toml')
+    if (-not $previousLayout) { $allowed += 'sources' }
+    if ($hasHostProfiles) { $allowed += 'hosts' }
     foreach ($entry in $manifest.files) {
         if ($entry.StartsWith('!')) { continue }
-        if ($entry -notin @('bin', 'scripts', 'common', 'hosts', 'skills', 'sources', 'docs', 'requirements.txt', 'registry.toml')) {
+        if ($entry -notin $allowed) {
             throw "Invalid payload allowlist entry: $entry"
         }
         $paths += @(Get-PayloadFiles $Root $entry $exclusions)
@@ -278,9 +297,8 @@ try {
     $source = Get-CanonicalPath $request.sourceRoot $caller
     $hostName = if ($options.ContainsKey('host')) { [string]$options.host } else { [string]$env:COMPUTERNAME }
     $hostName = $hostName.ToLowerInvariant()
-    if ($hostName -notmatch '^[a-z0-9][a-z0-9-]*$' -or
-        (-not $sharing -and -not [IO.File]::Exists((Get-IOPath ([IO.Path]::Combine($source, "hosts/$hostName.toml")))))) {
-        throw "Unknown bundled host '$hostName'. Pass --host with a profile from hosts/."
+    if ($hostName -notmatch '^[a-z0-9][a-z0-9-]*$') {
+        throw 'Unknown bundled host. Use letters, digits and hyphens.'
     }
     $homePath = if ($options.ContainsKey('home')) { Get-CanonicalPath $options.home $caller }
         else { Get-CanonicalPath $env:USERPROFILE $caller }
@@ -444,7 +462,7 @@ try {
         foreach ($entry in @{ list = '--list'; dryRun = '--dry-run'; yes = '--yes' }.GetEnumerator()) {
             if ($options.ContainsKey($entry.Key) -and [bool]$options[$entry.Key]) { $shareArguments += $entry.Value }
         }
-        & $venvPython -B (Get-IOPath ([IO.Path]::Combine($release, 'scripts/share.py'))) @shareArguments
+        & $venvPython -B (Get-IOPath ([IO.Path]::Combine($release, 'installer/share.py'))) @shareArguments
         $shareExitCode = $LASTEXITCODE
         if ($shareExitCode -ne 0) { $exitCode = $shareExitCode }
         Assert-Payload $release $payload
@@ -452,7 +470,7 @@ try {
     }
     else {
         $auditFiles = @([IO.Path]::Combine($release, 'common/config.toml'),
-            [IO.Path]::Combine($release, "hosts/$hostName.toml"), [IO.Path]::Combine($release, 'registry.toml'),
+            [IO.Path]::Combine($release, 'registry.toml'),
             $localConfig, [IO.Path]::Combine($codexPath, 'config.toml'))
         Assert-RuntimeReferences $venvPython $auditFiles @($source, $runs, $releases)
         Assert-Payload $release $payload
@@ -462,7 +480,7 @@ try {
         }
         foreach ($entry in $overrides.GetEnumerator()) { $arguments[$entry.Key] = $entry.Value }
         $global:LASTEXITCODE = 0
-        & ([IO.Path]::Combine($release, 'scripts/update-dependencies.ps1')) @arguments
+        & ([IO.Path]::Combine($release, 'installer/update-dependencies.ps1')) @arguments
         if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE; throw 'Harness install/apply/check failed. The previous active receipt has been retained.' }
         Assert-Payload $release $payload
         Assert-RuntimeReferences $venvPython $auditFiles @($source, $runs, $releases)
@@ -500,12 +518,12 @@ try {
         $exitCode = 0
     }
 }
-catch { Write-Error -Message $_.Exception.Message -ErrorAction Continue }
+catch { [Console]::Error.WriteLine($_.Exception.Message) }
 finally {
     if ($null -ne $runSource) {
         try { Remove-RunSource $runSource $runs $protectedPaths }
         catch {
-            Write-Error -Message ("Source cleanup failed: " + $_.Exception.Message) -ErrorAction Continue
+            [Console]::Error.WriteLine("Source cleanup failed: " + $_.Exception.Message)
             if ($exitCode -eq 0) { $exitCode = 1 }
         }
     }

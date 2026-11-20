@@ -20,7 +20,9 @@ import urllib.parse
 import urllib.request
 
 import tomlkit
-from harness import REPO, HarnessError, atomic_write, read_toml, safe_file, select_layout, official_source_files
+from harness import (
+    REPO, HarnessError, atomic_write, official_source_files, read_toml, require_supported_host, safe_file, select_layout,
+)
 import mcp_packages
 from registry import Registry, declaration_hash, load_registry, lock_issues
 
@@ -584,8 +586,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         host = args.host.lower()
-        if host not in ("homelab-desktop", "roylabs-desktop"):
-            raise HarnessError("Select homelab-desktop or roylabs-desktop")
+        require_supported_host(REPO, host)
         layout = select_layout(REPO, args.state_root)
         lock_path = layout.lock
         local = layout.local

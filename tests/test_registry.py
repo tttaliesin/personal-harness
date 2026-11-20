@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import tomlkit
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "installer"))
 from registry import declaration_hash, load_registry, lock_issues, normalize_plugin, parse_registry
 import install_dependencies as installer
 

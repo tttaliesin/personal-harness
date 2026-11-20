@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "installer"))
 import install_dependencies as installer
 from registry import load_registry, declaration_hash, lock_issues
 import tomlkit
@@ -346,7 +346,7 @@ class UpdateTests(unittest.TestCase):
                         {"dist": {"integrity": self.openspec["integrity"], "tarball": "http://example.test/a.tgz"}}):
             with self.subTest(changes=changes), TemporaryDirectory() as directory:
                 repo = self.make_repo(directory)
-                old = (repo / "sources/dependencies.lock.json").read_bytes()
+                old = (repo / "dependencies/dependencies.lock.json").read_bytes()
                 metadata = {"name": self.openspec["package"], "version": "2.0.0",
                             "dist": {key: self.openspec[key] for key in ("integrity", "tarball")}}
                 metadata.update(changes)
@@ -362,7 +362,7 @@ class UpdateTests(unittest.TestCase):
                     self.assertEqual(self.run_main(repo, "--install"), 2)
                 agent.assert_not_called()
                 openspec.assert_not_called()
-                self.assertEqual((repo / "sources/dependencies.lock.json").read_bytes(), old)
+                self.assertEqual((repo / "dependencies/dependencies.lock.json").read_bytes(), old)
 
     def test_openspec_malformed_present_locked_record_fails_before_any_install_or_write(self):
         invalid = [None, [], {}, *({**self.openspec, key: value} for key, value in (
@@ -375,7 +375,7 @@ class UpdateTests(unittest.TestCase):
                 lock = copy.deepcopy(self.lock)
                 installer.stamp_registry(lock, self.registry)
                 lock["openspec"] = record
-                path = repo / "sources/dependencies.lock.json"
+                path = repo / "dependencies/dependencies.lock.json"
                 path.write_text(json.dumps(lock), encoding="utf-8")
                 before = {p: p.read_bytes() for p in repo.rglob("*") if p.is_file()}
                 with ExitStack() as stack:
@@ -403,7 +403,7 @@ class UpdateTests(unittest.TestCase):
                     patch.object(installer, "install_plugins"), patch.object(installer, "sync_sources"):
                 self.assertEqual(self.run_main(repo, "--install", "--locked"), 0)
             openspec.assert_not_called()
-            self.assertNotIn("openspec", json.loads((repo / "sources/dependencies.lock.json").read_bytes()))
+            self.assertNotIn("openspec", json.loads((repo / "dependencies/dependencies.lock.json").read_bytes()))
             self.assertEqual(tomlkit.parse(config.read_text(encoding="utf-8"))["paths"]["openspec"],
                              "D:/private/openspec.cmd")
 
@@ -483,9 +483,11 @@ class UpdateTests(unittest.TestCase):
 
     def make_repo(self, directory):
         repo = Path(directory)
-        (repo / "sources").mkdir(parents=True)
-        (repo / "sources/dependencies.lock.json").write_text(json.dumps(self.lock))
+        (repo / "dependencies").mkdir(parents=True)
+        (repo / "dependencies/dependencies.lock.json").write_text(json.dumps(self.lock))
         (repo / "registry.toml").write_bytes((FIXTURES / "registry.toml").read_bytes())
+        (repo / "package.json").write_text(
+            json.dumps({"supportedHosts": ["homelab-desktop", "roylabs-desktop"]}), encoding="utf-8")
         return repo
 
     def run_main(self, repo, *args):
@@ -519,12 +521,12 @@ class UpdateTests(unittest.TestCase):
     def test_latest_query_failure_preserves_old_lock_without_fallback(self):
         with TemporaryDirectory() as directory:
             repo = self.make_repo(directory)
-            old = (repo / "sources/dependencies.lock.json").read_bytes()
+            old = (repo / "dependencies/dependencies.lock.json").read_bytes()
             with patch.object(installer, "fetch", side_effect=OSError("offline")), \
                     patch.object(installer, "install_agent") as install:
                 self.assertEqual(self.run_main(repo, "--install"), 2)
                 install.assert_not_called()
-            self.assertEqual((repo / "sources/dependencies.lock.json").read_bytes(), old)
+            self.assertEqual((repo / "dependencies/dependencies.lock.json").read_bytes(), old)
 
     def test_lock_is_written_only_after_every_install_source_sync_and_paths_succeed(self):
         result = self.resolve()
@@ -532,7 +534,7 @@ class UpdateTests(unittest.TestCase):
         for failing in (*operations, None):
             with self.subTest(failing=failing), TemporaryDirectory() as directory:
                 repo = self.make_repo(directory)
-                lock_path = repo / "sources/dependencies.lock.json"
+                lock_path = repo / "dependencies/dependencies.lock.json"
                 old = lock_path.read_bytes()
                 with ExitStack() as stack:
                     stack.enter_context(patch.object(installer, "resolve", return_value=result))
@@ -680,15 +682,19 @@ class UpdateTests(unittest.TestCase):
                     installer.install_plugins([plugin], "codex", home)
 
     def test_persistent_lock_precedence_and_old_local_adoption_preview_are_read_only(self):
-        for mode in ("seed", "persistent", "adopt"):
+        for mode in ("seed", "persistent", "adopt", "legacy-adopt"):
             with self.subTest(mode=mode), TemporaryDirectory() as directory:
                 payload = self.make_repo(Path(directory) / "payload")
-                old_repo = self.make_repo(Path(directory) / "old repo")
-                state = old_repo / ".local" if mode == "adopt" else Path(directory) / "state"
+                old_repo = Path(directory) / "another checkout"
+                adopting = mode in ("adopt", "legacy-adopt")
+                state = old_repo / ".local" if adopting else Path(directory) / "state"
                 selected = copy.deepcopy(self.lock)
                 selected["codegraph"]["version"] = "99.0.0"
-                selected_path = (old_repo / "sources/dependencies.lock.json" if mode == "adopt"
-                                 else state / "sources/dependencies.lock.json")
+                if adopting:
+                    lock_directory = "sources" if mode == "legacy-adopt" else "dependencies"
+                    selected_path = old_repo / lock_directory / "dependencies.lock.json"
+                else:
+                    selected_path = state / "sources/dependencies.lock.json"
                 if mode != "seed":
                     selected_path.parent.mkdir(parents=True, exist_ok=True)
                     selected_path.write_text(json.dumps(selected))
@@ -711,7 +717,7 @@ class UpdateTests(unittest.TestCase):
                 payload = self.make_repo(Path(directory) / "new payload")
                 seed = copy.deepcopy(legacy)
                 seed["openspec"] = {**self.openspec, "version": "99.0.0"}
-                (payload / "sources/dependencies.lock.json").write_text(json.dumps(seed), encoding="utf-8")
+                (payload / "dependencies/dependencies.lock.json").write_text(json.dumps(seed), encoding="utf-8")
                 state = Path(directory) / "prior state [literal] & 한글"
                 lock_path = state / "sources/dependencies.lock.json"
                 lock_path.parent.mkdir(parents=True)
@@ -801,7 +807,7 @@ class UpdateTests(unittest.TestCase):
             second = self.make_repo(Path(directory) / "release two")
             new_seed = copy.deepcopy(self.lock)
             new_seed["codegraph"]["version"] = "99.0.0"
-            (second / "sources/dependencies.lock.json").write_text(json.dumps(new_seed))
+            (second / "dependencies/dependencies.lock.json").write_text(json.dumps(new_seed))
             before = {p: p.read_bytes() for root in (old_repo, first, second)
                       for p in root.rglob("*") if p.is_file()}
             with patch.object(installer.platform, "machine", return_value="AMD64"), \
@@ -831,7 +837,7 @@ class UpdateTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             repo = self.make_repo(directory)
             before = {p.relative_to(repo): p.read_bytes() for p in repo.rglob("*") if p.is_file()}
-            for state in (repo, repo / "skills", repo / "sources", repo / "common", repo.parent):
+            for state in (repo, repo / "skills", repo / "sources", repo / "dependencies", repo / "common", repo.parent):
                 with self.subTest(state=state), patch.object(installer, "resolve") as resolve:
                     self.assertEqual(self.run_main(repo, "--install", "--state-root", str(state)), 2)
                     resolve.assert_not_called()
@@ -936,7 +942,7 @@ class UpdateTests(unittest.TestCase):
             config.write_text(f'[marketplaces.{plugin["marketplace"]}]\nsource = "{plugin["source"]}"\nref = "{plugin["ref"]}"\n')
             result = installer.Resolution(copy.deepcopy(self.lock))
             result.lock["plugins"] = [plugin]
-            old = (repo / "sources/dependencies.lock.json").read_bytes()
+            old = (repo / "dependencies/dependencies.lock.json").read_bytes()
 
             def run(command, **kwargs):
                 if command[1:4] == ["plugin", "marketplace", "add"]:
@@ -952,7 +958,7 @@ class UpdateTests(unittest.TestCase):
                 self.assertEqual(self.run_main(repo, "--install"), 2)
                 sync.assert_not_called()
                 save.assert_not_called()
-            self.assertEqual((repo / "sources/dependencies.lock.json").read_bytes(), old)
+            self.assertEqual((repo / "dependencies/dependencies.lock.json").read_bytes(), old)
             self.assertEqual(execute.call_args_list[0].args[0],
                              ["codex", "plugin", "marketplace", "remove", plugin["marketplace"], "--json"])
 
@@ -1035,7 +1041,7 @@ class UpdateTests(unittest.TestCase):
             state = Path(directory) / "state & 한글"
             result = self.resolve()
             result.lock["mcp"] = [{"name": "fixture", "kind": "npm", "recipe": {"version": "1.0.0"}}]
-            original = (repo / "sources/dependencies.lock.json").read_bytes()
+            original = (repo / "dependencies/dependencies.lock.json").read_bytes()
             with patch.object(installer, "resolve", return_value=result), \
                     patch.object(installer.platform, "machine", return_value="AMD64"), \
                     patch.object(installer.shutil, "which", return_value="fixture"), \
@@ -1053,7 +1059,7 @@ class UpdateTests(unittest.TestCase):
             configuration.assert_not_called()
             sync.assert_not_called()
             save.assert_not_called()
-            self.assertEqual((repo / "sources/dependencies.lock.json").read_bytes(), original)
+            self.assertEqual((repo / "dependencies/dependencies.lock.json").read_bytes(), original)
             self.assertFalse((state / "sources/dependencies.lock.json").exists())
 
     def test_mcp_recipe_preflight_failure_precedes_all_install_side_effects(self):
@@ -1061,7 +1067,7 @@ class UpdateTests(unittest.TestCase):
             repo = self.make_repo(directory)
             result = installer.Resolution(copy.deepcopy(self.lock))
             result.lock["mcp"] = [{"name": "fixture", "kind": "python"}]
-            original = (repo / "sources/dependencies.lock.json").read_bytes()
+            original = (repo / "dependencies/dependencies.lock.json").read_bytes()
             with patch.object(installer, "resolve", return_value=result), \
                     patch.object(installer.mcp_packages, "preflight", create=True,
                                  side_effect=ValueError("Invalid package context")) as preflight, \
@@ -1071,7 +1077,7 @@ class UpdateTests(unittest.TestCase):
             preflight.assert_called_once_with(result.lock["mcp"][0])
             for operation in (agent, graph, plugins, mcp):
                 operation.assert_not_called()
-            self.assertEqual((repo / "sources/dependencies.lock.json").read_bytes(), original)
+            self.assertEqual((repo / "dependencies/dependencies.lock.json").read_bytes(), original)
 
     def test_malformed_npm_recipe_fails_preflight_before_installation_or_writes(self):
         with TemporaryDirectory() as directory:

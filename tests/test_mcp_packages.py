@@ -18,7 +18,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "installer"))
 import mcp_packages as mcp
 from harness import HarnessError, safe_file
 from windows_paths import io_path

@@ -28,7 +28,7 @@ tasks:
     cmds:
       - >-
         powershell.exe -NoLogo -NoProfile -NonInteractive
-        -File ./scripts/harness.ps1 plan
+        -File ./installer/harness.ps1 plan
         -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
         {{.CLI_ARGS}}
 
@@ -38,7 +38,7 @@ tasks:
     cmds:
       - >-
         powershell.exe -NoLogo -NoProfile -NonInteractive
-        -File ./scripts/harness.ps1 check
+        -File ./installer/harness.ps1 check
         -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
         {{.CLI_ARGS}}
 
@@ -48,7 +48,7 @@ tasks:
     cmds:
       - >-
         powershell.exe -NoLogo -NoProfile -NonInteractive
-        -File ./scripts/harness.ps1 apply
+        -File ./installer/harness.ps1 apply
         -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
         {{.CLI_ARGS}}
 
@@ -59,7 +59,7 @@ tasks:
     cmds:
       - >-
         powershell.exe -NoLogo -NoProfile -NonInteractive
-        -File ./scripts/update-dependencies.ps1 -Install
+        -File ./installer/update-dependencies.ps1 -Install
         -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
         {{.CLI_ARGS}}
 
@@ -79,7 +79,7 @@ tasks:
     cmds:
       - >-
         powershell.exe -NoLogo -NoProfile -NonInteractive
-        -File ./scripts/update-dependencies.ps1
+        -File ./installer/update-dependencies.ps1
         -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
         {{.CLI_ARGS}}
 
@@ -87,9 +87,12 @@ tasks:
     dir: '{{.ROOT_DIR}}'
     desc: 임시 프로필에서 전체 테스트 실행
     aliases: [tests]
+    preconditions:
+      - sh: >-
+          {{.RUNTIME_PYTHON | shellQuote}} -c
+          'import sys; sys.exit(sys.version_info < (3, 11))'
+        msg: 테스트를 실행하려면 Python 3.11 이상이 필요합니다.
     cmds:
       - >-
-        powershell.exe -NoLogo -NoProfile -NonInteractive
-        -File ./scripts/test.ps1
-        -Python {{.RUNTIME_PYTHON | shellQuote}}
+        {{.RUNTIME_PYTHON | shellQuote}} -B -m unittest discover -s tests -v
         {{.CLI_ARGS}}

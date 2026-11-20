@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs the harness CLI with Python 3.11 or newer.
 .DESCRIPTION
-Passes plan, apply, or check to scripts/harness.py. Only apply writes
+Passes plan, apply, or check to installer/harness.py. Only apply writes
 configuration; plan and check are read-only operations.
 .PARAMETER Command
 The harness command: plan, apply, or check.
@@ -19,9 +19,9 @@ An optional local TOML configuration file, passed as --local-config.
 A Python executable name or path. Defaults to python. Arguments are separate
 parameters; do not include interpreter flags in this value.
 .EXAMPLE
-.\scripts\harness.ps1 plan -HostName homelab-desktop
+.\installer\harness.ps1 plan -HostName homelab-desktop
 .EXAMPLE
-.\scripts\harness.ps1 check -HostName roylabs-desktop -HomeDirectory 'D:\Test Profile'
+.\installer\harness.ps1 check -HostName roylabs-desktop -HomeDirectory 'D:\Test Profile'
 #>
 [CmdletBinding(PositionalBinding = $false)]
 param(

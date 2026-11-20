@@ -8,6 +8,9 @@ model_reasoning_summary = "detailed"
 model = "gpt-6.1-sol"
 model_reasoning_effort = "max"
 
+[windows]
+sandbox = "elevated"
+
 [desktop]
 followUpQueueMode = "steer"
 default-workspace-full-view = true

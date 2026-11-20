@@ -28,16 +28,7 @@ from windows_paths import io_path
 REPO = Path(__file__).resolve().parents[1]
 PROTECTED = {"notify", "model_catalog_json", "openai_base_url", "experimental_realtime_ws_base_url",
              "projects", "hooks", "model_providers", "computer_use"}
-SKILLS = {"create-readme": "agents", "korean-typography": "agents",
-          "development-environment": "agents", "repository-artifacts": "agents",
-          "feature-sliced-design": "agents",
-          "ste-ko": "agents", "humanize-korean": "agents", "humanize-windows-runtime": "agents",
-          "taste-windows-runtime": "agents",
-          "agent-desktop": "codex", "agent-desktop-windows": "codex"}
-REPOSITORY_SKILLS = {"create-readme", "korean-typography", "feature-sliced-design",
-                     "development-environment", "repository-artifacts",
-                     "ste-ko", "humanize-korean", "humanize-windows-runtime",
-                     "taste-windows-runtime", "openspec-workflow"}
+AGENT_DESKTOP_SKILLS = ("agent-desktop", "agent-desktop-windows")
 
 
 class HarnessError(Exception):
@@ -61,11 +52,13 @@ def select_layout(repo: Path, state_root: Path | None = None) -> Layout:
     if persistent and (repo.is_relative_to(local) or
                        (local.is_relative_to(repo) and not local.is_relative_to(repo / ".local"))):
         raise HarnessError("State root must not overlap the source payload; a checkout's .local is supported")
-    seed = repo / "sources/dependencies.lock.json"
+    seed = repo / "dependencies/dependencies.lock.json"
     if persistent and local.name == ".local":
-        adjacent = local.parent / "sources/dependencies.lock.json"
-        if adjacent.is_file():
-            seed = adjacent
+        for relative in ("dependencies/dependencies.lock.json", "sources/dependencies.lock.json"):
+            adjacent = local.parent / relative
+            if adjacent.is_file():
+                seed = adjacent
+                break
     return Layout(local, local / "sources/dependencies.lock.json" if persistent else seed,
                   seed, local if persistent else repo, local / "source-backups", persistent)
 
@@ -99,14 +92,23 @@ def validate_official_sources(root: Path, lock: Mapping) -> None:
     if license_path.is_file():
         actual.add("sources/agent-desktop-LICENSE")
     if actual != set(expected):
-        raise HarnessError("Official source cache file set does not match the selected lock; run scripts/install-dependencies.ps1")
+        raise HarnessError("Official source cache file set does not match the selected lock; run installer/install-dependencies.ps1")
     for path, sha256 in expected.items():
         if hashlib.sha256((root / path).read_bytes()).hexdigest() != sha256:
-            raise HarnessError(f"Official source cache digest mismatch: {path}; run scripts/install-dependencies.ps1")
+            raise HarnessError(f"Official source cache digest mismatch: {path}; run installer/install-dependencies.ps1")
 
 
 def read_toml(path: Path) -> dict:
     return tomlkit.parse(path.read_text(encoding="utf-8-sig"))
+
+
+def require_supported_host(repo: Path, host: str) -> None:
+    manifest = json.loads((repo / "package.json").read_text(encoding="utf-8-sig"))
+    supported = manifest.get("supportedHosts") if isinstance(manifest, dict) else None
+    if not isinstance(supported, list):
+        raise HarnessError("package.json must declare supportedHosts as an array")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", host) or host not in supported:
+        raise HarnessError(f"Unknown host: {host}")
 
 
 def validate_common(config: Mapping) -> None:
@@ -161,19 +163,6 @@ def merge_into(target, overlay: Mapping, prefix: tuple = ()) -> None:
             target[key] = current
         else:
             target[key] = copy.deepcopy(value)
-
-
-def merge_documents(current_text: str, common_text: str, host_text: str = "", local_text: str = "") -> str:
-    current = tomlkit.parse(current_text)
-    common = tomlkit.parse(common_text)
-    validate_common(common)
-    merge_into(current, common)
-    for text in (host_text, local_text):
-        if text.strip():
-            merge_into(current, tomlkit.parse(text))
-    rendered = tomlkit.dumps(current)
-    tomlkit.parse(rendered)
-    return rendered
 
 
 def expand(value, variables: Mapping):
@@ -357,27 +346,22 @@ def registered_settings(registry, lock: Mapping, state: Path, plan: Plan,
 
 def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None = None,
                local_config: Path | None = None, state_root: Path | None = None) -> Plan:
-    if host not in ("roylabs-desktop", "homelab-desktop"):
-        raise HarnessError(f"Unknown host: {host}")
     repo = repo.resolve()
+    require_supported_host(repo, host)
     layout = select_layout(repo, state_root)
     user_home = user_home.resolve()
     codex_home = (codex_home or user_home / ".codex").resolve()
-    profile = read_toml(repo / "hosts" / f"{host}.toml")
-    if profile.get("name") != host:
-        raise HarnessError("Host profile name does not match its filename")
     local_config = (local_config or layout.local / f"{host}.toml").resolve()
     if layout.persistent and not local_config.is_relative_to(layout.local):
         raise HarnessError("local-config must be inside the selected state root")
     local = read_toml(local_config) if local_config.exists() else {}
-    for source in (profile, local):
-        if set(source) - {"name", "platform", "paths", "config"}:
-            raise HarnessError("Host overrides support only name, platform, paths and config")
+    if set(local) - {"name", "platform", "paths", "config"}:
+        raise HarnessError("Local overrides support only name, platform, paths and config")
     variables = {"USERPROFILE": user_home.as_posix(), "CODEX_HOME": codex_home.as_posix(),
                  "REPO_ROOT": repo.as_posix(), "STATE_ROOT": layout.local.as_posix()}
-    profile = expand(profile, variables)
     local = expand(local, variables)
-    paths = {**profile.get("paths", {}), **local.get("paths", {})}
+    local_settings = local.get("config", {})
+    paths = dict(local.get("paths", {}))
     for key, value in list(paths.items()):
         if "/" in value or "\\" in value:
             path = Path(value)
@@ -402,22 +386,19 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     merged = tomlkit.parse(original)
     merge_into(merged, common)
     merge_into(merged, registered)
-    merge_into(merged, profile.get("config", {}))
-    merge_into(merged, local.get("config", {}))
+    merge_into(merged, local_settings)
     for spec in registry.mcp:
         server = merged.get('mcp_servers', {}).get(spec['name'], {})
         if server.get('command') and server.get('url'):
             raise HarnessError(f"MCP {spec['name']} has conflicting STDIO and HTTP settings; reconcile its local transport")
         previous = old.get('mcp_servers', {}).get(spec['name'], {})
-        url_override = any('url' in source.get('config', {}).get('mcp_servers', {}).get(spec['name'], {})
-                           for source in (profile, local))
+        url_override = 'url' in local_settings.get('mcp_servers', {}).get(spec['name'], {})
         credentials = any(previous.get(key) or server.get(key)
                           for key in ('http_headers', 'env_http_headers', 'bearer_token_env_var'))
         if previous.get('url') and previous['url'] != server.get('url') and credentials and not url_override:
             raise HarnessError(f"MCP {spec['name']} URL conflicts with local authentication; set an explicit local URL override")
     previous_codegraph = old.get("mcp_servers", {}).get("codegraph", {}).get("command")
-    override_codegraph = (local.get("config", {}).get("mcp_servers", {}).get("codegraph", {}).get("command")
-                          or profile.get("config", {}).get("mcp_servers", {}).get("codegraph", {}).get("command"))
+    override_codegraph = local_settings.get("mcp_servers", {}).get("codegraph", {}).get("command")
     chosen_codegraph = override_codegraph or previous_codegraph
     if chosen_codegraph and "codegraph" not in paths:
         paths["codegraph"] = chosen_codegraph
@@ -426,13 +407,13 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     if paths.get("codegraph") and codegraph:
         merged["mcp_servers"]["codegraph"]["command"] = codegraph
     if not codegraph:
-        plan.missing.append("codegraph CLI: run scripts/install-dependencies.ps1 or set [paths].codegraph locally")
+        plan.missing.append("codegraph CLI: run installer/install-dependencies.ps1 or set [paths].codegraph locally")
     agent_desktop = tool_path("agent_desktop", paths)
     if not agent_desktop:
-        plan.missing.append("agent-desktop CLI: run scripts/install-dependencies.ps1 or set [paths].agent_desktop locally")
+        plan.missing.append("agent-desktop CLI: run installer/install-dependencies.ps1 or set [paths].agent_desktop locally")
     openspec = tool_path("openspec", paths) if "openspec" in lock else None
     if "openspec" in lock and not openspec:
-        plan.missing.append("openspec CLI: run scripts/install-dependencies.ps1 or set [paths].openspec locally")
+        plan.missing.append("openspec CLI: run installer/install-dependencies.ps1 or set [paths].openspec locally")
     lock_path = layout.lock
     official_ready = not layout.persistent
     if lock_path.exists():
@@ -445,9 +426,9 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
         for item in lock["plugins"]:
             cache = codex_home / "plugins" / "cache" / item["marketplace"] / item["name"] / item["version"]
             if not ((cache / ".codex-plugin" / "plugin.json").is_file() or (cache / "plugin.json").is_file()):
-                plan.missing.append(f"Pinned plugin version is missing: {item['name']}@{item['version']}; run scripts/install-dependencies.ps1")
+                plan.missing.append(f"Pinned plugin version is missing: {item['name']}@{item['version']}; run installer/install-dependencies.ps1")
     elif layout.persistent:
-        plan.missing.append(f"Persistent dependency lock is missing: {lock_path}; run scripts/install-dependencies.ps1")
+        plan.missing.append(f"Persistent dependency lock is missing: {lock_path}; run installer/install-dependencies.ps1")
     if not old.get("model_catalog_json"):
         plan.notes.append("No local model catalog configured; verify gpt-6.1-sol/max availability with your provider")
     rendered = tomlkit.dumps(merged)
@@ -473,19 +454,23 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     if (codex_home / "AGENTS.override.md").exists():
         plan.missing.append("AGENTS.override.md shadows the shared AGENTS.md; reconcile the local override before applying")
     applied_files = previously_applied_files(codex_home)
-    skills = dict(SKILLS)
-    if "openspec" in lock:
-        skills["openspec-workflow"] = "agents"
-    for skill, scope in skills.items():
-        if skill not in REPOSITORY_SKILLS and not official_ready:
-            continue
-        root = codex_home if scope == "codex" else user_home / ".agents"
-        source = (repo if skill in REPOSITORY_SKILLS else layout.sources) / "skills" / skill
+    skills = [
+        (spec["name"], repo / spec["path"], repo, user_home / ".agents")
+        for spec in registry.skills
+        if "requires" not in spec or spec["requires"] in lock
+    ]
+    if official_ready:
+        skills.extend(
+            (name, layout.sources / "skills" / name, layout.sources, codex_home)
+            for name in AGENT_DESKTOP_SKILLS
+        )
+    for skill, source, source_root, root in skills:
+        safe_file(source, source_root)
         if not (source / "SKILL.md").is_file():
-            raise HarnessError(f"Missing source skill: {skill}")
+            raise HarnessError(f"Missing source skill: {skill} ({source.relative_to(source_root).as_posix()})")
         destination_root = root / "skills" / skill
         safe_file(destination_root, root)
-        source_files = {p.relative_to(source) for p in source.rglob("*") if p.is_file()}
+        source_files = {p.relative_to(source): p for p in source.rglob("*") if p.is_file()}
         if destination_root.is_dir() and not destination_root.is_symlink():
             extra = [p for p in destination_root.rglob("*") if p.is_file() and p.relative_to(destination_root) not in source_files]
             unknown = []
@@ -497,9 +482,9 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
                     unknown.append(path)
             if unknown:
                 plan.missing.append(f"Unmanaged files in {destination_root}: reconcile them before applying")
-        for file in sorted(source.rglob("*")):
-            if file.is_file():
-                plan.add(root / "skills" / skill / file.relative_to(source), file.read_bytes(), root)
+        for relative, file in sorted(source_files.items()):
+            safe_file(file, source_root)
+            plan.add(destination_root / relative, file.read_bytes(), root)
     return plan
 
 

@@ -15,47 +15,47 @@ ROOT = Path(__file__).resolve().parents[1]
 class UpdateCommandTests(unittest.TestCase):
     def test_harness_wrapper_keeps_imported_source_free_of_bytecode(self):
         with TemporaryDirectory() as directory:
-            scripts = Path(directory) / 'scripts'
-            scripts.mkdir()
-            shutil.copy2(ROOT / 'scripts/harness.ps1', scripts)
-            (scripts / 'fixture_module.py').write_text('VALUE = 1\n', encoding='utf-8')
-            (scripts / 'harness.py').write_text('import fixture_module\nprint(fixture_module.VALUE)\n', encoding='utf-8')
+            installer = Path(directory) / 'installer'
+            installer.mkdir()
+            shutil.copy2(ROOT / 'installer/harness.ps1', installer)
+            (installer / 'fixture_module.py').write_text('VALUE = 1\n', encoding='utf-8')
+            (installer / 'harness.py').write_text('import fixture_module\nprint(fixture_module.VALUE)\n', encoding='utf-8')
             environment = os.environ.copy()
             environment.pop('PYTHONDONTWRITEBYTECODE', None)
             environment.pop('PYTHONPYCACHEPREFIX', None)
             result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-File',
-                                     str(scripts / 'harness.ps1'), 'plan', '-HostName', 'homelab-desktop',
+                                     str(installer / 'harness.ps1'), 'plan', '-HostName', 'homelab-desktop',
                                      '-Python', sys.executable], env=environment,
                                     capture_output=True, text=True, encoding='utf-8')
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertFalse((scripts / '__pycache__').exists())
+            self.assertFalse((installer / '__pycache__').exists())
 
     def run_command(self, extra, install=True, failure=None, use_state=False):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            scripts = root / "scripts"
-            scripts.mkdir()
-            shutil.copy2(ROOT / "scripts/update-dependencies.ps1", scripts)
+            installer = root / "installer"
+            installer.mkdir()
+            shutil.copy2(ROOT / "installer/update-dependencies.ps1", installer)
             body = '''param([switch]$Install,[switch]$Locked,[string]$HostName,[string]$CodexHome,[string]$Codex,[string]$LocalConfig,[string]$StateRoot,[string]$Python)
 $record = @{kind='dependencies';install=[bool]$Install;codex_home=$CodexHome;host_name=$HostName;state_root=$StateRoot}
 $record | ConvertTo-Json -Compress | Add-Content -LiteralPath (Join-Path $PSScriptRoot 'calls.jsonl') -Encoding UTF8
 exit 0
 '''
-            scripts.joinpath("install-dependencies.ps1").write_text(body, encoding="utf-8")
-            scripts.joinpath("harness.ps1").write_text('''param([string]$Command,[string]$HostName,[string]$CodexHome,[string]$LocalConfig,[string]$HomeDirectory,[string]$StateRoot,[string]$Python)
+            installer.joinpath("install-dependencies.ps1").write_text(body, encoding="utf-8")
+            installer.joinpath("harness.ps1").write_text('''param([string]$Command,[string]$HostName,[string]$CodexHome,[string]$LocalConfig,[string]$HomeDirectory,[string]$StateRoot,[string]$Python)
 $record = @{kind=$Command;codex_home=$CodexHome;home_directory=$HomeDirectory;state_root=$StateRoot}
 $record | ConvertTo-Json -Compress | Add-Content -LiteralPath (Join-Path $PSScriptRoot 'calls.jsonl') -Encoding UTF8
 exit 0
 ''', encoding="utf-8")
             if failure:
-                target = scripts / ("install-dependencies.ps1" if failure == "dependencies" else "harness.ps1")
+                target = installer / ("install-dependencies.ps1" if failure == "dependencies" else "harness.ps1")
                 text = target.read_text(encoding="utf-8")
                 text = text.replace("exit 0", "exit 7" if failure == "dependencies" else
                                     f"if ($Command -eq '{failure}') {{ exit 7 }}\nexit 0")
                 target.write_text(text, encoding="utf-8")
             state = root / "state [literal] & $cache's 한글"
             home = root / "user's home"
-            arguments = ["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(scripts/"update-dependencies.ps1"),
+            arguments = ["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(installer/"update-dependencies.ps1"),
                          "-HostName", "homelab-desktop", "-HomeDirectory", str(home)]
             if use_state:
                 arguments.extend(["-StateRoot", str(state)])
@@ -66,7 +66,7 @@ exit 0
                 arguments.extend(["-CodexHome", str(explicit)])
             completed = subprocess.run(arguments, capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(completed.returncode, 7 if failure else 0, completed.stderr)
-            calls = [json.loads(line.lstrip("\ufeff")) for line in (scripts/"calls.jsonl").read_text(encoding="utf-8-sig").splitlines()]
+            calls = [json.loads(line.lstrip("\ufeff")) for line in (installer/"calls.jsonl").read_text(encoding="utf-8-sig").splitlines()]
             self.assertTrue(all(c["state_root"] == (str(state) if use_state else "") for c in calls))
             expected = explicit if extra else home/".codex"
             return calls, str(home), str(expected)
@@ -106,21 +106,21 @@ exit 0
     def test_core_wrappers_forward_literal_state_and_config_to_python(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            scripts = root / "scripts"
-            scripts.mkdir()
+            installer = root / "installer"
+            installer.mkdir()
             recorder = "import json, pathlib, sys; pathlib.Path(__file__).with_suffix('.json').write_text(json.dumps(sys.argv[1:]))"
             state = str(root / "state [literal] & $cache's 한글")
             config = str(Path(state) / "host's [local].toml")
             for wrapper, module, prefix in (("harness.ps1", "harness.py", ["plan"]),
                                              ("install-dependencies.ps1", "install_dependencies.py", ["-Locked"])):
                 with self.subTest(wrapper=wrapper):
-                    shutil.copy2(ROOT / "scripts" / wrapper, scripts)
-                    (scripts / module).write_text(recorder, encoding="utf-8")
+                    shutil.copy2(ROOT / "installer" / wrapper, installer)
+                    (installer / module).write_text(recorder, encoding="utf-8")
                     result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-File",
-                                             str(scripts / wrapper), *prefix, "-HostName", "homelab-desktop",
+                                             str(installer / wrapper), *prefix, "-HostName", "homelab-desktop",
                                              "-StateRoot", state, "-LocalConfig", config, "-Python", sys.executable],
                                             capture_output=True, text=True, encoding="utf-8")
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    args = json.loads((scripts / module).with_suffix(".json").read_text())
+                    args = json.loads((installer / module).with_suffix(".json").read_text())
                     self.assertEqual(args[args.index("--state-root") + 1], state)
                     self.assertEqual(args[args.index("--local-config") + 1], config)

@@ -206,7 +206,7 @@ function main(args) {
     'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const result = spawnSync(powershell, [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-File',
-    path.join(sourceRoot, 'scripts', 'bootstrap.ps1'), '-RequestBase64', request,
+    path.join(sourceRoot, 'installer', 'bootstrap.ps1'), '-RequestBase64', request,
   ], { stdio: 'inherit', shell: false });
   if (result.error) throw new Error(`Cannot start Windows PowerShell: ${result.error.message}`);
   if (result.signal) throw new Error(`Windows PowerShell stopped with signal ${result.signal}.`);

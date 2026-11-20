@@ -1,4 +1,4 @@
-# Copy to .local/<hostname>.toml; this file is never applied by itself.
+# Copy to .local/<hostname>.toml or to <state root>/<hostname>.toml for npx installs.
 # Relative paths are resolved from the repository root.
 # USERPROFILE, CODEX_HOME, REPO_ROOT and STATE_ROOT placeholders are accepted.
 

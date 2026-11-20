@@ -23,7 +23,7 @@ import unittest
 from unittest import mock
 
 
-_MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "harness.py"
+_MODULE_PATH = Path(__file__).resolve().parents[1] / "installer" / "harness.py"
 sys.path.insert(0, str(_MODULE_PATH.parent))
 from registry import declaration_hash
 _SPEC = importlib.util.spec_from_file_location("_harness_contract_target", _MODULE_PATH)
@@ -65,7 +65,7 @@ RUNTIME_TOKEN = "dummy-test-token"
 UNICODE_VALUE = "로컬 환경"
 
 [mcp_servers.codegraph]
-command = "old-codegraph"
+command = "codegraph"
 args = ["old-serve"]
 custom_transport = "local-transport"
 
@@ -107,6 +107,9 @@ COMMON_CONFIG = '''# shared preferences
 model = "shared-model"
 model_reasoning_effort = "max"
 
+[windows]
+sandbox = "elevated"
+
 [desktop]
 autoArchiveAfterDays = 1
 
@@ -133,6 +136,19 @@ COMMENT_MARKERS = (
     "# node runtime block stays local", "# keep env comment",
     "# keep project trust comment",
 )
+
+
+def merge_config_for_test(current_text: str, common_text: str, *overlays: str) -> str:
+    merged = harness.tomlkit.parse(current_text)
+    common = harness.tomlkit.parse(common_text)
+    harness.validate_common(common)
+    harness.merge_into(merged, common)
+    for text in overlays:
+        if text.strip():
+            harness.merge_into(merged, harness.tomlkit.parse(text))
+    rendered = harness.tomlkit.dumps(merged)
+    tomllib.loads(rendered)
+    return rendered
 
 
 def write_file(path: Path, data: str | bytes) -> Path:
@@ -172,9 +188,24 @@ class FakeRepository:
         self.home = root / "user's home"
         self.codex = root / "custom codex" if custom_codex else self.home / ".codex"
         self.commands = {
-            "fake-codegraph": self.repo / "fake-bin" / "codegraph.cmd",
-            "fake-agent-desktop": self.repo / "fake-bin" / "agent-desktop.cmd",
+            "codegraph": self.repo / "fake-bin" / "codegraph.cmd",
+            "agent-desktop": self.repo / "fake-bin" / "agent-desktop.cmd",
         }
+        self.skills = [
+            {"name": "create-readme", "path": "skills/writing/create-readme"},
+            {"name": "development-environment", "path": "skills/engineering/development-environment"},
+            {"name": "repository-artifacts", "path": "skills/engineering/repository-artifacts"},
+            {"name": "openspec-workflow", "path": "skills/engineering/openspec-workflow", "requires": "openspec"},
+            {"name": "korean-typography", "path": "skills/design/korean-typography"},
+            {"name": "feature-sliced-design", "path": "dependencies/skills/feature-sliced-design",
+             "upstream": "https://github.com/feature-sliced/skills"},
+            {"name": "ste-ko", "path": "skills/writing/ste-ko", "upstream": "https://github.com/beamonic/ste-ko"},
+            {"name": "humanize-korean", "path": "dependencies/skills/humanize-korean",
+             "upstream": "https://github.com/epoko77-ai/im-not-ai"},
+            {"name": "humanize-windows-runtime", "path": "skills/writing/humanize-windows-runtime"},
+            {"name": "taste-windows-runtime", "path": "skills/design/taste-windows-runtime"},
+        ]
+        self.skill_sources = {item["name"]: self.repo / item["path"] for item in self.skills}
         self.skill_files = {
             ("create-readme", "SKILL.md"): b"# README skill\n",
             ("create-readme", "references/guide.md"): "# 사용 지침\n".encode(),
@@ -203,17 +234,20 @@ class FakeRepository:
             ("agent-desktop-windows", "SKILL.md"): b"# Windows desktop skill\n",
             ("agent-desktop-windows", ".metadata"): b"hidden source file\n",
         }
+        write_file(self.repo / "package.json", json.dumps({
+            "supportedHosts": ["homelab-desktop", "roylabs-desktop"],
+        }))
         write_file(self.repo / "common" / "config.toml", COMMON_CONFIG)
-        write_file(self.repo / "registry.toml", 'schema_version = 1\n')
-        write_file(self.repo / 'sources/dependencies.lock.json', '{"schema_version":1,"plugins":[]}')
+        self.write_registry()
+        write_file(self.repo / 'dependencies/dependencies.lock.json', '{"schema_version":1,"plugins":[]}')
         write_file(
             self.repo / "common" / "AGENTS.md",
             "# 공통 지침\nSkills live in ${CODEX_HOME}/skills.\n",
         )
-        self.write_host("roylabs-desktop")
-        self.write_host("homelab-desktop")
         for (skill, relative), payload in self.skill_files.items():
-            write_file(self.repo / "skills" / skill / relative, payload)
+            source = self.skill_sources.get(skill, self.repo / "skills" / skill)
+            write_file(source / relative, payload)
+        write_file(self.skill_sources["openspec-workflow"] / "SKILL.md", b"# OpenSpec workflow\n")
         if ready:
             for command in self.commands.values():
                 write_file(command, "This fixture must never be executed.\n")
@@ -226,24 +260,16 @@ class FakeRepository:
             write_file(self.codex / "skills/unrelated/SKILL.md", b"do not touch\r\n")
             write_file(self.home / "unrelated.txt", b"unmanaged home file\x00\xff")
 
-    def write_host(self, host="roylabs-desktop", *, config="", paths=None):
-        configured = {
-            "codegraph": "fake-codegraph",
-            "agent_desktop": "fake-agent-desktop",
-        }
-        configured.update(paths or {})
-        text = f'name = {json.dumps(host)}\nplatform = "windows"\n\n[paths]\n'
-        text += "".join(f"{key} = {json.dumps(value, ensure_ascii=False)}\n" for key, value in configured.items())
-        text += '\n[config.windows]\nsandbox = "elevated"\n'
-        text += config
-        write_file(self.repo / "hosts" / f"{host}.toml", text)
+    def write_registry(self, extra=""):
+        text = harness.tomlkit.dumps({"schema_version": 1, "skills": self.skills})
+        write_file(self.repo / "registry.toml", text + "\n" + extra)
 
     def which(self, name):
         command = self.commands.get(name)
         return str(command) if command is not None and command.is_file() else None
 
     def skill_target(self, skill, relative):
-        root = self.codex if harness.SKILLS[skill] == "codex" else self.home / ".agents"
+        root = self.codex if skill in harness.AGENT_DESKTOP_SKILLS else self.home / ".agents"
         return root / "skills" / skill / relative
 
     def expected_targets(self):
@@ -263,7 +289,7 @@ class PersistentStateTests(unittest.TestCase):
         state = Path(directory) / "state [cache] 한글"
         files = {"sources/agent-desktop-LICENSE": b"state license"}
         for (skill, relative), data in fixture.skill_files.items():
-            if skill in harness.REPOSITORY_SKILLS:
+            if skill in fixture.skill_sources:
                 write_file(state / "skills" / skill / relative, b"stale state:" + data)
             else:
                 files[f"skills/{skill}/{relative}"] = b"state:" + data
@@ -295,7 +321,7 @@ class PersistentStateTests(unittest.TestCase):
             self.assertEqual(tree_snapshot(fixture.repo), before)
             self.assertEqual(tree_snapshot(state), state_before)
             for (skill, relative), payload in fixture.skill_files.items():
-                expected = payload if skill in harness.REPOSITORY_SKILLS else files[f"skills/{skill}/{relative}"]
+                expected = payload if skill in fixture.skill_sources else files[f"skills/{skill}/{relative}"]
                 with self.subTest(skill=skill, relative=relative):
                     self.assertEqual(fixture.skill_target(skill, relative).read_bytes(), expected)
             for skill in ("korean-typography", "taste-windows-runtime", "feature-sliced-design",
@@ -352,7 +378,7 @@ class PersistentStateTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             fixture, state, _ = self.prepare(directory)
             skill = b"---\nname: openspec-workflow\ndescription: Fixture\n---\nworkflow\n"
-            write_file(fixture.repo / "skills/openspec-workflow/SKILL.md", skill)
+            write_file(fixture.skill_sources["openspec-workflow"] / "SKILL.md", skill)
             lock_path = state / "sources/dependencies.lock.json"
             lock = json.loads(lock_path.read_bytes())
             lock["openspec"] = {"package": "@fission-ai/openspec", "version": "2.0.0"}
@@ -376,7 +402,7 @@ class PersistentStateTests(unittest.TestCase):
     def test_missing_openspec_in_new_lock_prevents_all_profile_writes(self):
         with TemporaryDirectory() as directory:
             fixture, state, _ = self.prepare(directory)
-            write_file(fixture.repo / "skills/openspec-workflow/SKILL.md", b"workflow")
+            write_file(fixture.skill_sources["openspec-workflow"] / "SKILL.md", b"workflow")
             lock_path = state / "sources/dependencies.lock.json"
             lock = json.loads(lock_path.read_bytes())
             lock["openspec"] = {"package": "@fission-ai/openspec", "version": "2.0.0"}
@@ -406,7 +432,7 @@ class ConfigPreservationTests(unittest.TestCase):
                 self.assertEqual(rendered.count(marker), 1)
 
     def test_common_merge_preserves_comments_runtime_and_unknown_configuration(self):
-        rendered = harness.merge_documents(CURRENT_CONFIG, COMMON_CONFIG)
+        rendered = merge_config_for_test(CURRENT_CONFIG, COMMON_CONFIG)
         self.assert_preserved(rendered)
         merged = tomllib.loads(rendered)
         self.assertEqual(merged["model"], "shared-model")
@@ -415,23 +441,33 @@ class ConfigPreservationTests(unittest.TestCase):
         self.assertTrue(merged["features"]["multi_agent"])
         self.assertEqual(merged["mcp_servers"]["codegraph"]["args"], ["serve", "--mcp"])
 
+    def test_packaged_common_config_keeps_desktop_skill_selections_and_shared_sandbox(self):
+        with (harness.REPO / "common/config.toml").open("rb") as stream:
+            common = tomllib.load(stream)
+        self.assertEqual(common["windows"]["sandbox"], "elevated")
+        self.assertTrue(common["plugins"]["computer-use@openai-bundled"]["enabled"])
+        selections = {entry["name"]: entry["enabled"] for entry in common["skills"]["config"]}
+        self.assertFalse(selections["computer-use"])
+        self.assertTrue(selections["agent-desktop"])
+        self.assertTrue(selections["agent-desktop-windows"])
+
     def test_empty_overlays_preserve_the_entire_document(self):
-        self.assertEqual(harness.merge_documents(CURRENT_CONFIG, "", " \n", ""), CURRENT_CONFIG)
+        self.assertEqual(merge_config_for_test(CURRENT_CONFIG, "", " \n", ""), CURRENT_CONFIG)
 
     def test_repeated_merge_is_byte_stable(self):
-        once = harness.merge_documents(CURRENT_CONFIG, COMMON_CONFIG)
-        twice = harness.merge_documents(once, COMMON_CONFIG)
+        once = merge_config_for_test(CURRENT_CONFIG, COMMON_CONFIG)
+        twice = merge_config_for_test(once, COMMON_CONFIG)
         self.assertEqual(twice, once)
         self.assert_preserved(twice)
 
-    def test_host_then_local_overrides_merge_leaves_and_may_set_local_runtime(self):
-        host = '''model = "host-model"
-notify = ["host-notifier"]
+    def test_registered_then_local_overrides_merge_leaves_and_may_set_local_runtime(self):
+        registered = '''model = "registered-model"
+notify = ["registered-notifier"]
 [desktop]
 autoArchiveAfterDays = 4
-host_only = true
+registered_only = true
 [mcp_servers.node_repl.env]
-HOST_SETTING = "from-host"
+OVERLAY_SETTING = "from-registered"
 '''
         local = '''model = "local-model"
 notify = ["local-notifier"]
@@ -440,23 +476,23 @@ openai_base_url = "https://local.opencodex.invalid/v1"
 autoArchiveAfterDays = 7
 local_only = true
 [mcp_servers.node_repl.env]
-HOST_SETTING = "local-wins"
+OVERLAY_SETTING = "local-wins"
 '''
-        merged = tomllib.loads(harness.merge_documents(CURRENT_CONFIG, COMMON_CONFIG, host, local))
+        merged = tomllib.loads(merge_config_for_test(CURRENT_CONFIG, COMMON_CONFIG, registered, local))
         self.assertEqual(merged["model"], "local-model")
         self.assertEqual(merged["notify"], ["local-notifier"])
         self.assertEqual(merged["openai_base_url"], "https://local.opencodex.invalid/v1")
         self.assertEqual(merged["desktop"], {
             "autoArchiveAfterDays": 7, "futureDesktopOption": "local-only",
-            "host_only": True, "local_only": True,
+            "registered_only": True, "local_only": True,
         })
         expected_env = copy.deepcopy(tomllib.loads(CURRENT_CONFIG)["mcp_servers"]["node_repl"]["env"])
-        expected_env["HOST_SETTING"] = "local-wins"
+        expected_env["OVERLAY_SETTING"] = "local-wins"
         self.assertEqual(merged["mcp_servers"]["node_repl"]["env"], expected_env)
 
     def test_table_overlay_on_scalar_reports_conflict_instead_of_discarding_it(self):
         with self.assertRaises(harness.HarnessError):
-            harness.merge_documents('features = "local-value"\n', "[features]\nmulti_agent = true\n")
+            merge_config_for_test('features = "local-value"\n', "[features]\nmulti_agent = true\n")
 
 
 class SkillSelectionTests(unittest.TestCase):
@@ -503,7 +539,7 @@ enabled = true
 '''
 
     def test_merge_matches_name_path_and_pair_and_keeps_unrelated_entries(self):
-        rendered = harness.merge_documents(self.CURRENT, "", self.OVERLAY)
+        rendered = merge_config_for_test(self.CURRENT, "", self.OVERLAY)
         expected = copy.deepcopy(tomllib.loads(self.CURRENT))
         entries = expected["skills"]["config"]
         entries[0]["enabled"] = True
@@ -517,8 +553,8 @@ enabled = true
     def test_repeated_skill_overlays_are_idempotent_across_all_layers(self):
         common = '[[skills.config]]\nname = "selected"\nenabled = false\n'
         local = '[[skills.config]]\nname = "selected"\nenabled = false\n'
-        once = harness.merge_documents(self.CURRENT, common, self.OVERLAY, local)
-        twice = harness.merge_documents(once, common, self.OVERLAY, local)
+        once = merge_config_for_test(self.CURRENT, common, self.OVERLAY, local)
+        twice = merge_config_for_test(once, common, self.OVERLAY, local)
         self.assertEqual(twice, once)
         entries = tomllib.loads(twice)["skills"]["config"]
         self.assertEqual(len(entries), 6)
@@ -578,10 +614,10 @@ enabled = true
                     },
                     "unrelated": {"items": ["local", "설정"]},
                 }
-                once = harness.merge_documents(current, common, host, local)
+                once = merge_config_for_test(current, common, host, local)
                 self.assertEqual(tomllib.loads(once), expected)
                 self.assertIn("# keep inline selection comment", once)
-                self.assertEqual(harness.merge_documents(once, common, host, local), once)
+                self.assertEqual(merge_config_for_test(once, common, host, local), once)
 
     def test_common_aot_creates_missing_skill_array_without_invalid_toml(self):
         common = '''[[skills.config]]
@@ -598,9 +634,9 @@ enabled = true
                     {"name": "computer-use", "enabled": False},
                     {"name": "agent-desktop", "enabled": True},
                 ]
-                once = harness.merge_documents(current, common)
+                once = merge_config_for_test(current, common)
                 self.assertEqual(tomllib.loads(once), expected)
-                self.assertEqual(harness.merge_documents(once, common), once)
+                self.assertEqual(merge_config_for_test(once, common), once)
 
     def test_name_only_selection_updates_existing_entry_without_losing_local_path(self):
         current = '''[skills]
@@ -617,26 +653,26 @@ enabled = true
         common = '[[skills.config]]\nname = "computer-use"\nenabled = false\n'
         expected = tomllib.loads(current)
         expected["skills"]["config"][0]["enabled"] = False
-        once = harness.merge_documents(current, common)
+        once = merge_config_for_test(current, common)
         self.assertEqual(tomllib.loads(once), expected)
         self.assertIn("# keep local skill comment", once)
-        self.assertEqual(harness.merge_documents(once, common), once)
+        self.assertEqual(merge_config_for_test(once, common), once)
 
     def test_path_only_selection_updates_named_entry_among_same_name_candidates(self):
         host = '[[skills.config]]\npath = "C:/second/skill"\nenabled = true\n'
         expected = tomllib.loads(self.CURRENT)
         expected["skills"]["config"][3]["enabled"] = True
-        once = harness.merge_documents(self.CURRENT, "", host)
+        once = merge_config_for_test(self.CURRENT, "", host)
         self.assertEqual(tomllib.loads(once), expected)
-        self.assertEqual(harness.merge_documents(once, "", host), once)
+        self.assertEqual(merge_config_for_test(once, "", host), once)
 
     def test_name_and_path_pair_does_not_match_partial_candidates(self):
         host = '[[skills.config]]\nname = "scoped"\npath = "C:/local/skill"\nenabled = true\n'
         expected = tomllib.loads(self.CURRENT)
         expected["skills"]["config"].append({"name": "scoped", "path": "C:/local/skill", "enabled": True})
-        once = harness.merge_documents(self.CURRENT, "", host)
+        once = merge_config_for_test(self.CURRENT, "", host)
         self.assertEqual(tomllib.loads(once), expected)
-        self.assertEqual(harness.merge_documents(once, "", host), once)
+        self.assertEqual(merge_config_for_test(once, "", host), once)
 
     def test_name_only_selection_rejects_multiple_existing_paths_in_every_layer(self):
         inline = '''[skills]
@@ -649,7 +685,7 @@ config = [{name = "scoped", path = "C:/first/skill", enabled = false}, {name = "
                     overlays = ["", "", ""]
                     overlays[layer] = overlay
                     with self.assertRaises(harness.HarnessError):
-                        harness.merge_documents(current, *overlays)
+                        merge_config_for_test(current, *overlays)
 
     def test_path_only_selection_rejects_multiple_existing_names(self):
         aot = '''[[skills.config]]
@@ -668,7 +704,7 @@ config = [{name = "first", path = "relative/shared-skill", enabled = true}, {nam
         for storage, current in (("aot", aot), ("inline", inline)):
             with self.subTest(storage=storage):
                 with self.assertRaises(harness.HarnessError):
-                    harness.merge_documents(current, common)
+                    merge_config_for_test(current, common)
 
     def test_unidentified_selection_is_rejected_in_every_overlay_layer(self):
         invalid = "[[skills.config]]\nenabled = true\n"
@@ -677,7 +713,7 @@ config = [{name = "first", path = "relative/shared-skill", enabled = true}, {nam
                 overlays = ["", "", ""]
                 overlays[layer] = invalid
                 with self.assertRaises(harness.HarnessError):
-                    harness.merge_documents(self.CURRENT, *overlays)
+                    merge_config_for_test(self.CURRENT, *overlays)
 
     def test_ambiguous_existing_selection_is_rejected(self):
         for identity in (
@@ -688,7 +724,7 @@ config = [{name = "first", path = "relative/shared-skill", enabled = true}, {nam
                 current = f"[[skills.config]]\n{identity}\nenabled = true\n" * 2
                 overlay = f"[[skills.config]]\n{identity}\nenabled = false\n"
                 with self.assertRaises(harness.HarnessError):
-                    harness.merge_documents(current, overlay)
+                    merge_config_for_test(current, overlay)
 
 
 class CommonValidationTests(unittest.TestCase):
@@ -708,28 +744,28 @@ class CommonValidationTests(unittest.TestCase):
         for name, fragment in fragments.items():
             with self.subTest(setting=name):
                 with self.assertRaises(harness.HarnessError):
-                    harness.merge_documents(CURRENT_CONFIG, fragment)
+                    merge_config_for_test(CURRENT_CONFIG, fragment)
 
     def test_windows_drive_paths_are_rejected_even_inside_nested_arrays(self):
         for absolute in (r"C:\Local Tools\tool.exe", "D:/Local Tools/tool.exe"):
             with self.subTest(path=absolute):
                 common = '[portable]\nitems = [{ args = ["--tool", ' + json.dumps(absolute) + "] }]\n"
                 with self.assertRaises(harness.HarnessError):
-                    harness.merge_documents(CURRENT_CONFIG, common)
+                    merge_config_for_test(CURRENT_CONFIG, common)
 
     def test_posix_and_unc_absolute_paths_are_rejected_from_common(self):
         for absolute in ("/opt/private/tool", r"\\server\share\tool.exe", "//server/share/tool.exe"):
             with self.subTest(path=absolute):
                 common = "[portable]\nargs = [" + json.dumps(absolute) + "]\n"
                 with self.assertRaises(harness.HarnessError):
-                    harness.merge_documents(CURRENT_CONFIG, common)
+                    merge_config_for_test(CURRENT_CONFIG, common)
 
     def test_relative_paths_and_https_urls_remain_portable(self):
         common = '''[portable]
 paths = ["skills/reference", "./bin/tool", "../sibling/skill"]
 documentation = "https://example.invalid/guide"
 '''
-        merged = tomllib.loads(harness.merge_documents("", common))
+        merged = tomllib.loads(merge_config_for_test("", common))
         self.assertEqual(merged, tomllib.loads(common))
 
 
@@ -755,6 +791,10 @@ class TemporaryHarnessTestCase(unittest.TestCase):
             self.fixture.repo, kwargs.pop("host", "roylabs-desktop"),
             self.fixture.home, kwargs.pop("codex_home", self.fixture.codex), **kwargs,
         )
+
+    def planned_config(self, plan):
+        content = next(change.after for change in plan.changes if change.path == self.fixture.codex / 'config.toml')
+        return tomllib.loads(content.decode())
 
     def make_directory_link(self, destination, source):
         """Create a real link entirely inside the test's TemporaryDirectory."""
@@ -800,7 +840,7 @@ class TemporaryHarnessTestCase(unittest.TestCase):
 
 class RegistryPlanTests(TemporaryHarnessTestCase):
     def register(self, text):
-        write_file(self.fixture.repo / 'registry.toml', 'schema_version = 1\n' + text)
+        self.fixture.write_registry(text)
         registry = harness.load_registry(self.fixture.repo / 'registry.toml')
         lock = {'schema_version': 2, 'registry_sha256': registry.fingerprint,
                 'registrations': {'plugins': list(registry.plugins), 'mcp': list(registry.mcp)},
@@ -811,12 +851,8 @@ class RegistryPlanTests(TemporaryHarnessTestCase):
                                     'declaration_sha256': declaration_hash(spec)})
             write_file(self.fixture.codex / 'plugins/cache' / spec['marketplace'] / spec['name'] /
                        '1.0.0/plugin.json', json.dumps({'name': spec['name'], 'version': '1.0.0'}))
-        write_file(self.fixture.repo / 'sources/dependencies.lock.json', json.dumps(lock))
+        write_file(self.fixture.repo / 'dependencies/dependencies.lock.json', json.dumps(lock))
         return registry, lock
-
-    def planned_config(self, plan):
-        content = next(change.after for change in plan.changes if change.path == self.fixture.codex / 'config.toml')
-        return tomllib.loads(content.decode())
 
     def existing_server(self, settings):
         path = self.fixture.codex / 'config.toml'
@@ -824,7 +860,8 @@ class RegistryPlanTests(TemporaryHarnessTestCase):
                         encoding='utf-8')
 
     def test_bare_stdio_launch_and_private_values_survive_registration_and_plan(self):
-        self.fixture.write_host(paths={'node': sys.executable})
+        local = self.fixture.repo / '.local/roylabs-desktop.toml'
+        paths = harness.tomlkit.dumps({'paths': {'node': sys.executable}})
         for kind, command in (('npm', 'npx'), ('python', 'uvx')):
             with self.subTest(kind=kind), \
                     mock.patch.object(harness.mcp_packages, '_resolve_' + kind, return_value={}), \
@@ -845,6 +882,7 @@ env_vars = ["NEW_TOKEN", "LOCAL_TOKEN"]
                             'cwd': 'private-working-directory', 'env': {'LOCAL_TOKEN': 'private-env-sentinel'},
                             'env_vars': ['LOCAL_TOKEN', {'name': 'OTHER_TOKEN'}]}
                 self.existing_server(previous)
+                write_file(local, paths)
                 current = {'mcp_servers': {'service': previous}}
                 overlay = harness.registered_settings(registry, lock, self.fixture.repo / '.local',
                                                      self.simple_plan(), {'node': sys.executable}, current)
@@ -861,12 +899,11 @@ env_vars = ["NEW_TOKEN", "LOCAL_TOKEN"]
                     self.assertEqual(config['mcp_servers'][name], tomllib.loads(CURRENT_CONFIG)['mcp_servers'][name])
                 self.assertNotIn('private-arg-sentinel', '\n'.join(plan.settings))
                 self.assertNotIn('private-env-sentinel', '\n'.join(plan.settings))
-                write_file(self.fixture.repo / '.local/roylabs-desktop.toml',
-                           '[config.mcp_servers.service]\ncommand = "local-override"\nargs = ["--local"]\n')
+                write_file(local, paths + '\n[config.mcp_servers.service]\n'
+                           'command = "local-override"\nargs = ["--local"]\n')
                 server = self.planned_config(self.build())['mcp_servers']['service']
                 self.assertEqual(server['command'], 'local-override')
                 self.assertEqual(server['args'], ['--local'])
-                (self.fixture.repo / '.local/roylabs-desktop.toml').unlink()
 
     def test_unmanaged_launch_without_args_does_not_gain_public_args(self):
         registry = mock.Mock(plugins=(), mcp=({'name': 'service', 'kind': 'python'},))
@@ -1045,7 +1082,7 @@ name = "service"
 kind = "http"
 url = "https://public.example.test/mcp"
 ''')
-        write_file(self.fixture.repo / 'sources/dependencies.lock.json', '{"schema_version":1,"plugins":[]}')
+        write_file(self.fixture.repo / 'dependencies/dependencies.lock.json', '{"schema_version":1,"plugins":[]}')
         before = tree_snapshot(self.root)
         plan = self.build()
         self.assertTrue(plan.missing)
@@ -1102,6 +1139,33 @@ url = "https://public.example.test/mcp"
 
 
 class BuildPlanTests(TemporaryHarnessTestCase):
+    def test_packaged_standalone_registry_contains_the_repository_skills(self):
+        registry = harness.load_registry(harness.REPO / "registry.toml")
+        self.assertCountEqual(registry.skills, self.fixture.skills)
+        for skill in registry.skills:
+            with self.subTest(skill=skill["name"]):
+                self.assertTrue((harness.REPO / skill["path"] / "SKILL.md").is_file())
+
+    def test_newly_registered_skill_plans_all_files_under_its_flat_name(self):
+        name = "fixture-review"
+        relative = f"skills/writing/{name}"
+        self.fixture.write_registry(f'[[skills]]\nname = "{name}"\npath = "{relative}"\n')
+        files = {"SKILL.md": b"# Fixture review\n", "references/examples/payload.bin": b"\x00\xff\r\n"}
+        for filename, payload in files.items():
+            write_file(self.fixture.repo / relative / filename, payload)
+        write_file(self.fixture.repo / "skills/writing/unregistered/SKILL.md", b"# Unregistered\n")
+
+        before = tree_snapshot(self.root)
+        plan = self.build()
+
+        flat_root = self.fixture.home / ".agents/skills" / name
+        expected = {flat_root / filename: payload for filename, payload in files.items()}
+        planned = {change.path: change.after for change in plan.changes}
+        self.assertEqual(plan.missing, [])
+        self.assertEqual(planned.keys(), self.fixture.expected_targets() | expected.keys())
+        self.assertEqual({path: planned[path] for path in expected}, expected)
+        self.assertEqual(tree_snapshot(self.root), before)
+
     def test_plan_is_read_only_and_lists_all_managed_files(self):
         before = tree_snapshot(self.root)
         plan = self.build()
@@ -1143,7 +1207,7 @@ class BuildPlanTests(TemporaryHarnessTestCase):
         rendered = config.after.decode()
         ConfigPreservationTests.assert_preserved(self, rendered)
         self.assertEqual(tomllib.loads(rendered)["windows"]["sandbox"], "elevated")
-        self.assertEqual(tomllib.loads(rendered)["mcp_servers"]["codegraph"]["command"], str(self.fixture.commands["fake-codegraph"]))
+        self.assertEqual(tomllib.loads(rendered)["mcp_servers"]["codegraph"]["command"], str(self.fixture.commands["codegraph"]))
 
     def test_inline_skill_arrays_in_planned_config_are_valid_and_second_plan_is_stable(self):
         for storage, inline in (
@@ -1181,14 +1245,26 @@ class BuildPlanTests(TemporaryHarnessTestCase):
                 self.assertEqual(second.changes, [change for change in plan.changes if change.path != config_path])
                 self.assertEqual(tree_snapshot(self.root), before_second)
 
-    def test_both_supported_hosts_use_their_profile(self):
-        for host in ("roylabs-desktop", "homelab-desktop"):
-            with self.subTest(host=host):
-                self.fixture.write_host(host, config=f'\n[config.host_marker]\nname = "{host}"\n')
-                plan = self.build(host=host)
-                config = next(change.after for change in plan.changes if change.path.name == "config.toml")
-                self.assertEqual(plan.host, host)
-                self.assertEqual(tomllib.loads(config.decode())["host_marker"]["name"], host)
+    def test_supported_hosts_share_windows_default_and_respect_local_override(self):
+        self.assertFalse((self.fixture.repo / "hosts").exists())
+        for roylabs_sandbox in ("elevated", "unelevated"):
+            if roylabs_sandbox == "unelevated":
+                write_file(self.fixture.repo / ".local/roylabs-desktop.toml",
+                           '[config.windows]\nsandbox = "unelevated"\n')
+            for host, expected in (("homelab-desktop", "elevated"), ("roylabs-desktop", roylabs_sandbox)):
+                with self.subTest(host=host, roylabs_sandbox=roylabs_sandbox):
+                    plan = self.build(host=host)
+                    self.assertEqual(plan.host, host)
+                    self.assertEqual(plan.missing, [])
+                    self.assertEqual(self.planned_config(plan)["windows"]["sandbox"], expected)
+
+    def test_plan_rejects_a_host_removed_from_the_manifest(self):
+        write_file(self.fixture.repo / "package.json", '{"supportedHosts": ["homelab-desktop"]}')
+        write_file(self.fixture.repo / ".local/roylabs-desktop.toml", '[config]\nmodel = "local-model"\n')
+        before = tree_snapshot(self.root)
+        with self.assertRaisesRegex(harness.HarnessError, "Unknown host.*roylabs-desktop"):
+            self.build(host="roylabs-desktop")
+        self.assertEqual(tree_snapshot(self.root), before)
 
     def test_default_codex_home_and_default_local_override_are_used(self):
         write_file(self.fixture.repo / ".local/roylabs-desktop.toml", '[config]\nmodel = "default-local"\n')
@@ -1199,17 +1275,8 @@ class BuildPlanTests(TemporaryHarnessTestCase):
 
     def test_custom_codex_explicit_local_overlays_and_nested_placeholders(self):
         self.fixture = FakeRepository(self.root / "overlays", custom_codex=True)
-        self.fixture.write_host(config='''
-[config]
-model = "host-model"
-[config.desktop]
-autoArchiveAfterDays = 4
-host_only = "${USERPROFILE}/host"
-[config.placeholder_values]
-paths = ["${USERPROFILE}/one", "${CODEX_HOME}/two", "${REPO_ROOT}/three"]
-launch = [{ cwd = "${REPO_ROOT}", args = ["${CODEX_HOME}/script"] }]
-''')
-        write_file(self.fixture.repo / ".local/roylabs-desktop.toml", '[config]\nmodel = "wrong-default"\n')
+        write_file(self.fixture.repo / ".local/roylabs-desktop.toml",
+                   '[config]\nmodel = "wrong-default"\n[config.desktop]\ndefault_only = true\n')
         local = write_file(self.root / "chosen override.toml", '''[paths]
 codegraph = "${REPO_ROOT}/fake-bin/codegraph.cmd"
 agent_desktop = "${REPO_ROOT}/fake-bin/agent-desktop.cmd"
@@ -1219,6 +1286,9 @@ notify = ["${USERPROFILE}/notify.exe", "${CODEX_HOME}/catalog"]
 [config.desktop]
 autoArchiveAfterDays = 7
 local_only = "${REPO_ROOT}/local"
+[config.placeholder_values]
+paths = ["${USERPROFILE}/one", "${CODEX_HOME}/two", "${REPO_ROOT}/three"]
+launch = [{ cwd = "${REPO_ROOT}", args = ["${CODEX_HOME}/script"] }]
 [config.mcp_servers.node_repl.env]
 LOCAL_HOME = "${USERPROFILE}"
 ''')
@@ -1232,7 +1302,7 @@ LOCAL_HOME = "${USERPROFILE}"
         self.assertEqual(merged["model"], "local-model")
         self.assertEqual(merged["notify"], [home + "/notify.exe", codex + "/catalog"])
         self.assertEqual(merged["desktop"]["autoArchiveAfterDays"], 7)
-        self.assertEqual(merged["desktop"]["host_only"], home + "/host")
+        self.assertNotIn("default_only", merged["desktop"])
         self.assertEqual(merged["desktop"]["local_only"], repo + "/local")
         self.assertEqual(merged["placeholder_values"], {
             "paths": [home + "/one", codex + "/two", repo + "/three"],
@@ -1240,32 +1310,28 @@ LOCAL_HOME = "${USERPROFILE}"
         })
         self.assertEqual(merged["mcp_servers"]["node_repl"]["env"]["LOCAL_HOME"], home)
         self.assertEqual(merged["mcp_servers"]["node_repl"]["env"]["RUNTIME_TOKEN"], "dummy-test-token")
-        self.assertEqual(merged["mcp_servers"]["codegraph"]["command"], str(self.fixture.commands["fake-codegraph"]))
+        self.assertEqual(merged["mcp_servers"]["codegraph"]["command"], str(self.fixture.commands["codegraph"]))
         self.assertNotIn("${", config)
         instructions = next(change.after.decode() for change in plan.changes if change.path.name == "AGENTS.md")
         self.assertTrue(instructions.startswith(f"# 공통 지침\nSkills live in {codex}/skills.\n"))
         self.assertEqual(instructions.count("## Local tool executables"), 1)
         tool_instructions = instructions.split("## Local tool executables", 1)[1]
-        for tool, executable in (
-            ("agent-desktop", self.fixture.commands["fake-agent-desktop"]),
-            ("codegraph", self.fixture.commands["fake-codegraph"]),
-        ):
+        for tool in ("agent-desktop", "codegraph"):
+            executable = self.fixture.commands[tool]
             self.assertIn(f"`{tool}`: `{executable.as_posix()}`", tool_instructions)
         self.assertNotIn("${", instructions)
         self.which.assert_not_called()  # configured prerequisite files suffice
 
-    def test_unknown_host_or_local_placeholder_fails_without_writes(self):
-        for layer in ("host", "local"):
-            with self.subTest(layer=layer):
-                self.fixture = FakeRepository(self.root / layer)
-                invalid = '[config.nested]\nitems = [{ args = ["${UNKNOWN_PATH}/tool"] }]\n'
-                if layer == "host":
-                    self.fixture.write_host(config="\n" + invalid)
-                else:
-                    write_file(self.fixture.repo / ".local/roylabs-desktop.toml", invalid)
+    def test_unknown_placeholder_in_local_config_fails_without_writes(self):
+        invalid = '[config.nested]\nitems = [{ args = ["${UNKNOWN_PATH}/tool"] }]\n'
+        for explicit in (False, True):
+            with self.subTest(explicit_local_config=explicit):
+                self.fixture = FakeRepository(self.root / ("explicit" if explicit else "default"))
+                local = self.root / "chosen override.toml" if explicit else self.fixture.repo / ".local/roylabs-desktop.toml"
+                write_file(local, invalid)
                 before = tree_snapshot(self.root)
                 with self.assertRaisesRegex(harness.HarnessError, "placeholder"):
-                    self.build()
+                    self.build(local_config=local if explicit else None)
                 self.assertEqual(tree_snapshot(self.root), before)
 
     def test_common_runtime_validation_is_also_enforced_by_build_plan(self):

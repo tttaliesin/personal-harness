@@ -14,7 +14,7 @@ from unittest.mock import patch
 import warnings
 import zipfile
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "installer"))
 import nuget_packages as nuget
 from harness import HarnessError, safe_file
 from windows_paths import io_path

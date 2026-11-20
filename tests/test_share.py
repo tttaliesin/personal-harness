@@ -15,7 +15,7 @@ import zipfile
 
 import tomlkit
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "installer"))
 import share
 from registry import declaration_hash, normalize_mcp, parse_registry
 

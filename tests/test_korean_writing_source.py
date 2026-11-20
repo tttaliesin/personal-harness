@@ -12,18 +12,20 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+HUMANIZE_SKILL = ROOT / "dependencies/skills/humanize-korean"
+STE_KO_ADAPTER = ROOT / "skills/writing/ste-ko"
 
 
 class KoreanWritingSourceTests(unittest.TestCase):
     def test_complete_imports_match_the_pinned_upstream_files(self):
         provenance = json.loads(
-            (ROOT / "sources/korean-development-writing.json").read_text(encoding="utf-8")
+            (ROOT / "dependencies/korean-development-writing.json").read_text(encoding="utf-8")
         )["skills"]
         self.assertEqual(set(provenance), {"ste-ko", "humanize-korean"})
-        for name, source in provenance.items():
+        for name, skill in (("ste-ko", STE_KO_ADAPTER), ("humanize-korean", HUMANIZE_SKILL)):
             with self.subTest(skill=name):
+                source = provenance[name]
                 self.assertRegex(source["source_commit"], r"^[0-9a-f]{40}$")
-                skill = ROOT / "skills" / name
                 actual = {
                     path.relative_to(skill).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                     for path in skill.rglob("*") if path.is_file()
@@ -35,7 +37,7 @@ class KoreanWritingSourceTests(unittest.TestCase):
                 self.assertIn("LICENSE", actual)
 
     def test_editor_runs_in_an_independent_workspace_and_flags_weakened_obligation(self):
-        scripts = ROOT / "skills/humanize-korean/scripts"
+        scripts = HUMANIZE_SKILL / "scripts"
         text = "릴리스 담당자는 테스트를 통과한 경우에만 배포 기록을 남겨야 한다. 긴급 수정에는 별도 절차를 적용한다."
         with tempfile.TemporaryDirectory(prefix="korean-writing-") as temporary:
             workspace = Path(temporary)
@@ -70,8 +72,7 @@ class KoreanWritingSourceTests(unittest.TestCase):
     def test_preparation_and_verification_reuse_run_directory_across_process_temp_changes(self):
         powershell = shutil.which("powershell.exe")
         self.assertIsNotNone(powershell)
-        skill = ROOT / "skills/humanize-korean"
-        prepare = ROOT / "skills/humanize-windows-runtime/scripts/prepare.ps1"
+        prepare = ROOT / "skills/writing/humanize-windows-runtime/scripts/prepare.ps1"
         text = "릴리스 담당자는 테스트가 통과한 경우에만 배포 기록을 남겨야 한다."
         command = (
             "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\n"
@@ -87,7 +88,7 @@ class KoreanWritingSourceTests(unittest.TestCase):
             second.mkdir(parents=True)
             shared = workspace / "shared run files"
             environment = {
-                **os.environ, "POLISH_TEST_SCRIPT": str(prepare), "POLISH_TEST_SKILL": str(skill),
+                **os.environ, "POLISH_TEST_SCRIPT": str(prepare), "POLISH_TEST_SKILL": str(HUMANIZE_SKILL),
                 "POLISH_TEST_SOURCE": text, "POLISH_TEST_PYTHON": sys.executable,
                 "TEMP": str(first), "TMP": str(first),
             }
@@ -115,7 +116,7 @@ class KoreanWritingSourceTests(unittest.TestCase):
             after = run / "final.md"
             after.write_text(text, encoding="utf-8")
             gate = subprocess.run(
-                [result["python"], "-B", "-X", "utf8", str(skill / "scripts/verify_gates.py"),
+                [result["python"], "-B", "-X", "utf8", str(HUMANIZE_SKILL / "scripts/verify_gates.py"),
                  "--before", str(before), "--after", str(after), "--genre", "report", "--json"],
                 cwd=second, env={**os.environ, "TEMP": str(second), "TMP": str(second)},
                 capture_output=True, timeout=25,

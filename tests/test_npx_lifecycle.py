@@ -66,7 +66,7 @@ class NpxLifecycleTests(unittest.TestCase):
         self.environment.update(
             USERPROFILE=str(self.root / "profile"), HOME=str(self.root / "profile"),
             APPDATA=str(self.root / "appdata"), LOCALAPPDATA=str(self.root / "localappdata"),
-            CODEX_HOME=str(self.root / "profile/.codex"),
+            CODEX_HOME=str(self.root / "profile/.codex"), COMPUTERNAME="ROYLABS-DESKTOP",
             npm_config_cache=str(self.cache), npm_config_userconfig=str(self.npmrc),
             npm_config_globalconfig=str(self.root / "global-npmrc"),
             npm_config_update_notifier="false", npm_config_audit="false", npm_config_fund="false",
@@ -78,12 +78,13 @@ class NpxLifecycleTests(unittest.TestCase):
 
     def write_package(self, package):
         (package / "bin").mkdir(parents=True)
-        (package / "scripts").mkdir()
+        (package / "installer").mkdir()
         shutil.copy2(ROOT / "bin/personal-harness.mjs", package / "bin/personal-harness.mjs")
-        (package / "scripts/bootstrap.ps1").write_text(BOOTSTRAP, encoding="utf-8")
+        (package / "installer/bootstrap.ps1").write_text(BOOTSTRAP, encoding="utf-8")
         (package / "package.json").write_text(json.dumps({
             "name": NAME, "version": "0.1.0", "type": "module",
             "bin": {"personal-harness": "bin/personal-harness.mjs"},
+            "supportedHosts": ["homelab-desktop", "roylabs-desktop"],
         }), encoding="utf-8")
 
     def prepare_entry(self, include_npx=False):

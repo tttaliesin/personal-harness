@@ -42,7 +42,7 @@
 | 서비스 수준 | `default` |
 | 승인 정책 | `on-request` |
 | 사용자 설정의 sandbox | `danger-full-access` |
-| Windows sandbox | PC 프로필의 `elevated` |
+| Windows sandbox | 공통 설정의 `elevated` |
 | Multi-agent | `true` |
 | 자동 보관 | 1일 |
 | 로캘 | `ko-KR` |
@@ -56,20 +56,23 @@
 
 ## 스킬과 외부 도구
 
+단독 스킬의 배포 목록은 [registry.toml](../registry.toml)의 `[[skills]]`에서 관리한다.
+설치기는 등록한 스킬 디렉터리의 파일 전체를 `~/.agents/skills/<name>/`에 복사한다.
+
 | 구성 | 관리 방식 |
 |---|---|
-| `create-readme` | 사용자 원본을 `~/.agents/skills/create-readme`에 복사 |
-| `openspec-workflow` | 저장소에서 작성한 연동 스킬을 `~/.agents/skills/openspec-workflow`에 복사 |
-| `development-environment` | 기존 스택을 보존하는 실행·테스트 환경 지침과 runtime 참조를 `~/.agents/skills/development-environment`에 복사 |
-| `repository-artifacts` | 공유 문서·로컬 검토·테스트 산출물 판단 지침을 `~/.agents/skills/repository-artifacts`에 복사 |
-| `korean-typography` | 한글 웹·앱 UI 지침과 참조 문서를 `~/.agents/skills/korean-typography`에 복사 |
-| `ste-ko` | 각 PC의 `~/.agents/skills/ste-ko`에 한국어 개발 문서 지침과 STE-KO 원본 규격을 복사 |
-| `humanize-korean` | `~/.agents/skills/humanize-korean`에 im-not-ai의 Codex용 원본 스킬·참조·실행 스크립트를 복사 |
-| `humanize-windows-runtime` | Windows 윤문에 필요한 작업 폴더와 Python 경로를 고정하는 실행 보조 |
-| `taste-windows-runtime` | 원본 Taste 브라우저 검사에만 적용하는 Windows 실행기를 `~/.agents/skills/taste-windows-runtime`에 복사 |
-| `feature-sliced-design` | 공식 FSD 원본과 참조·평가 디렉터리 전체를 `~/.agents/skills/feature-sliced-design`에 복사하며 이미 FSD를 쓰는 저장소에서만 자율 선택 |
-| `agent-desktop` | 설치한 최신 안정 릴리스의 공식 스킬과 참조 문서를 Codex 홈의 `skills`에 복사 |
-| `agent-desktop-windows` | 같은 릴리스의 Windows 스킬과 참조 문서를 복사 |
+| [create-readme](../skills/writing/create-readme) | Roylabs 사용자 프로필에서 가져온 프로젝트 README 작성 지침 |
+| [openspec-workflow](../skills/engineering/openspec-workflow) | 저장소에서 작성한 OpenSpec 연동 스킬. 잠금 파일에 `openspec`이 있을 때 적용 |
+| [development-environment](../skills/engineering/development-environment) | 기존 스택을 보존하는 실행·테스트 환경 지침과 런타임 참조 |
+| [repository-artifacts](../skills/engineering/repository-artifacts) | 공유 문서·로컬 검토·테스트 산출물 판단 지침 |
+| [korean-typography](../skills/design/korean-typography) | 한글 웹·앱 UI 지침과 참조 문서 |
+| [ste-ko](../skills/writing/ste-ko) | 한국어 개발 문서용 자체 스킬. 같은 디렉터리에 STE-KO 원본 참조를 보관 |
+| [humanize-korean](../dependencies/skills/humanize-korean) | im-not-ai의 Codex용 원본 스킬과 참조 문서, 실행 스크립트 |
+| [humanize-windows-runtime](../skills/writing/humanize-windows-runtime) | Windows 윤문에 필요한 작업 폴더와 Python 경로를 고정하는 실행 보조 |
+| [taste-windows-runtime](../skills/design/taste-windows-runtime) | 원본 Taste 브라우저 검사에만 적용하는 Windows 실행기 |
+| [feature-sliced-design](../dependencies/skills/feature-sliced-design) | 공식 FSD 원본과 참조·평가 디렉터리 전체. FSD를 쓰는 저장소에서만 자율 선택 |
+| [agent-desktop](../skills/agent-desktop) | 설치한 최신 안정 릴리스의 공식 스킬과 참조 문서를 Codex 홈의 `skills`에 복사 |
+| [agent-desktop-windows](../skills/agent-desktop-windows) | 같은 릴리스의 Windows 스킬과 참조 문서를 Codex 홈의 `skills`에 복사 |
 | agent-desktop CLI | GitHub 최신 안정 릴리스의 Windows x64 배포물과 실행 파일 SHA256 확인 |
 | CodeGraph CLI | npm `@colbymchenry/codegraph`의 `latest` 배포와 integrity 확인 |
 | OpenSpec CLI | npm `@fission-ai/openspec`의 `latest` 배포와 integrity 확인 |
@@ -78,13 +81,7 @@
 | NuGet MCP | 공식 `NuGet.Mcp.Server`의 Windows x64 패키지와 전용 .NET 10 실행 환경을 lock의 버전·해시로 고정해 stdio로 등록 |
 | Taste Skill | 원본 `taste-skill@taste-skill` 플러그인의 `design-taste-frontend`를 두 PC의 설치 대상으로 지정 |
 
-Context7의 원격 저장소는 [upstash/context7.git](https://github.com/upstash/context7.git)이다.
-현재 확인한 플러그인 manifest 버전은 `1.0.2`다.
-플러그인은 hosted endpoint `https://mcp.context7.com/mcp`를 사용하므로 로컬 MCP 서버 프로세스를 추가하지 않는다.
-설치 후에는 [공식 안내](https://context7.com/docs/clients/codex)에 따라 새 스레드에서 스킬과 도구를 로드한다.
-무인증 protocol 조회의 단일 성공은 계속되는 무인증 접근이나 두 PC 설치 완료의 근거로 사용하지 않는다.
-계정 정보와 토큰은 Git에서 제외한다.
-원본 플러그인 캐시와 프로젝트의 repo-governance는 유지한다.
+Context7의 설치 대상, 원격 연결과 확인 절차는 [개발 도구 안내](development-tools.md#context7-선택과-설치-상태)에 있다.
 
 [Microsoft Learn MCP 공식 안내](https://learn.microsoft.com/en-us/training/support/mcp)의 공개 원격 서버를 사용한다.
 작은 기계적 수정에는 문서 조회를 필수로 두지 않는다.
@@ -107,14 +104,12 @@ Taste Skill을 사용할 때도 기존 프레임워크, SSR·API·인증·데이
 윤문이 필요한 문서에는 `humanize-korean`을 자율적으로 선택하고, 변경한 부분의 주체·조건·예외와 의무·허용·금지를 원문과 대조한다.
 Windows에서는 준비 단계가 반환한 작업 폴더의 절대 경로를 윤문과 검증 단계에 전달한다.
 이 흐름의 배포 목록에서 STE80을 제외한다.
-스킬 출처와 고정 버전은 [한국어 개발 문서 출처 기록](../sources/korean-development-writing.json)에서 확인할 수 있다.
+스킬 출처와 고정 버전은 [한국어 개발 문서 출처 기록](../dependencies/korean-development-writing.json)에서 확인할 수 있다.
 
-초기 스킬 파일 11개의 SHA256은 [Roylabs 원본 기록](../sources/roylabs-2026-11-12.json)에 있다.
-공식 FSD 스킬의 고정 commit과 전체 파일 해시는 [FSD 출처 기록](../sources/feature-sliced-skill.json)에 있다.
-FSD 스킬은 배포 소스에 포함된 스킬로 등록하며 Git 플러그인·MCP용 `registry.toml`에 가짜 플러그인 항목을 추가하지 않는다.
+초기 스킬 파일 11개의 SHA256은 [Roylabs 원본 기록](../dependencies/roylabs-2026-11-12.json)에 있다.
+공식 FSD 스킬의 고정 커밋과 전체 파일 해시는 [FSD 출처 기록](../dependencies/feature-sliced-skill.json)에 있다.
 Steiger와 ArchUnitNET의 도입은 저장소별로 결정하며 하네스 전역 의존성이나 자동 hook으로 등록하지 않는다.
-현재 설치 결과와 버전 정보는 [dependencies.lock.json](../sources/dependencies.lock.json)에 기록한다.
-스킬에 포함된 문서를 일부만 복사하지 않고 해당 디렉터리 전체를 관리한다.
+체크아웃에서 설치하고 검증한 의존성의 버전은 [dependencies.lock.json](../dependencies/dependencies.lock.json)에 기록한다.
 
 Ego와 `ego-browser` 스킬은 각 PC의 브라우저가 소유한다.
 이 저장소는 앱이나 스킬의 설치·업데이트·버전 검사·링크 생성에 관여하지 않는다.

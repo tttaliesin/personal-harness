@@ -24,7 +24,7 @@
   },
   "content_sha256": "e4b8d804195f7c7799cf7f96ae4f92ec3da612a35f2888c8fb31a94f4f24a589",
   "upstream_readme": {
-    "path": "sources/feature-sliced-skills-README.md",
+    "path": "dependencies/feature-sliced-skills-README.md",
     "sha256": "b90ac6a2e21186aaef5e2fba34b928430a93811273dab1809f49441a9a1a5ce6"
   }
 }

@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "skills/taste-windows-runtime/scripts"
+SCRIPTS = Path(__file__).resolve().parents[1] / "skills/design/taste-windows-runtime/scripts"
 NODE = shutil.which("node")
 
 

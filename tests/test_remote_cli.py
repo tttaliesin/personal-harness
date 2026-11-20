@@ -197,8 +197,8 @@ class RemoteCliTests(unittest.TestCase):
             else:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, destination)
-        (self.payload / "scripts/update-dependencies.ps1").write_text(UPDATE_STUB, encoding="utf-8")
-        (self.payload / "scripts/share.py").write_text(SHARE_STUB, encoding="utf-8")
+        (self.payload / "installer/update-dependencies.ps1").write_text(UPDATE_STUB, encoding="utf-8")
+        (self.payload / "installer/share.py").write_text(SHARE_STUB, encoding="utf-8")
         self.caller = self.root / "c"
         self.caller.mkdir()
         self.python = self.root / "python's [exe] & $().exe"
@@ -250,26 +250,50 @@ class RemoteCliTests(unittest.TestCase):
 
     def imported_skill_payload_files(self):
         files = set()
-        for name in ("feature-sliced-design", "ste-ko", "humanize-korean", "humanize-windows-runtime"):
-            source = self.payload / "skills" / name
+        for relative in ("dependencies/skills/feature-sliced-design", "dependencies/skills/humanize-korean",
+                         "skills/writing/ste-ko", "skills/writing/humanize-windows-runtime"):
+            source = self.payload / relative
             self.assertTrue((source / "SKILL.md").is_file())
             files.update(path.relative_to(self.payload).as_posix()
                          for path in source.rglob("*") if path.is_file())
         return files
 
-    def legacy_source(self, change=None, pre_registry=True):
-        hashes = dict([call for call in self.calls() if call["kind"] == "wrapper"][-1]["hashes"])
+    def legacy_source(self, change=None, pre_registry=True, *, scripts_layout=True):
+        hashes = [call for call in self.calls() if call["kind"] == "wrapper"][-1]["hashes"]
         content = {name: (self.payload / name).read_bytes() for name in hashes}
-        content.pop("scripts/share.py", None)
+        manifest = json.loads(content["package.json"])
+        if scripts_layout:
+            legacy_roots = {"installer": "scripts", "dependencies": "sources"}
+            legacy_content = {}
+            for name, data in content.items():
+                parts = name.split("/")
+                grouped_skill = parts[0] == "skills" and parts[1] in {"design", "engineering", "writing"}
+                if grouped_skill or parts[:2] == ["dependencies", "skills"]:
+                    legacy_name = "/".join(["skills", *parts[2:]])
+                else:
+                    legacy_name = "/".join([legacy_roots.get(parts[0], parts[0]), *parts[1:]])
+                legacy_content[legacy_name] = data
+            content = legacy_content
+            content.pop("scripts/share.py", None)
+            manifest["files"].remove("sources")
+            manifest["files"] = [legacy_roots.get(name, name) for name in manifest["files"]]
         if pre_registry:
-            manifest = json.loads(content["package.json"])
             manifest["files"].remove("registry.toml")
-            content["package.json"] = json.dumps(manifest, indent=2).encode()
             old_scripts = {"bootstrap.ps1", "harness.ps1", "harness.py", "install_dependencies.py",
                            "install-dependencies.ps1", "update-dependencies.ps1"}
             content = {name: data for name, data in content.items()
                        if name != "registry.toml" and
                        (not name.startswith("scripts/") or name.removeprefix("scripts/") in old_scripts)}
+        manifest.pop("supportedHosts", None)
+        manifest["files"].append("hosts")
+        if scripts_layout:
+            manifest["files"].append("!scripts/test.ps1")
+        for host in ("homelab-desktop", "roylabs-desktop"):
+            content[f"hosts/{host}.toml"] = (
+                f'name = "{host}"\nplatform = "windows"\n\n[config.windows]\nsandbox = "elevated"\n'
+            ).encode("utf-8")
+        content["hosts/local.example.toml"] = content.pop("docs/local.example.toml")
+        content["package.json"] = json.dumps(manifest, indent=2).encode()
         if change:
             content["README.md"] += change
         hashes = {name: hashlib.sha256(data).hexdigest() for name, data in content.items()}
@@ -316,13 +340,16 @@ class RemoteCliTests(unittest.TestCase):
         self.assertEqual(run_source.parent.parent, self.manager / "runs")
         self.assertFalse(run_source.parent.exists())
         self.assertFalse((self.manager / "releases").exists())
-        for name in ("skills/agent-desktop/references/commands-system.md", "sources/agent-desktop-LICENSE"):
-            self.assertIn(name, wrapper["hashes"])
+        self.assertFalse(any(name.startswith("hosts/") for name in wrapper["hashes"]))
+        for name in ("skills/agent-desktop/references/commands-system.md", "sources/agent-desktop-LICENSE",
+                     "dependencies/dependencies.lock.json", "dependencies/NOTICE.md", "docs/local.example.toml"):
+            with self.subTest(payload_file=name):
+                self.assertIn(name, wrapper["hashes"].keys())
         for name in self.imported_skill_payload_files():
             with self.subTest(imported_skill_file=name):
                 self.assertEqual(wrapper["hashes"][name],
                                  hashlib.sha256((self.payload / name).read_bytes()).hexdigest())
-        for name in ("scripts/test.ps1", "AGENTS.md", "Taskfile.yml", "__pycache__"):
+        for name in ("scripts/test.ps1", "installer/test.ps1", "AGENTS.md", "Taskfile.yml", "__pycache__"):
             self.assertNotIn(name, wrapper["hashes"])
 
     def test_default_targets_and_explicit_manager_state_and_codex_home(self):
@@ -384,7 +411,7 @@ class RemoteCliTests(unittest.TestCase):
         self.assertFalse(any(args[1:3] == ["-m", "venv"] or args[1:4] == ["-m", "pip", "install"]
                              for args in self.python_calls()[python_before:]))
 
-    def test_share_unknown_host_needs_no_bundled_profile_but_rejects_unsafe_names(self):
+    def test_share_accepts_unlisted_hosts_and_rejects_unsafe_names(self):
         self.run_cli("share", extra=["--host", "NEW-PC", "--list"])
         self.assertEqual([call["kind"] for call in self.calls()], ["share"])
         for host in ("../outside", "bad/name", "bad_name"):
@@ -413,7 +440,7 @@ class RemoteCliTests(unittest.TestCase):
         self.assertFalse((self.manager / "active.json").exists())
 
     def test_share_runs_real_managed_python_without_payload_bytecode(self):
-        helper = self.payload / "scripts/share.py"
+        helper = self.payload / "installer/share.py"
         helper.write_text("import windows_paths\n" + SHARE_STUB, encoding="utf-8")
         digest = hashlib.sha256((self.payload / "requirements.txt").read_bytes()).hexdigest()
         venv = self.state / "python" / digest
@@ -456,11 +483,11 @@ class RemoteCliTests(unittest.TestCase):
         self.assertFalse((self.manager / "active.json").exists())
 
     def test_new_incoming_payload_requires_share_helper_for_every_command(self):
-        (self.payload / "scripts/share.py").unlink()
+        (self.payload / "installer/share.py").unlink()
         for command in ("install", "update", "share"):
             with self.subTest(command=command):
                 result = self.run_cli(command, expected=1)
-                self.assertIn(b"Required source is missing from the payload allowlist: scripts/share.py", result.stderr)
+                self.assertIn(b"Required source is missing from the payload allowlist: installer/share.py", result.stderr)
                 self.assertFalse(self.manager.exists())
                 self.assertFalse(self.python_log.exists())
 
@@ -672,9 +699,17 @@ class RemoteCliTests(unittest.TestCase):
 
     def test_verified_legacy_migration_waits_for_success_and_preserves_persistent_files(self):
         self.run_cli()
-        first = self.legacy_source()
-        second = self.legacy_source(b"\nolder revision\n", pre_registry=False)
-        previous = self.legacy_receipt(first)
+        releases = (
+            self.legacy_source(),
+            self.legacy_source(b"\nolder revision\n", pre_registry=False),
+            self.legacy_source(pre_registry=False, scripts_layout=False),
+        )
+        official = ("skills/agent-desktop/SKILL.md", "skills/agent-desktop-windows/SKILL.md",
+                    "sources/agent-desktop-LICENSE")
+        expected = {name: (self.payload / name).read_bytes() for name in official}
+        for release in releases:
+            self.assertEqual({name: (release / name).read_bytes() for name in official}, expected)
+        previous = self.legacy_receipt(releases[0])
         sentinels = {}
         for target in (self.state / "tools/unrelated.exe", self.state / "sources/lock.json",
                        self.state / "skills/kept.md", self.state / "private.toml",
@@ -684,11 +719,11 @@ class RemoteCliTests(unittest.TestCase):
             sentinels[target] = target.read_bytes()
         self.run_cli("update", expected=43, environment=dict(self.environment, HARNESS_FIXTURE_FAIL_STAGE="check"))
         self.assertEqual((self.manager / "active.json").read_bytes(), previous)
-        self.assertTrue(first.exists())
-        self.assertTrue(second.exists())
+        for release in releases:
+            self.assertEqual({name: (release / name).read_bytes() for name in official}, expected)
         self.run_cli("update")
-        self.assertFalse(first.exists())
-        self.assertFalse(second.exists())
+        for release in releases:
+            self.assertFalse(release.exists(), release)
         self.assertEqual(self.receipt()["schema_version"], 2)
         self.assertNotIn("source_root", self.receipt())
         self.assertEqual({target: target.read_bytes() for target in sentinels}, sentinels)
@@ -865,7 +900,7 @@ class RemoteCliTests(unittest.TestCase):
                 self.assertEqual(len(self.calls()), calls)
 
     def test_runtime_normalization_only_bypasses_exact_pipe_namespaces(self):
-        bootstrap = (ROOT / "scripts/bootstrap.ps1").read_text(encoding="utf-8")
+        bootstrap = (ROOT / "installer/bootstrap.ps1").read_text(encoding="utf-8")
         definition = bootstrap.split("def normalized(value):\n", 1)[1].split("\nroots =", 1)[0]
         namespace = {"os": os}
         exec("def normalized(value):\n" + definition, namespace)
@@ -1019,6 +1054,18 @@ class RemoteCliTests(unittest.TestCase):
             self.assertIn(b"Usage:", result.stdout)
         self.assertFalse(self.manager.exists())
 
+    def test_install_and_update_reject_a_host_removed_from_the_manifest(self):
+        manifest_path = self.payload / "package.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["supportedHosts"].remove("roylabs-desktop")
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        for command in ("install", "update"):
+            with self.subTest(command=command):
+                result = self.run_cli(command, expected=1)
+                self.assertIn(b"Unknown bundled host 'roylabs-desktop'", result.stderr)
+                self.assertFalse(self.manager.exists())
+                self.assertFalse(self.python_log.exists())
+
     def test_unsafe_persistent_roots_and_allowlist_are_rejected(self):
         for flags in (["--install-root", str(self.payload / "manager")],
                       ["--state-root", str(self.payload / "state")],
@@ -1040,7 +1087,7 @@ class RemoteCliTests(unittest.TestCase):
         calls = self.log.read_bytes()
         source = {p.relative_to(self.payload): p.read_bytes() for p in self.payload.rglob("*") if p.is_file()}
         roots = ["--install-root", str(self.manager), "--state-root", str(self.state)]
-        for flags in (["--codex-home", str(self.payload / "hosts")],
+        for flags in (["--codex-home", str(self.payload / "common")],
                       ["--codex-home", str(self.manager / "releases/target")],
                       ["--home", str(self.payload)],
                       ["--home", str(self.manager / "releases/target")]):
@@ -1104,7 +1151,7 @@ class RemoteCliTests(unittest.TestCase):
     def test_actual_npm_pack_has_complete_allowlisted_payload_and_runs_offline(self):
         self.assertTrue((ROOT / "docs/history/deployment-2026-11-12-13.md").is_file())
         for relative in ("AGENTS.md", ".local/private.txt", ".audit/private.txt", "tests/private.py",
-                         "scripts/__pycache__/private.pyc", "skills/agent-desktop/.local/private.txt"):
+                         "installer/__pycache__/private.pyc", "skills/agent-desktop/.local/private.txt"):
             path = self.payload / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("private sentinel", encoding="utf-8")
@@ -1118,12 +1165,16 @@ class RemoteCliTests(unittest.TestCase):
         package = json.loads(result.stdout)[0]
         files = {item["path"] for item in package["files"]}
         self.assertTrue(self.imported_skill_payload_files().issubset(files))
+        lock = json.loads((self.payload / "dependencies/dependencies.lock.json").read_bytes())
+        self.assertEqual(set(lock["agent_desktop"]["files_sha256"]) - files, set())
         for name in ("skills/agent-desktop/references/commands-system.md", "skills/agent-desktop-windows/references/troubleshooting.md",
-                     "sources/agent-desktop-LICENSE", "docs/deployment.md", "scripts/bootstrap.ps1",
-                     "registry.toml", "scripts/registry.py", "scripts/mcp_packages.py", "scripts/windows_paths.py", "scripts/share.py"):
+                     "sources/agent-desktop-LICENSE", "dependencies/NOTICE.md", "dependencies/dependencies.lock.json",
+                     "docs/deployment.md", "docs/local.example.toml", "installer/bootstrap.ps1", "registry.toml",
+                     "installer/registry.py", "installer/mcp_packages.py", "installer/windows_paths.py", "installer/share.py"):
             self.assertIn(name, files)
-        self.assertFalse(any(name.startswith("docs/history/") for name in files))
-        self.assertNotIn("scripts/test.ps1", files)
+        self.assertFalse(any(name.startswith(("docs/history/", "hosts/", "scripts/")) for name in files))
+        self.assertEqual({name for name in files if name.startswith("sources/")}, {"sources/agent-desktop-LICENSE"})
+        self.assertNotIn("installer/test.ps1", files)
         self.assertNotIn("Taskfile.yml", files)
         self.assertNotIn("AGENTS.md", files)
         self.assertFalse(any(set(name.split("/")) & {".local", ".audit", ".git", "tests", "__pycache__"} for name in files))
@@ -1140,6 +1191,8 @@ class RemoteCliTests(unittest.TestCase):
         manifest = json.loads((self.payload / "package.json").read_text())
         self.assertTrue(manifest["private"])
         self.assertEqual(manifest["engines"]["node"], ">=22.12.0")
+        self.assertEqual(manifest["supportedHosts"], ["homelab-desktop", "roylabs-desktop"])
+        self.assertNotIn("hosts", manifest["files"])
         self.assertNotIn("scripts", manifest)
         self.assertNotIn("dependencies", manifest)
 

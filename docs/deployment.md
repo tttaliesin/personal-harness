@@ -13,7 +13,7 @@
 `task update:plan`은 공식 최신 안정판을 조회한 뒤 설치 계획만 출력한다.
 기본 미리보기는 네트워크를 읽지만 파일과 사용자 홈을 쓰지 않는다.
 `task install` 또는 `task update`를 실행하면 조회한 배포를 저장소의 `.local`에 설치하고, 선택한 Codex 홈에 플러그인을 등록한다.
-공식 스킬 갱신과 설치 검증이 끝나면 실제 설치한 버전·commit·해시를 lock에 기록한다.
+의존성과 공식 Agent Desktop 스킬의 설치를 검증한 뒤 실제 버전과 커밋, 해시를 [dependencies/dependencies.lock.json](../dependencies/dependencies.lock.json)에 기록한다.
 이어서 Harness를 적용하고 상태를 확인한다.
 Codex CLI는 PATH와 기존 `node_repl` 설정의 `CODEX_CLI_PATH`에서 찾는다.
 자동으로 찾지 못하면 `task install -- -Codex 'D:/tools/codex.exe'`로 지정한다.
@@ -22,18 +22,14 @@ Codex CLI는 PATH와 기존 `node_repl` 설정의 `CODEX_CLI_PATH`에서 찾는�
 Ego와 번들 스킬은 브라우저가 관리한다.
 이 저장소의 설치·사전 검사·적용 대상에 포함하지 않는다.
 
-```toml
-[paths]
-agent_desktop = "D:/tools/agent-desktop.exe"
-codegraph = "D:/tools/codegraph.cmd"
-```
-
+설치된 도구 경로를 직접 지정하려면 [로컬 설정 예시](local.example.toml)의 `[paths]`를 사용한다.
 `${USERPROFILE}`, `${CODEX_HOME}`, `${REPO_ROOT}`, `${STATE_ROOT}`를 치환한다.
 `${STATE_ROOT}`는 선택한 상태 경로이며, 저장소 기본값은 `.local`이다.
 상대경로는 실행 중인 소스 루트를 기준으로 해석한다.
 `task plan -- -HomeDirectory 'D:/Test Profile'`은 해당 사용자 홈을 대상으로 하며, 실제 `CODEX_HOME` 환경변수를 자동으로 끌어오지 않는다.
 사용자 홈과 다른 Codex 홈을 함께 사용할 때는 `-CodexHome`도 지정한다.
-다른 PC 프로필을 확인할 때는 `task plan HOST=roylabs-desktop`처럼 호스트를 지정한다.
+다른 PC의 적용 계획을 확인할 때는 `task plan HOST=roylabs-desktop`처럼 호스트를 지정한다.
+지원 대상 PC는 [package.json](../package.json)의 `supportedHosts`에서 확인할 수 있다.
 
 ## 적용 절차
 
@@ -48,9 +44,11 @@ codegraph = "D:/tools/codegraph.cmd"
 계획 이후 바뀐 파일도 덮어쓰지 않는다.
 쓰기 실패 시 이번 적용에서 쓴 파일은 이전 내용으로 되돌리고 백업은 유지한다.
 
-새 공식 스킬에서 삭제된 파일은 이전 적용 기록의 SHA256과 현재 내용이 일치할 때만 정리한다.
+설치기는 `registry.toml`의 `[[skills]]`에 등록한 스킬 디렉터리의 파일 전체를 `~/.agents/skills/<name>/`에 복사한다.
+검증한 공식 Agent Desktop 스킬은 Codex 홈의 `skills/`에 복사한다.
+스킬 원본에서 삭제된 파일은 현재 SHA256이 이전 적용 기록과 일치할 때만 정리한다.
 사용자가 수정하거나 추가한 파일이 있으면 해당 파일을 보존하고 적용을 중단한다.
-공식 소스의 파일과 디렉터리 형태가 충돌하면 소스에 쓰기 전에 중단한다.
+원본과 설치 경로에서 파일과 디렉터리의 형태가 충돌하면 쓰기 전에 적용을 중단한다.
 
 설정 파일의 주석과 명시하지 않은 항목은 TOML 편집기로 유지한다.
 `skills.config`는 이름 또는 경로가 같은 항목만 갱신한다.

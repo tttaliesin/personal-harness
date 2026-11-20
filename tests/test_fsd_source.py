@@ -9,10 +9,10 @@ import unittest
 class FsdSourceTests(unittest.TestCase):
     def test_imported_skill_and_upstream_notice_match_provenance(self):
         repo = Path(__file__).resolve().parents[1]
-        provenance = json.loads((repo / "sources/feature-sliced-skill.json").read_text(encoding="utf-8"))
+        provenance = json.loads((repo / "dependencies/feature-sliced-skill.json").read_text(encoding="utf-8"))
         self.assertEqual(provenance["source"], "https://github.com/feature-sliced/skills")
         self.assertRegex(provenance["source_commit"], r"^[0-9a-f]{40}$")
-        root = repo / "skills/feature-sliced-design"
+        root = repo / "dependencies/skills/feature-sliced-design"
         actual = {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                   for path in root.rglob("*") if path.is_file()}
         self.assertEqual(actual, provenance["files_sha256"])
