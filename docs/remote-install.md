@@ -62,12 +62,16 @@ WindowsApps의 Python 실행 별칭은 인터프리터로 사용하지 않는다
 새 항목을 등록하거나 설치 출처를 바꾼 뒤에는 일반 `update`로 해당 PC의 정확한 버전 기록을 갱신한다.
 `--locked`는 현재 등록 목록과 기록이 일치할 때 사용한다.
 
-로컬 플러그인 번들을 설치하려면 상태 루트의 `<hostname>.toml`에 `[plugin_bundles]`를 지정한다.
-번들은 원격 설치 명령이 끝난 뒤에도 사용할 수 있는 폴더에 둔다.
-경로 지정과 검증 절차는 [로컬 플러그인 번들](deployment.md#로컬-플러그인-번들)을 참고한다.
-
 설치기는 기존 Codex 프로필의 모델, 추론 수준, 입력 제안을 유지한다.
 이 설정을 PC별로 덮어쓰려면 상태 루트의 `<hostname>.toml`에 값을 지정한다. [PC별 설정 방법](deployment.md#적용-절차)
+
+## 자체 플러그인 설치
+
+`repo-governance`, Windows Agent Devkit, Worker Orchestrator는 Codex의 `personal-harness` Git 마켓플레이스에서 설치한다.
+Codex는 같은 공개 저장소의 Git 기본 브랜치인 `main`을 읽는다.
+사용자가 PC마다 배포본 경로를 지정할 필요가 없다. [설치 명령](../README.md#자체-플러그인-설치)
+
+이전에 로컬 번들에서 설치했다면 해당 PC에서 활성 출처를 한 번 바꾼다. [기존 로컬 설치 전환](deployment.md#기존-로컬-설치-전환)
 
 ## 다른 PC에 공유할 항목 올리기
 

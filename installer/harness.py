@@ -31,6 +31,8 @@ REPO = Path(__file__).resolve().parents[1]
 PROTECTED = {"notify", "model_catalog_json", "openai_base_url", "experimental_realtime_ws_base_url",
              "projects", "hooks", "model_providers", "computer_use"}
 RETIRED_DESKTOP_SKILLS = ("agent-desktop", "agent-desktop-windows")
+# Existing host overrides can retain these keys after migration to the native marketplace.
+RETIRED_LOCAL_MARKETPLACES = {"repo-governance-local", "windows-agent-devkit-local", "worker-orchestrator-local"}
 
 
 class HarnessError(Exception):
@@ -324,12 +326,18 @@ def registered_settings(registry, lock: Mapping, state: Path, plan: Plan,
     return overlay
 
 
-def local_bundle_records(declarations: tuple[dict, ...], locations: Mapping, config_dir: Path) -> list[dict]:
+def local_bundle_records(declarations: tuple[dict, ...], locations: Mapping, config_dir: Path, *,
+                         variables: Mapping | None = None) -> list[dict]:
     registered = {item["marketplace"] for item in declarations}
-    if not isinstance(locations, Mapping) or set(locations) - registered:
+    retired = RETIRED_LOCAL_MARKETPLACES - registered
+    if not isinstance(locations, Mapping) or set(locations) - registered - retired:
         raise HarnessError("plugin_bundles must map registered local marketplaces to bundle directories")
     roots = {}
     for marketplace, value in locations.items():
+        if marketplace in retired:
+            continue
+        if variables is not None:
+            value = expand(value, variables)
         if not isinstance(value, str) or not value.strip():
             raise HarnessError(f"Expected a local bundle directory for {marketplace}")
         path = Path(value)
@@ -390,7 +398,8 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     if set(local) - {"name", "platform", "paths", "config", "plugin_bundles"}:
         raise HarnessError("Local overrides support paths, config and plugin_bundles")
     variables = path_variables(repo, layout.local, user_home, codex_home)
-    local = expand(local, variables)
+    locations = local.get("plugin_bundles", {})
+    local = expand({key: value for key, value in local.items() if key != "plugin_bundles"}, variables)
     local_settings = local.get("config", {})
     paths = dict(local.get("paths", {}))
     for key, value in list(paths.items()):
@@ -416,8 +425,7 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     original = config_path.read_text(encoding="utf-8-sig") if config_path.exists() else ""
     old = tomlkit.parse(original)
     registered = registered_settings(registry, lock, layout.local, plan, paths, old)
-    locations = local.get("plugin_bundles", {})
-    for record in local_bundle_records(registry.local_plugins, locations, local_config.parent):
+    for record in local_bundle_records(registry.local_plugins, locations, local_config.parent, variables=variables):
         selector = f"{record['name']}@{record['marketplace']}"
         if (local_marketplace_matches(record, old) and selector in old.get("plugins", {})
                 and local_plugin_cache_matches(record, codex_home)):

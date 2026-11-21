@@ -1,0 +1,11 @@
+{
+  "name": "worker-orchestrator",
+  "version": "0.1.6",
+  "description": "Project-scoped worker chat lifecycle through existing Codex Desktop tools.",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Worker Orchestrator",
+    "shortDescription": "프로젝트별 워커 대화 생명주기",
+    "capabilities": []
+  }
+}

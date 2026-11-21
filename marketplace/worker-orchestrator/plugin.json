@@ -1,0 +1,15 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "worker-orchestrator",
+  "description": "Project-scoped worker chat lifecycle through existing Codex Desktop tools.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Worker Orchestrator",
+        "shortDescription": "프로젝트별 워커 대화 생명주기",
+        "capabilities": []
+      }
+    }
+  },
+  "version": "0.1.6"
+}

@@ -3,3 +3,9 @@
 
 # Keep PowerShell sources ASCII-only for BOM-free Windows PowerShell 5.1 support.
 *.ps1 text eol=lf working-tree-encoding=UTF-8
+
+# Published plugin packages retain their verified deployment bytes.
+/marketplace/** -text !eol !working-tree-encoding
+
+# Preserve the original generated notice, including its ending newline.
+/marketplace/windows-agent-devkit/THIRD_PARTY_NOTICES.txt whitespace=-blank-at-eof

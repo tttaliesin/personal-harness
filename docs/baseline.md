@@ -78,12 +78,13 @@
 | Microsoft Learn MCP | `registry.toml`에서 공식 원격 HTTP `https://learn.microsoft.com/api/mcp`를 관리하며 별도 의존성 패키지를 설치하지 않음 |
 | NuGet MCP | 공식 `NuGet.Mcp.Server`의 Windows x64 패키지와 전용 .NET 10 실행 환경을 lock의 버전·해시로 고정해 stdio로 등록 |
 | Taste Skill | 원본 `taste-skill@taste-skill` 플러그인의 `design-taste-frontend`를 두 PC의 설치 대상으로 지정 |
-| `repo-governance` | PC에서 배포 경로를 지정하면 `repo-governance@repo-governance-local`의 고정 배포본 `0.2.0`을 설치 |
-| Windows Agent Devkit | 고정 배포본 `0.3.5`를 사용하며 Windows 환경 점검에서 `environment-doctor`를 선택 |
-| Worker Orchestrator | 게시한 배포본 `0.1.6`을 사용하며 프로젝트 위임이 있는 작업에서 선택 |
+| `repo-governance` | `personal-harness`의 첫 배포본은 `0.2.0`. 저장소 공통 규약과 검사기를 제공 |
+| Windows Agent Devkit | `personal-harness`의 첫 배포본은 `0.3.5`. Windows 환경 점검에서 `environment-doctor`를 선택 |
+| Worker Orchestrator | `personal-harness`의 첫 배포본은 `0.1.6`. 프로젝트 위임이 있는 작업에서 선택 |
 
 Context7의 설치 대상, 원격 연결과 확인 절차는 [개발 도구 안내](development-tools.md#context7-선택과-설치-상태)에 있다.
-자체 플러그인의 PC별 설치 절차는 [로컬 플러그인 번들](deployment.md#로컬-플러그인-번들)에 있다.
+자체 플러그인 세 개는 Codex가 공개 `main`에서 설치한다. [자체 플러그인 설치](../README.md#자체-플러그인-설치)
+플러그인의 제품별 설정과 hook 신뢰는 각 PC에서 관리한다. [Codex Git 마켓플레이스](deployment.md#codex-git-마켓플레이스)
 
 [Microsoft Learn MCP 공식 안내](https://learn.microsoft.com/en-us/training/support/mcp)의 공개 원격 서버를 사용한다.
 작은 기계적 수정에는 문서 조회를 필수로 두지 않는다.

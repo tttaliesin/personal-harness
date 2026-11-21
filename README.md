@@ -2,6 +2,7 @@
 
 Roylabs Desktop의 Codex User Harness를 기준으로 공통 지침과 설정을 각 PC의 기존 Codex 프로필에 병합한다.
 설치기는 등록한 스킬과 필요한 개발 도구도 각 PC에 배포한다.
+자체 플러그인 세 개는 같은 저장소의 Codex Git 마켓플레이스에서 설치한다.
 
 [한 명령으로 설치](docs/remote-install.md) · [관리 범위와 기준 구성](docs/baseline.md) · [개발 도구 사용](docs/development-tools.md) · [적용과 복구](docs/deployment.md) · [원본과 버전](dependencies/NOTICE.md)
 
@@ -10,7 +11,7 @@ Roylabs Desktop의 Codex User Harness를 기준으로 공통 지침과 설정을
 Windows x64에서 Node.js 22.12.0 이상과 npm, Git, Python 3.11 이상, Codex가 필요하다.
 공개 저장소에서 소스를 받는 데 GitHub 인증은 필요하지 않다.
 처음 사용하는 PC에서는 Codex를 한 번 실행해 로컬 런타임 설정을 생성한다.
-어느 폴더에서든 다음 명령으로 전체 Harness를 설치한다.
+어느 폴더에서든 다음 명령으로 공통 Harness를 설치한다.
 
 ```powershell
 npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git install
@@ -31,6 +32,24 @@ Codex가 생성한 런타임과 인증은 기존 Codex 홈에서 유지한다.
 
 Codex Desktop은 내장 Computer Use를 앱과 함께 설치한다.
 Windows 앱 화면을 확인하거나 앱에 직접 입력해야 할 때 Codex는 내장 Computer Use를 선택한다.
+
+## 자체 플러그인 설치
+
+Windows Agent Devkit과 Worker Orchestrator를 실행하려면 Node.js 24 이상이 필요하다.
+터미널에서 다음 명령으로 마켓플레이스와 플러그인을 설치한다.
+
+```powershell
+codex plugin marketplace add tttaliesin/personal-harness
+codex plugin add repo-governance@personal-harness
+codex plugin add windows-agent-devkit@personal-harness
+codex plugin add worker-orchestrator@personal-harness
+```
+
+Codex는 공개 저장소의 Git 기본 브랜치인 `main`에서 `personal-harness` 카탈로그를 읽는다.
+PC마다 번들 폴더를 준비하거나 경로를 설정할 필요가 없다.
+설치 후 Codex Desktop을 다시 열거나 터미널에서 `codex`로 새 세션을 시작한다.
+플러그인 목록에서 `personal-harness`의 세 항목이 활성 상태인지 확인한다.
+[기존 설치 전환과 갱신](docs/deployment.md#codex-git-마켓플레이스)
 
 ## 설치한 플러그인과 MCP 공유하기
 
@@ -172,7 +191,8 @@ task install -- -Locked
 | [common/AGENTS.md](common/AGENTS.md) | 전역 사용자 지침. `${CODEX_HOME}`은 적용 대상 PC에서 치환 |
 | [common/config.toml](common/config.toml) | 사용자 정책, Windows sandbox와 Desktop 공통 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
 | `.local/<hostname>.toml` | 해당 PC에서만 사용하는 경로와 선택적 설정 덮어쓰기. Git 제외 |
-| [registry.toml](registry.toml) | 단독 스킬과 외부 참조의 출처, 자체 플러그인의 소스 경로와 배포본 고정값, 외부 플러그인과 MCP의 등록 정보 |
+| [registry.toml](registry.toml) | 단독 스킬과 외부 참조의 출처, 외부 플러그인과 MCP의 등록 정보 |
+| [.agents/plugins/marketplace.json](.agents/plugins/marketplace.json) | Codex가 읽는 `personal-harness` 카탈로그 |
 | [skills/custom/](skills/custom) | 자체 스킬인 `create-readme`, `development-environment`, `korean-typography`, `repository-artifacts` |
 | [skills/adapters/](skills/adapters) | 연동·호환 어댑터인 `openspec-workflow`, `ste-ko`, `taste-windows-runtime`, `humanize-windows-runtime` |
 | `.local/external-skills.json` | 외부 스킬과 참조 자료의 로컬 캐시. Git 제외 |
@@ -181,6 +201,7 @@ task install -- -Locked
 | [dependencies/NOTICE.md](dependencies/NOTICE.md) | 외부 원본의 출처와 라이선스 안내 |
 | [dependencies/roylabs-2026-11-12.json](dependencies/roylabs-2026-11-12.json) | 초기 Roylabs 기준 구성의 출처와 파일 해시 |
 | [plugins/](plugins) | 자체 플러그인의 소스와 테스트 |
+| [marketplace/](marketplace) | Windows Agent Devkit과 Worker Orchestrator의 배포본 |
 | [installer/](installer) | Task와 원격 명령이 사용하는 설치·갱신·적용 구현 |
 | [bin/](bin) | `npx` 명령의 진입점 |
 | [Taskfile.yml](Taskfile.yml) | 저장소 루트에서 사용하는 준비, 설치, 갱신, 적용과 검증 명령 |
@@ -208,9 +229,8 @@ task install -- -Locked
 `openspec-workflow`의 `requires`는 `openspec`이다.
 작업 중 스킬을 사용하는 기준은 `common/AGENTS.md`에서 관리한다.
 
-자체 플러그인은 `[[local_plugins]]`의 `source_path`가 가리키는 `plugins/<name>/`에서 수정한다.
-설치기는 PC별 `[plugin_bundles]`의 배포본을 등록한 `version`과 `bundle_sha256`으로 검증한다.
-PC별 설정은 [로컬 플러그인 번들](docs/deployment.md#로컬-플러그인-번들)을 참고한다.
+자체 플러그인의 소스는 `plugins/<name>/`에서 수정한다.
+카탈로그가 가리키는 배포 경로와 새 버전을 게시하는 방법은 [자체 플러그인 소스와 배포본](docs/deployment.md#자체-플러그인-소스와-배포본)을 참고한다.
 
 ```mermaid
 flowchart LR

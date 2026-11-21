@@ -19,7 +19,7 @@ import urllib.request
 
 import tomlkit
 from harness import (
-    REPO, HarnessError, atomic_write, expand, local_bundle_records, local_marketplace_matches,
+    REPO, HarnessError, atomic_write, local_bundle_records, local_marketplace_matches,
     local_plugin_cache_matches, path_variables, read_toml, require_supported_host, safe_file, select_layout,
     skill_files,
 )
@@ -573,8 +573,9 @@ def main(argv=None) -> int:
         user_home = args.home.resolve()
         codex_home = (args.codex_home or Path(os.environ.get("CODEX_HOME", user_home / ".codex"))).resolve()
         settings = read_toml(config) if config.exists() else {}
-        locations = expand(settings.get("plugin_bundles", {}), path_variables(REPO.resolve(), local, user_home, codex_home))
-        bundles = local_bundle_records(result.local_plugins, locations, config.parent)
+        locations = settings.get("plugin_bundles", {})
+        variables = path_variables(REPO.resolve(), local, user_home, codex_home)
+        bundles = local_bundle_records(result.local_plugins, locations, config.parent, variables=variables)
         external_specs = tuple(spec for spec in registry.skills if "source" in spec
                                and ("requires" not in spec or spec["requires"] in lock))
         cache_path = local / EXTERNAL_SKILL_CACHE

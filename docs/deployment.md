@@ -13,7 +13,7 @@
 `task update:plan`은 등록한 기준에 따라 최신 의존성과 외부 스킬을 조회한 뒤 설치 계획만 출력한다.
 기본 미리보기는 네트워크를 읽지만 파일과 사용자 홈을 쓰지 않는다.
 `task install`과 `task update`는 선택한 상태 루트에 도구를 설치한다.
-설치기는 대상 Codex 홈에 플러그인을 등록한다.
+설치기는 등록한 외부 플러그인을 대상 Codex 홈에 등록한다.
 설치한 의존성을 검증한 뒤 버전, 커밋, 해시를 `<state-root>/sources/dependencies.lock.json`에 기록한다.
 이어서 하네스를 적용하고 상태를 확인한다.
 
@@ -116,7 +116,7 @@ PC별 TOML에서 명시할 때는 모델과 추론 수준을 `[config]`에 적�
 갱신 중 실패하면 뒤 단계로 진행하지 않는다.
 최신 버전 확인은 이 명령이나 설치 명령을 실행할 때 수행하며, 예약 작업은 생성하지 않는다.
 
-GitHub 릴리스는 draft와 prerelease를 제외한 공식 최신 안정판을 사용한다.
+공통 설치기가 GitHub 릴리스에서 가져오는 의존성은 draft와 prerelease를 제외한 공식 최신 안정판을 사용한다.
 플러그인 버전이 같아도 릴리스의 commit이 바뀌면 실제 소스를 갱신한다.
 버전이 바뀌면 기존 marketplace 등록을 공식 CLI로 제거하고 새 revision으로 등록한다.
 브라우저 소유의 Ego와 번들 스킬에는 이 절차를 적용하지 않는다.
@@ -141,51 +141,77 @@ PC의 전역 Git 설정은 유지한다.
 `task apply`의 파일 백업은 의존성 설치 전체를 되돌리는 기능이 아니다.
 설치 실패 시 기록된 lock과 오류를 확인하고 같은 명령을 다시 실행한다.
 
-## 로컬 플러그인 번들
+## Codex Git 마켓플레이스
 
-[registry.toml](../registry.toml)의 `[[local_plugins]]`에서 마켓플레이스 이름과 플러그인 ID를 등록한다.
-각 항목의 `version`과 `bundle_sha256`은 이미 배포한 번들을 고정한다.
-
-1. 해당 PC에 배포가 허용된 번들의 압축을 풀어 지속적으로 사용할 수 있는 폴더에 둔다.
-2. [로컬 설정 예시](local.example.toml)의 `[plugin_bundles]`를 PC별 TOML에 복사해 마켓플레이스별 경로를 지정한다.
-   체크아웃에서 기본 설정 파일은 `.local/<hostname>.toml`이다.
-   상대 경로는 설정 파일이 있는 폴더를 기준으로 해석한다.
-3. `task install`로 번들을 설치한다.
-   기록한 의존성을 재현할 때는 `task install -- -Locked`를 사용한다.
-   설치기는 번들을 검증한 뒤 공식 Codex CLI로 마켓플레이스와 플러그인을 등록한다.
-4. `task check`로 등록 출처와 설치 캐시를 확인한다.
-   설치 전에는 `task plan`으로 현재 설치 상태를 확인할 수 있다.
-
-PC별 경로를 지정하지 않은 마켓플레이스의 기존 등록은 보존한다.
-이 경우 공통 의존성 설치는 계속 진행한다.
-
-번들 해시는 숨김 파일을 포함한 전체 일반 파일을 대상으로 계산한다.
-설치기는 `/` 구분자를 쓴 상대 경로와 파일별 소문자 SHA-256을 JSON 객체에 담는다.
-경로를 정렬하고 공백을 생략한 ASCII 이스케이프 JSON의 UTF-8 바이트를 SHA-256으로 해시한다. [번들 검증 구현](../installer/local_plugin_bundles.py)
+Codex는 공개 `main`의 [.agents/plugins/marketplace.json](../.agents/plugins/marketplace.json)에서 `personal-harness`를 읽는다.
+[자체 플러그인 설치](../README.md#자체-플러그인-설치)의 네 명령을 대상 PC에서 실행한다.
+공통 설치기는 계속 공통 설정과 단독 스킬, 등록한 외부 의존성을 관리한다.
 
 Windows Agent Devkit과 Worker Orchestrator는 Node.js 24 이상에서 실행한다.
 PC의 기본 Node.js가 이전 버전이면 호환되는 기존 실행 파일을 사용한다. [Windows Agent Devkit 요구 사항](../plugins/windows-agent-devkit/package.json) · [Worker Orchestrator 요구 사항](../plugins/worker-orchestrator/package.json)
 
+### 기존 로컬 설치 전환
+
+이전 로컬 TOML의 `[plugin_bundles]`에 세 마켓플레이스의 경로가 남아 있어도 공통 설치기는 해당 경로를 건너뛴다.
+Codex 프로필에는 기존 로컬 등록과 새 Git 등록이 함께 남을 수 있다.
+기존 로컬 설치를 사용한 PC에서 다음 전환을 한 번 수행한다.
+
+1. `personal-harness`의 플러그인 세 개를 설치한다.
+2. Codex의 플러그인 목록에서 `personal-harness` 출처의 세 항목이 활성 상태인지 확인한다.
+3. 같은 플러그인의 이전 로컬 출처 항목을 끈다.
+   이전 출처는 `repo-governance-local`, `windows-agent-devkit-local`, `worker-orchestrator-local`이다.
+4. Codex를 다시 열고 새 채팅에서 플러그인과 스킬을 확인한다.
+
+플러그인 설정과 hook 신뢰는 해당 PC의 Codex 프로필에서 관리한다.
+Codex가 hook 검토를 요청하면 해당 PC에서 확인한다.
 `repo-governance`의 제품별 설정은 해당 작업트리에서 `task bind:product`로 연결한다. [제품 설정 연결 절차](../plugins/repo-governance/plugin/skills/repo-governance/references/repository-policy.md)
 
-## 자체 플러그인 소스
+### PC에서 갱신
 
-Personal Harness의 공개 GitHub `main`에는 세 플러그인의 공용 소스와 테스트를 둔다.
-각 플러그인의 소스 경로는 `[[local_plugins]]`의 `source_path`에 기록한다.
-PC별 설치 경로, 개인·조직별 설정, 제품별 설정과 작업 기록은 해당 환경에서 관리한다.
-새 번들 게시와 기존 설치 경로 전환은 별도 작업으로 진행한다.
+새 배포본이 공개 `main`에 올라오면 다음 명령으로 마켓플레이스를 갱신한다.
 
-| 소스 | 소스 버전 | 이관 기준 커밋 |
+```powershell
+codex plugin marketplace upgrade personal-harness
+```
+
+Codex를 다시 열고 플러그인 목록에서 설치한 버전을 확인한다. [OpenAI 마켓플레이스 안내](https://developers.openai.com/plugins/build/plugins#add-a-marketplace-from-the-cli)
+
+## 자체 플러그인 소스와 배포본
+
+소스와 테스트는 `plugins/`에 둔다.
+카탈로그의 `source.path`는 저장소 루트를 기준으로 해석한다.
+
+| 소스 | 이관한 소스 버전 | 이관 기준 커밋 | 카탈로그의 배포 경로 | 첫 게시 버전 |
+|---|---|---|---|---|
+| [repo-governance](../plugins/repo-governance) | `0.2.0` | `441a74e4334d1240319ce635e10cc3c6062a4825` | `./plugins/repo-governance/plugin` | `0.2.0` |
+| [Windows Agent Devkit](../plugins/windows-agent-devkit) | `0.3.5` | `2ccf5538f6ebfd6c0179c9467ae53c10a18f76d4` | `./marketplace/windows-agent-devkit` | `0.3.5` |
+| [Worker Orchestrator](../plugins/worker-orchestrator) | `0.1.7-local.1` | `7b2d76691bd677f72aaa63f5f674d8eb7ac2d79b` | `./marketplace/worker-orchestrator` | `0.1.6` |
+
+`repo-governance`는 공개용으로 정리한 `main`의 공용 `plugin/`을 배포한다.
+개인용 카탈로그와 개인·조직별 설정은 각 환경에서 관리한다.
+
+Windows Agent Devkit `0.3.5`의 공개 배포본은 이전 배포본의 `docs/roadmap.md`에 있던 개인 WSL 작업 경로 한 곳을 가렸다.
+실행 파일을 포함한 나머지 파일은 이전 배포본과 바이트가 같다.
+
+Worker Orchestrator `0.1.6`의 파일 목록과 파일별 SHA-256은 승인한 기존 배포본과 일치한다.
+이 배포본의 매니페스트에 기록된 커밋은 `7ef027ac9be7c9e175c17657b1a0fb1f9a3f0f62`다.
+Worker Orchestrator의 `0.1.7-local.1`은 별도 개발 버전이다.
+
+이전 `bundle_sha256`은 로컬 마켓플레이스의 카탈로그를 포함한 번들 전체의 등록값이다.
+공개 해시는 첫 게시 시점에 카탈로그가 가리키는 플러그인 디렉터리에서 계산한 값이다.
+
+| 첫 게시 대상 | 이전 로컬 번들 `bundle_sha256` | 공개 배포 디렉터리 SHA-256 |
 |---|---|---|
-| [Windows Agent Devkit](../plugins/windows-agent-devkit) | `0.3.5` | `2ccf5538f6ebfd6c0179c9467ae53c10a18f76d4` |
-| [Worker Orchestrator](../plugins/worker-orchestrator) | `0.1.7-local.1` | `7b2d76691bd677f72aaa63f5f674d8eb7ac2d79b` |
-| [repo-governance](../plugins/repo-governance) | `0.2.0` | `441a74e4334d1240319ce635e10cc3c6062a4825` |
+| Windows Agent Devkit `0.3.5` | `5ae22630f461a94b5a15f8fb9ab1c6de92d2e7c84bdb34eaa378b3e4ddc7f092` | `6211565cdc8eafdec3e69e4c947b09953f4680b875278bc8e8c423d21d489b09` |
+| Worker Orchestrator `0.1.6` | `d6e809c0fbb692a218275b7f457e30abb7fb0d63c5c327b9a68cfa4dbd6633d4` | `82b8843c95ac705494684618c7fbc29ecbb2705226c5f976ab5890389ed9435e` |
 
-설치기는 소스 이관 후에도 등록한 번들 고정값을 사용한다.
-Worker Orchestrator의 설치 대상은 게시한 `0.1.6` 번들이다. [등록 목록](../registry.toml)
+해시 계산에는 숨김 파일을 포함한 모든 일반 파일의 상대 경로와 파일별 SHA-256을 사용한다.
+`/`로 구분한 경로를 정렬하고 공백 없는 ASCII 이스케이프 JSON을 만든 뒤 그 UTF-8 바이트를 SHA-256으로 해시한다.
+두 공개 배포 경로의 줄 끝 변환은 `.gitattributes`에서 끈다.
 
-각 플러그인 디렉터리에서 다음 명령을 실행한다.
-회귀 테스트는 각 디렉터리의 `npm test`로 실행한다.
+### 새 버전 게시
+
+플러그인의 버전을 올릴 때는 해당 소스 디렉터리에서 `npm test`와 아래 명령을 실행한다.
 
 | 소스 | 배포본 생성과 검사 |
 |---|---|
@@ -195,3 +221,12 @@ Worker Orchestrator의 설치 대상은 게시한 `0.1.6` 번들이다. [등록 
 
 `repo-governance`를 패키징할 때는 출력 경로의 상위 폴더인 `.local/artifacts`를 먼저 준비한다.
 `DEST`는 아직 존재하지 않는 폴더를 지정한다. [패키징 명령](../plugins/repo-governance/Taskfile.yml)
+
+1. 표의 배포 경로에 새 버전을 준비한다.
+   Windows Agent Devkit은 `npm run package`가 출력한 `directory`의 내용으로 교체한다.
+   Worker Orchestrator는 `dist/codex/worker-orchestrator/`의 내용으로 교체한다.
+   `repo-governance`는 카탈로그가 가리키는 공용 `plugin/`에서 갱신한다.
+2. 배포 경로의 플러그인 이름과 버전을 확인한다.
+3. 임시 Codex 프로필에서 마켓플레이스 등록과 새 버전 설치를 확인한다.
+4. 해당 배포 경로와 관련 소스 변경을 같은 공개 `main`에 올린다.
+5. 대상 PC에서 Codex 마켓플레이스를 갱신한다.

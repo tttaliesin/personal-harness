@@ -1,0 +1,21 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "windows-agent-devkit",
+  "version": "0.3.5",
+  "description": "Windows 개발환경을 읽기 전용으로 점검하고 권장 도구와 사용자가 직접 실행할 명령을 안내합니다.",
+  "repository": "https://github.com/tttaliesin/windows-agent-devkit",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Windows Agent Devkit",
+        "shortDescription": "Windows 개발환경 진단과 도구·명령 안내",
+        "developerName": "tttaliesin",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": "현재 프로젝트의 Windows 개발환경을 점검해줘."
+      }
+    }
+  }
+}

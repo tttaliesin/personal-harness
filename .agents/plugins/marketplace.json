@@ -1,0 +1,44 @@
+{
+  "name": "personal-harness",
+  "interface": {
+    "displayName": "Personal Harness"
+  },
+  "plugins": [
+    {
+      "name": "repo-governance",
+      "source": {
+        "source": "local",
+        "path": "./plugins/repo-governance/plugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "windows-agent-devkit",
+      "source": {
+        "source": "local",
+        "path": "./marketplace/windows-agent-devkit"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "worker-orchestrator",
+      "source": {
+        "source": "local",
+        "path": "./marketplace/worker-orchestrator"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

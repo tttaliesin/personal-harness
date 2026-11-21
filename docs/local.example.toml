@@ -6,13 +6,6 @@
 # codegraph = "D:/tools/codegraph.cmd"
 # openspec = "D:/tools/openspec.cmd"
 
-# Enable local bundle management by specifying an unpacked marketplace directory.
-# Relative bundle paths resolve from this local config file's directory.
-# [plugin_bundles]
-# repo-governance-local = "${STATE_ROOT}/private-plugins/repo-governance"
-# windows-agent-devkit-local = "${STATE_ROOT}/private-plugins/windows-agent-devkit"
-# worker-orchestrator-local = "${STATE_ROOT}/private-plugins/worker-orchestrator"
-
 # Optional local preferences override common values.
 # App-generated runtime keys remain in the existing ~/.codex/config.toml.
 # [config.desktop]

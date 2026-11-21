@@ -116,27 +116,3 @@ source = "https://github.com/Leonxlnx/taste-skill.git"
 channel = "latest-release"
 manifest = ".codex-plugin/plugin.json"
 enabled = true
-
-[[local_plugins]]
-name = "repo-governance"
-source_path = "plugins/repo-governance"
-marketplace = "repo-governance-local"
-version = "0.2.0"
-bundle_sha256 = "d9ceff9434ba8602e42be552898add671138e28aff14314021237dc30e015895"
-enabled = true
-
-[[local_plugins]]
-name = "windows-agent-devkit"
-source_path = "plugins/windows-agent-devkit"
-marketplace = "windows-agent-devkit-local"
-version = "0.3.5"
-bundle_sha256 = "5ae22630f461a94b5a15f8fb9ab1c6de92d2e7c84bdb34eaa378b3e4ddc7f092"
-enabled = true
-
-[[local_plugins]]
-name = "worker-orchestrator"
-source_path = "plugins/worker-orchestrator"
-marketplace = "worker-orchestrator-local"
-version = "0.1.6"
-bundle_sha256 = "d6e809c0fbb692a218275b7f457e30abb7fb0d63c5c327b9a68cfa4dbd6633d4"
-enabled = true
