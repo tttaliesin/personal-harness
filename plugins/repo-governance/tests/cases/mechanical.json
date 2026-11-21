@@ -1,0 +1,467 @@
+{
+  "schemaVersion": 1,
+  "rulesVersion": "0.2.0",
+  "fixtures": [
+    {
+      "id": "name.valid",
+      "scope": "mechanical-subset",
+      "check": "name",
+      "sourceCaseIds": [
+        "N1"
+      ],
+      "setup": "text",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "name",
+        "sources": [
+          {
+            "kind": "text",
+            "text": "product-inventory-api"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "pass",
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "name.digit-start",
+      "scope": "mechanical-subset",
+      "check": "name",
+      "sourceCaseIds": [
+        "N15"
+      ],
+      "setup": "text",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "name",
+        "sources": [
+          {
+            "kind": "text",
+            "text": "product-3d-inspection-api"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "pass",
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "name.invalid",
+      "scope": "mechanical-subset",
+      "check": "name",
+      "sourceCaseIds": [
+        "N12"
+      ],
+      "setup": "text",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "name",
+        "sources": [
+          {
+            "kind": "text",
+            "text": "inventory_api"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "violation",
+        "exitCode": 2
+      }
+    },
+    {
+      "id": "description.valid",
+      "scope": "mechanical-subset",
+      "check": "description",
+      "sourceCaseIds": [
+        "DESC15"
+      ],
+      "setup": "text",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "description",
+        "sources": [
+          {
+            "kind": "text",
+            "text": "주문 CSV의 필수 열을 검사하는 Node.js 명령줄 도구"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "pass",
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "description.invalid",
+      "scope": "mechanical-subset",
+      "check": "description",
+      "sourceCaseIds": [
+        "DESC9"
+      ],
+      "setup": "text",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "description",
+        "sources": [
+          {
+            "kind": "text",
+            "text": "주문 이력을 조회하는 웹 화면.\n환경: 개발"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "violation",
+        "exitCode": 2
+      }
+    },
+    {
+      "id": "readme.valid",
+      "scope": "mechanical-subset",
+      "check": "readme",
+      "sourceCaseIds": [
+        "RM6"
+      ],
+      "setup": "text",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "readme",
+        "sources": [
+          {
+            "kind": "text",
+            "text": "# fixture-tool\n\n주문 CSV의 필수 열을 검사하는 명령줄 도구.\n\n## 시작하기\n\nNode.js 22.18 이상에서 node src/check.mjs sample.csv를 실행한다.\n정상 결과는 필수 열이 있는 경우 종료 코드 0이다.\n\n## 주요 기능\n\nCSV의 필수 열을 검사한다.\n\n## 구성\n\nsrc/check.mjs는 입력 CSV의 열을 읽고 판정한다.\n\n## 검증\n\nnode --test로 필수 열 유무를 확인한다.\n이 문서는 fixture이며 실제 제품 실행 성공을 주장하지 않는다.\n\n## 기여와 문의\n\n변경 규칙은 specs/commits.md를 확인한다.\n문의는 테스트 fixture의 유지 역할에 전달한다.\n"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "pass",
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "readme.invalid",
+      "scope": "mechanical-subset",
+      "check": "readme",
+      "sourceCaseIds": [
+        "RM4"
+      ],
+      "setup": "text",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "readme",
+        "sources": [
+          {
+            "kind": "text",
+            "text": "# {{저장소 이름}}\n\n## 시작하기\n\n## 주요 기능\n\n## 검증\n"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "violation",
+        "exitCode": 2
+      }
+    },
+    {
+      "id": "commit.valid",
+      "scope": "mechanical-subset",
+      "check": "commit-message",
+      "sourceCaseIds": [
+        "CMT1"
+      ],
+      "setup": "text",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "commit-message",
+        "sources": [
+          {
+            "kind": "text",
+            "text": "fix: 만료된 토큰의 재사용을 차단한다"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "pass",
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "commit.invalid",
+      "scope": "mechanical-subset",
+      "check": "commit-message",
+      "sourceCaseIds": [
+        "CMT5"
+      ],
+      "setup": "text",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "commit-message",
+        "sources": [
+          {
+            "kind": "text",
+            "text": "만료된 토큰의 재사용을 차단한다"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "violation",
+        "exitCode": 2
+      }
+    },
+    {
+      "id": "branch.valid",
+      "scope": "mechanical-subset",
+      "check": "branch",
+      "sourceCaseIds": [
+        "BR1"
+      ],
+      "setup": "repository",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "branch",
+        "sources": [
+          {
+            "kind": "text",
+            "text": "prevent-expired-token-reuse"
+          }
+        ],
+        "context": {
+          "baseRef": "HEAD"
+        }
+      },
+      "expected": {
+        "decision": "pass",
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "branch.invalid",
+      "scope": "mechanical-subset",
+      "check": "branch",
+      "sourceCaseIds": [
+        "BR4"
+      ],
+      "setup": "repository",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "branch",
+        "sources": [
+          {
+            "kind": "text",
+            "text": "Fix_Login"
+          }
+        ],
+        "context": {
+          "baseRef": "HEAD"
+        }
+      },
+      "expected": {
+        "decision": "violation",
+        "exitCode": 2
+      }
+    },
+    {
+      "id": "pr.valid",
+      "scope": "mechanical-subset",
+      "check": "pull-request",
+      "sourceCaseIds": [
+        "PR1"
+      ],
+      "setup": "text",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "pull-request",
+        "sources": [
+          {
+            "kind": "pr",
+            "number": 1,
+            "headOid": "1111111111111111111111111111111111111111",
+            "baseOid": "2222222222222222222222222222222222222222",
+            "title": "Prevent expired token reuse",
+            "body": "만료된 토큰의 재사용을 거절한다. 호출자는 인증 실패 응답을 처리해야 한다. 실제 제품 검증은 수행하지 않았다."
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "pass",
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "pr.invalid",
+      "scope": "mechanical-subset",
+      "check": "pull-request",
+      "sourceCaseIds": [
+        "PR4"
+      ],
+      "setup": "text",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "pull-request",
+        "sources": [
+          {
+            "kind": "pr",
+            "number": 1,
+            "headOid": "1111111111111111111111111111111111111111",
+            "baseOid": "2222222222222222222222222222222222222222",
+            "title": "",
+            "body": "## 배경\n"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "violation",
+        "exitCode": 2
+      }
+    },
+    {
+      "id": "file.valid",
+      "scope": "mechanical-subset",
+      "check": "file-scope",
+      "sourceCaseIds": [
+        "FILE1"
+      ],
+      "setup": "index-valid",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "file-scope",
+        "sources": [
+          {
+            "kind": "index"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "pass",
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "file.output",
+      "scope": "mechanical-subset",
+      "check": "file-scope",
+      "sourceCaseIds": [
+        "FILE12"
+      ],
+      "setup": "index-output",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "file-scope",
+        "sources": [
+          {
+            "kind": "index"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "violation",
+        "exitCode": 2
+      }
+    },
+    {
+      "id": "commit.missing-file",
+      "scope": "mechanical-subset",
+      "check": "commit-message",
+      "sourceCaseIds": [
+        "CMT24"
+      ],
+      "setup": "repository",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "commit-message",
+        "sources": [
+          {
+            "kind": "file",
+            "path": "missing-message.txt"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "needs-context",
+        "exitCode": 3
+      }
+    },
+    {
+      "id": "branch.missing-base",
+      "scope": "mechanical-subset",
+      "check": "branch",
+      "sourceCaseIds": [
+        "BR8"
+      ],
+      "setup": "repository",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "branch",
+        "sources": [
+          {
+            "kind": "text",
+            "text": "prevent-expired-token-reuse"
+          }
+        ],
+        "context": {}
+      },
+      "expected": {
+        "decision": "needs-context",
+        "exitCode": 3
+      }
+    },
+    {
+      "id": "name.invalid-request",
+      "scope": "mechanical-subset",
+      "check": "name",
+      "sourceCaseIds": [
+        "N16"
+      ],
+      "setup": "text",
+      "request": {
+        "schemaVersion": 3,
+        "operation": "check",
+        "check": "name",
+        "sources": [
+          {
+            "kind": "text",
+            "text": "product-inventory-api"
+          }
+        ],
+        "context": {},
+        "approved": true
+      },
+      "expected": {
+        "decision": "error",
+        "exitCode": 1
+      }
+    }
+  ]
+}

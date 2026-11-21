@@ -1,0 +1,19 @@
+{
+  "name": "repo-governance",
+  "version": "0.2.0",
+  "description": "일곱 저장소 공통 규약·읽기 전용 검사기·작업 에이전트 지침.",
+  "license": "UNLICENSED",
+  "skills": "./skills/",
+  "hooks": "./hooks/codex.json",
+  "interface": {
+    "displayName": "Repo Governance",
+    "shortDescription": "저장소 공통 규약과 읽기 전용 검사",
+    "longDescription": "작업 에이전트가 공통 규약과 실제 근거를 확인하고, 검사기는 일곱 규약의 기계 조건을 확인합니다. 실제 지원 hook에서 기계 위반을 거절합니다.",
+    "developerName": "RoyLabsTeam",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Interactive"
+    ]
+  }
+}

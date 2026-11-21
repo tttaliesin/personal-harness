@@ -168,10 +168,11 @@ class DependencyTests(unittest.TestCase):
                     patch.object(installer, "install_codegraph") as graph, \
                     patch.object(installer, "install_openspec") as openspec, \
                     patch.object(installer, "install_plugins") as plugins, \
+                    patch.object(installer, "install_local_plugins") as local_plugins, \
                     patch.object(installer.mcp_packages, "install") as mcp, \
                     patch.object(installer.urllib.request, "urlopen") as network, redirect_stdout(io.StringIO()):
                 self.assertEqual(installer.main(["--host", "homelab-desktop", "--locked", "--codex-home", str(repo / "fake-home")]), 0)
-                for call in (graph, openspec, plugins, mcp, network):
+                for call in (graph, openspec, plugins, local_plugins, mcp, network):
                     call.assert_not_called()
             self.assertEqual(before, set(repo.rglob("*")))
 

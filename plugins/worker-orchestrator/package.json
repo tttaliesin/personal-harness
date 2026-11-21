@@ -1,0 +1,14 @@
+{
+  "name": "worker-orchestrator",
+  "version": "0.1.7-local.1",
+  "private": true,
+  "type": "module",
+  "description": "Project-scoped worker conversation lifecycle for Codex Desktop",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "test": "node --test",
+    "build": "node scripts/build-package.mjs",
+    "check": "node scripts/check-package.mjs",
+    "orchestrator": "node src/cli/main.mjs"
+  }
+}

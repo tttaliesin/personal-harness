@@ -102,7 +102,7 @@ task update:plan
 task install
 ```
 
-설치 도우미는 실행할 때 `registry.toml`에 등록된 플러그인과 MCP를 각 항목의 갱신 기준으로 조회한다.
+설치 도우미는 실행할 때 `registry.toml`에 등록된 외부 플러그인과 MCP를 각 항목의 갱신 기준으로 조회한다.
 CodeGraph와 OpenSpec의 npm `latest` 배포도 조회한다.
 Microsoft Learn MCP는 `registry.toml`의 공식 원격 HTTP 연결을 적용하며 별도 의존성 패키지를 설치하지 않는다.
 NuGet MCP는 공식 `NuGet.Mcp.Server`와 하네스 전용 .NET 실행 환경을 버전·해시로 고정해 설치한다.
@@ -172,7 +172,7 @@ task install -- -Locked
 | [common/AGENTS.md](common/AGENTS.md) | 전역 사용자 지침. `${CODEX_HOME}`은 적용 대상 PC에서 치환 |
 | [common/config.toml](common/config.toml) | 사용자 정책, Windows sandbox와 Desktop 공통 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
 | `.local/<hostname>.toml` | 해당 PC에서만 사용하는 경로와 선택적 설정 덮어쓰기. Git 제외 |
-| [registry.toml](registry.toml) | 단독 스킬과 외부 참조의 출처, 외부 플러그인과 MCP의 등록 정보 |
+| [registry.toml](registry.toml) | 단독 스킬과 외부 참조의 출처, 자체 플러그인의 소스 경로와 배포본 고정값, 외부 플러그인과 MCP의 등록 정보 |
 | [skills/custom/](skills/custom) | 자체 스킬인 `create-readme`, `development-environment`, `korean-typography`, `repository-artifacts` |
 | [skills/adapters/](skills/adapters) | 연동·호환 어댑터인 `openspec-workflow`, `ste-ko`, `taste-windows-runtime`, `humanize-windows-runtime` |
 | `.local/external-skills.json` | 외부 스킬과 참조 자료의 로컬 캐시. Git 제외 |
@@ -180,6 +180,7 @@ task install -- -Locked
 | [dependencies/dependencies.lock.json](dependencies/dependencies.lock.json) | 설치 상태가 없을 때 읽는 초기 잠금 파일 |
 | [dependencies/NOTICE.md](dependencies/NOTICE.md) | 외부 원본의 출처와 라이선스 안내 |
 | [dependencies/roylabs-2026-11-12.json](dependencies/roylabs-2026-11-12.json) | 초기 Roylabs 기준 구성의 출처와 파일 해시 |
+| [plugins/](plugins) | 자체 플러그인의 소스와 테스트 |
 | [installer/](installer) | Task와 원격 명령이 사용하는 설치·갱신·적용 구현 |
 | [bin/](bin) | `npx` 명령의 진입점 |
 | [Taskfile.yml](Taskfile.yml) | 저장소 루트에서 사용하는 준비, 설치, 갱신, 적용과 검증 명령 |
@@ -206,6 +207,10 @@ task install -- -Locked
 `requires`를 지정한 스킬은 잠금 파일에 해당 의존성이 있을 때 설치한다.
 `openspec-workflow`의 `requires`는 `openspec`이다.
 작업 중 스킬을 사용하는 기준은 `common/AGENTS.md`에서 관리한다.
+
+자체 플러그인은 `[[local_plugins]]`의 `source_path`가 가리키는 `plugins/<name>/`에서 수정한다.
+설치기는 PC별 `[plugin_bundles]`의 배포본을 등록한 `version`과 `bundle_sha256`으로 검증한다.
+PC별 설정은 [로컬 플러그인 번들](docs/deployment.md#로컬-플러그인-번들)을 참고한다.
 
 ```mermaid
 flowchart LR

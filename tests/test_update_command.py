@@ -36,8 +36,8 @@ class UpdateCommandTests(unittest.TestCase):
             installer = root / "installer"
             installer.mkdir()
             shutil.copy2(ROOT / "installer/update-dependencies.ps1", installer)
-            body = '''param([switch]$Install,[switch]$Locked,[string]$HostName,[string]$CodexHome,[string]$Codex,[string]$LocalConfig,[string]$StateRoot,[string]$Python)
-$record = @{kind='dependencies';install=[bool]$Install;codex_home=$CodexHome;host_name=$HostName;state_root=$StateRoot}
+            body = '''param([switch]$Install,[switch]$Locked,[string]$HostName,[string]$HomeDirectory,[string]$CodexHome,[string]$Codex,[string]$LocalConfig,[string]$StateRoot,[string]$Python)
+$record = @{kind='dependencies';install=[bool]$Install;codex_home=$CodexHome;home_directory=$HomeDirectory;host_name=$HostName;state_root=$StateRoot}
 $record | ConvertTo-Json -Compress | Add-Content -LiteralPath (Join-Path $PSScriptRoot 'calls.jsonl') -Encoding UTF8
 exit 0
 '''
@@ -76,18 +76,19 @@ exit 0
         self.assertEqual([c["kind"] for c in calls], ["dependencies", "apply", "check"])
         self.assertTrue(calls[0]["install"])
         self.assertTrue(all(c["codex_home"] == expected for c in calls))
-        self.assertTrue(all(c["home_directory"] == home for c in calls[1:]))
+        self.assertTrue(all(c["home_directory"] == home for c in calls))
 
     def test_explicit_codex_home_takes_precedence_consistently(self):
         calls, home, expected = self.run_command(True)
         self.assertTrue(all(c["codex_home"] == expected for c in calls))
-        self.assertTrue(all(c["home_directory"] == home for c in calls[1:]))
+        self.assertTrue(all(c["home_directory"] == home for c in calls))
 
     def test_preview_does_not_apply_or_check(self):
-        calls, _, expected = self.run_command(False, install=False)
+        calls, home, expected = self.run_command(False, install=False)
         self.assertEqual(len(calls), 1)
         self.assertFalse(calls[0]["install"])
         self.assertEqual(calls[0]["codex_home"], expected)
+        self.assertEqual(calls[0]["home_directory"], home)
 
     def test_failures_stop_before_later_phases_and_preserve_exit_code(self):
         for failure, expected in (("dependencies", ["dependencies"]),
@@ -103,7 +104,7 @@ exit 0
                 calls, _, _ = self.run_command(False, install=install, use_state=True)
                 self.assertEqual(len(calls), 3 if install else 1)
 
-    def test_core_wrappers_forward_literal_state_and_config_to_python(self):
+    def test_core_wrappers_forward_literal_home_state_and_config_to_python(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             installer = root / "installer"
@@ -111,6 +112,7 @@ exit 0
             recorder = "import json, pathlib, sys; pathlib.Path(__file__).with_suffix('.json').write_text(json.dumps(sys.argv[1:]))"
             state = str(root / "state [literal] & $cache's 한글")
             config = str(Path(state) / "host's [local].toml")
+            home = str(root / "profile [literal] & $data's 한글")
             for wrapper, module, prefix in (("harness.ps1", "harness.py", ["plan"]),
                                              ("install-dependencies.ps1", "install_dependencies.py", ["-Locked"])):
                 with self.subTest(wrapper=wrapper):
@@ -118,9 +120,11 @@ exit 0
                     (installer / module).write_text(recorder, encoding="utf-8")
                     result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-File",
                                              str(installer / wrapper), *prefix, "-HostName", "homelab-desktop",
-                                             "-StateRoot", state, "-LocalConfig", config, "-Python", sys.executable],
+                                             "-StateRoot", state, "-LocalConfig", config, "-HomeDirectory", home,
+                                             "-Python", sys.executable],
                                             capture_output=True, text=True, encoding="utf-8")
                     self.assertEqual(result.returncode, 0, result.stderr)
                     args = json.loads((installer / module).with_suffix(".json").read_text())
                     self.assertEqual(args[args.index("--state-root") + 1], state)
                     self.assertEqual(args[args.index("--local-config") + 1], config)
+                    self.assertEqual(args[args.index("--home") + 1], home)

@@ -10,7 +10,9 @@ Treat `common/AGENTS.md` and registered skills as deployable source data while e
 - Keep maintained local references beside each skill's `SKILL.md`.
 - Declare externally fetched standalone skills with `role = "upstream"`, an HTTPS GitHub repository in `source`, a `channel`, and a `files` mapping from installation targets to upstream relative paths.
 - Keep the `ste-ko` adapter's local `SKILL.md` and declare its external references with the same source fields.
-- Place installation code in `installer`.
+- Place owned plugin projects in `plugins` and installation code in `installer`.
+- Keep PC paths, personal and organization settings, and product bindings in their respective local environments.
+- Preserve the published `version` and `bundle_sha256` pins in `[[local_plugins]]` when importing plugin source.
 - Put private absolute paths and local overrides in ignored `.local/<hostname>.toml`.
 - Preserve app-generated `node_repl`, notify, marketplace paths, OpenCodex configuration, project trust and hook trust in the existing target profile.
 - Keep authentication, account records, sessions, runtime pipes and backup contents out of Git.

@@ -1,0 +1,20 @@
+{
+  "name": "repo-governance-local",
+  "interface": {
+    "displayName": "Repo governance local"
+  },
+  "plugins": [
+    {
+      "name": "repo-governance",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

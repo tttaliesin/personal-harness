@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 3,
+  "operation": "check",
+  "check": "name",
+  "sources": [
+    {
+      "kind": "text",
+      "text": "Inventory_API"
+    }
+  ],
+  "context": {
+    "bundlePath": "./skills/repo-governance/assets/bundle.json"
+  }
+}

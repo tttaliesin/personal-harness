@@ -14,7 +14,8 @@ param(
     [string]$Codex,
     [string]$LocalConfig,
     [string]$Python,
-    [string]$StateRoot
+    [string]$StateRoot,
+    [string]$HomeDirectory
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -34,6 +35,7 @@ try {
     $cliArguments = @('-B', (Join-Path $PSScriptRoot 'install_dependencies.py'), '--host', $HostName.ToLowerInvariant())
     if ($Install) { $cliArguments += '--install' }
     if ($Locked) { $cliArguments += '--locked' }
+    if ($HomeDirectory) { $cliArguments += @('--home', $HomeDirectory) }
     if ($CodexHome) { $cliArguments += @('--codex-home', $CodexHome) }
     if ($Codex) { $cliArguments += @('--codex', $Codex) }
     if ($LocalConfig) { $cliArguments += @('--local-config', $LocalConfig) }

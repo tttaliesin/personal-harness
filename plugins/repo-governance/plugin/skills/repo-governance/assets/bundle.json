@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 1,
+  "version": "0.2.0",
+  "checkerSchemaVersion": 3,
+  "root": "../../..",
+  "files": [
+    {
+      "path": ".agents/plugins/marketplace.json",
+      "sha256": "53505ce84196aabb1c5dc77fd77a0a7b2df81e797a3e677e071c8639af589eba"
+    },
+    {
+      "path": ".claude-plugin/plugin.json",
+      "sha256": "384a71fa722ad339173de1cfb167760df2c9b2b0cddbb142dd575d711d776b1b"
+    },
+    {
+      "path": ".codex-plugin/plugin.json",
+      "sha256": "129f83b36d1593fb2947ff9e9ade0d7454ca768076994e58e389f13aa5a784e5"
+    },
+    {
+      "path": ".pi/extensions/repo-governance.ts",
+      "sha256": "fa31daf8edd561cebee6aaf73b44b3dcfa41b74bf64ecce8cbfbf464adb2e6b5"
+    },
+    {
+      "path": "README.md",
+      "sha256": "f0c5713c63dff20bedae9f71be8924a6314ca16f23d912840cc03e25bcf3e607"
+    },
+    {
+      "path": "SPEC.md",
+      "sha256": "4faa4f772d6b98a43d6caf7aa0965220c180320d2e7d4483de5809738d7d4ad8"
+    },
+    {
+      "path": "Taskfile.yml",
+      "sha256": "9b3057ce95b7d8308228303128764a3c5edbef8e6641cbe0db9276c5e7ff7d9a"
+    },
+    {
+      "path": "hooks/claude-code.json",
+      "sha256": "df237a587895af2e58022655a5f61264abe4cc45e5258ee5fd8c3713ae602200"
+    },
+    {
+      "path": "hooks/codex.json",
+      "sha256": "204fb791a7f7faa18ef2d1c0b7f35870a76f3654b00d2c9535202bfe87530efd"
+    },
+    {
+      "path": "hooks/run.mjs",
+      "sha256": "85c0ae777976cf99af4b4509addcaf1bb67095233a2d2bfad2c72ee87c503e87"
+    },
+    {
+      "path": "package.json",
+      "sha256": "32ed9e5ca931d39251922721897410f32cbc05dd4335554e4d95d8f15bd048c4"
+    },
+    {
+      "path": "scripts/bundle.mjs",
+      "sha256": "1b78b8fbeb2118a267da7558ddf5315d27558a769409b9112ac6a1fd5d6c8953"
+    },
+    {
+      "path": "scripts/cases.mjs",
+      "sha256": "1bac17c599726764bdc8d13ccfb77621656019678cee2898c7faf77bf212199b"
+    },
+    {
+      "path": "scripts/task-cli.mjs",
+      "sha256": "6f7920eea545ef1b49a1904b9b27ed09890f63e284c2dc01275ffc0bde14f704"
+    },
+    {
+      "path": "scripts/verify.mjs",
+      "sha256": "cc48b5c630a5a545c2fe7433146043de4297fa747163446f4bc3b7a0eb0dbdef"
+    },
+    {
+      "path": "skills/repo-governance/SKILL.md",
+      "sha256": "4815aa43e1d46e2a936daf662d773091f783fe4367f5bfb992c1297ffef1b726"
+    },
+    {
+      "path": "skills/repo-governance/assets/examples/name-invalid.json",
+      "sha256": "3aaf82b8f125bfb5c0d5af69fb36c32d0f31fe5efcfde7a6d39b9a2307df29b0"
+    },
+    {
+      "path": "skills/repo-governance/assets/examples/name-valid.json",
+      "sha256": "799b44398b550942e50ad24d38b7f54bf0488cb758b83df02384e4c410ac501e"
+    },
+    {
+      "path": "skills/repo-governance/assets/policy.json",
+      "sha256": "3a2b24c1eb6ec9fb81044f9d892de6647a78c77c5edff9b106904c2384ad5eee"
+    },
+    {
+      "path": "skills/repo-governance/assets/product.example.json",
+      "sha256": "f9391795c3018e1e10e56ba27608197459618adb05e6a4673b12c519332043d2"
+    },
+    {
+      "path": "skills/repo-governance/assets/readme-hero.svg",
+      "sha256": "28d2ea33ef511ba0ffe937a3399fd790d2c684bbc0ad49c9a65def6d30dbc5f9"
+    },
+    {
+      "path": "skills/repo-governance/references/architecture.md",
+      "sha256": "ed7cc10105758e4e0c599934e2b592f5397928aeaccc1596de9cd786c25aa8a3"
+    },
+    {
+      "path": "skills/repo-governance/references/checker.md",
+      "sha256": "660f0c52ef2fca64119b102b4f8a20cee17fd45a70309bf8f31ec41bdb228dc7"
+    },
+    {
+      "path": "skills/repo-governance/references/claude-code-tools.md",
+      "sha256": "f59f45b3c3a7c9d1c961d21eec60de2760255ce68464716231ecb8473e930afc"
+    },
+    {
+      "path": "skills/repo-governance/references/codex-tools.md",
+      "sha256": "a2f4756139641a0bbb11193b8ecdd541a543b6105e32f9db115a227d478072f2"
+    },
+    {
+      "path": "skills/repo-governance/references/native-verification.md",
+      "sha256": "a678fbc3c1ab5bb80676a9af19345b0d625c66cfd8318e6c8ceede8b947846ed"
+    },
+    {
+      "path": "skills/repo-governance/references/pi-tools.md",
+      "sha256": "c04e917e100fe951636509adb16b6dc7abdd5de49fa903cf1a23d54af05d987a"
+    },
+    {
+      "path": "skills/repo-governance/references/repository-policy.md",
+      "sha256": "71867aa6b482b11cca30ebda8a42889872a9ef14e9bc7ed3eca09e0c15b15e0b"
+    },
+    {
+      "path": "skills/repo-governance/references/verification.md",
+      "sha256": "ce6ef166b8f6f270677d5ea9d3622b92f7fd52ca0f1567263e7e36b853aca578"
+    },
+    {
+      "path": "skills/repo-governance/scripts/check.mjs",
+      "sha256": "69b67dee2ea6370526e5b7aef6ff6c32335d5d691051cb6172abb76a221a1b79"
+    },
+    {
+      "path": "skills/repo-governance/scripts/checks/documents.mjs",
+      "sha256": "8f4e5974cffc073d4770a37fa8ca3fe6b495fc240941d4f379701248d5bc79d0"
+    },
+    {
+      "path": "skills/repo-governance/scripts/checks/file-scope.mjs",
+      "sha256": "28770f32002af92ca9a1f0853a2d6d25d47d4c144238a65e9956ef9ff98758a6"
+    },
+    {
+      "path": "skills/repo-governance/scripts/checks/git.mjs",
+      "sha256": "17b101bc0faf387b19fe74b77b12625e8ee129c0bc481a0779d2c1b3ef12f039"
+    },
+    {
+      "path": "skills/repo-governance/scripts/checks/repository.mjs",
+      "sha256": "3f33390ec6acbcf8eaf8734309bbe54cbd0cafe3bb2d9be443b5aba879e46d7b"
+    },
+    {
+      "path": "skills/repo-governance/scripts/contracts.mjs",
+      "sha256": "c161a6799914e3377ffae3c684440f263b68011fa8e4a1c5d41c85295a8f56fc"
+    },
+    {
+      "path": "skills/repo-governance/scripts/hook.mjs",
+      "sha256": "8f771850d6a7afdfae0c3a1ac352cac076522b3c7a8d505860df69706188201f"
+    },
+    {
+      "path": "skills/repo-governance/scripts/inputs.mjs",
+      "sha256": "a2124686fe581f903d22bd4d905a0d0ff5348bd6fb35a0da096888aad5a444c1"
+    },
+    {
+      "path": "skills/repo-governance/scripts/native-product.mjs",
+      "sha256": "b93de946bc94fde94c4f480bb00620494decaa0839d21761908d10687bb9b4d0"
+    },
+    {
+      "path": "skills/repo-governance/scripts/rules.mjs",
+      "sha256": "f2864e6d9423674851a801564d75dfb9563bd104ea5cef85f82b6e345673a989"
+    },
+    {
+      "path": "skills/repo-governance/scripts/tool-call.mjs",
+      "sha256": "8ef164af048321b248fa9de15e6c0e03198785d4e5f26f46b95da326a434e41f"
+    },
+    {
+      "path": "skills/repo-governance/scripts/vendor/markdown-it.LICENSE",
+      "sha256": "b6046053b04cf867446af1dd7a12118e9b02b07d66affc67ce72577174d23653"
+    },
+    {
+      "path": "skills/repo-governance/scripts/vendor/markdown-it.mjs",
+      "sha256": "d5432491790141da046b1197353705db03264f40b5727f3b4b591f5aba193e30"
+    },
+    {
+      "path": "specs/branches.md",
+      "sha256": "05cd170b0b3bc08fd39cb575f91070915c5aaf8dafb8a61c1ce23066c1df69f2"
+    },
+    {
+      "path": "specs/commits.md",
+      "sha256": "da2bb2fb07c75b9cae61770d31b0be2724443e0641a792e5e87e80995a9e3a7e"
+    },
+    {
+      "path": "specs/description.md",
+      "sha256": "2668ab652e0b23a8d8a5765fbc7560b0f1166aae1b4c7a450e3f79906bb13ec8"
+    },
+    {
+      "path": "specs/file-inclusion.md",
+      "sha256": "63c5cb180ecb890ac2fd8941fedc49659cf6ab3419cd8987dcb86e8adff15d69"
+    },
+    {
+      "path": "specs/naming.md",
+      "sha256": "e4fbd36d39d81112433ab51e8813774b8b622109c2fa6606c1d70b2e5ead2396"
+    },
+    {
+      "path": "specs/pull-requests.md",
+      "sha256": "5cbc82d4dbd90c18b5e312a138556c5df061b8f7f000360d89307a0e02049aca"
+    },
+    {
+      "path": "specs/readme.md",
+      "sha256": "a0143bce74bca009297cd77eeb394e184504069561fea3d03799ac0606e5d96d"
+    },
+    {
+      "path": "templates/PULL_REQUEST.md",
+      "sha256": "975b2e98cbfc24f214a2b683cb80fe0d71cbf3f1bf568ffa6725f6009fdcf337"
+    },
+    {
+      "path": "templates/README.md",
+      "sha256": "719d5cc96dd04afeed1332f5641b95853150946ccda9144c49cedf5b78188ad3"
+    },
+    {
+      "path": "templates/github-actions.yml",
+      "sha256": "ee02809c7b0ff1f0b03e3a71bd96d6c523efae6ab6b4c3056885dcdbaf81e18c"
+    }
+  ]
+}

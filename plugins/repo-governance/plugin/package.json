@@ -1,0 +1,33 @@
+{
+  "name": "repo-governance",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "description": "일곱 저장소 공통 규약과 읽기 전용 검사기·하네스 연결.",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "verify:bundle": "node scripts/bundle.mjs verify"
+  },
+  "pi": {
+    "skills": [
+      "./skills"
+    ],
+    "extensions": [
+      "./.pi/extensions/repo-governance.ts"
+    ]
+  },
+  "repoGovernance": {
+    "markdownParser": {
+      "name": "markdown-it",
+      "version": "15.0.3",
+      "source": "npm:markdown-it@15.0.3",
+      "integrity": "sha512-+Az7Ojz3iRGu8KYMvJ6xVhvrxP3eE+vEtJX75Ow88XBpcQNV/0lGX5ZynIIBftREo4DC2jsveAMDaeltmm8QvQ==",
+      "license": "MIT",
+      "file": "skills/repo-governance/scripts/vendor/markdown-it.mjs",
+      "licenseFile": "skills/repo-governance/scripts/vendor/markdown-it.LICENSE"
+    }
+  }
+}

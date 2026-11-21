@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "verify:bundle": "node scripts/bundle.mjs verify",
+    "bundle:build": "node scripts/bundle.mjs build",
+    "verify:coverage": "node scripts/verify.mjs coverage"
+  }
+}

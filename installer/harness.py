@@ -24,6 +24,7 @@ except ImportError:
 from registry import load_registry, lock_issues
 from external_skills import CACHE_NAME as EXTERNAL_SKILL_CACHE, load_available_cache
 import mcp_packages
+from local_plugin_bundles import directory_digest, inspect_bundle
 from windows_paths import io_path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -156,6 +157,11 @@ def expand(value, variables: Mapping):
         if "${" in value:
             raise HarnessError(f"Unknown path placeholder: {value}")
     return value
+
+
+def path_variables(repo: Path, state: Path, user_home: Path, codex_home: Path) -> dict:
+    return {"USERPROFILE": user_home.as_posix(), "CODEX_HOME": codex_home.as_posix(),
+            "REPO_ROOT": repo.as_posix(), "STATE_ROOT": state.as_posix()}
 
 
 def safe_file(path: Path, root: Path) -> None:
@@ -318,6 +324,35 @@ def registered_settings(registry, lock: Mapping, state: Path, plan: Plan,
     return overlay
 
 
+def local_bundle_records(declarations: tuple[dict, ...], locations: Mapping, config_dir: Path) -> list[dict]:
+    registered = {item["marketplace"] for item in declarations}
+    if not isinstance(locations, Mapping) or set(locations) - registered:
+        raise HarnessError("plugin_bundles must map registered local marketplaces to bundle directories")
+    roots = {}
+    for marketplace, value in locations.items():
+        if not isinstance(value, str) or not value.strip():
+            raise HarnessError(f"Expected a local bundle directory for {marketplace}")
+        path = Path(value)
+        if path.anchor and not path.is_absolute():
+            raise HarnessError(f"Expected an absolute or config-relative local bundle directory for {marketplace}")
+        roots[marketplace] = path if path.is_absolute() else config_dir / path
+    return [inspect_bundle(item, roots[item["marketplace"]])
+            for item in declarations if item["marketplace"] in roots]
+
+
+def local_marketplace_matches(record: Mapping, config: Mapping) -> bool:
+    registered = config.get("marketplaces", {}).get(record["marketplace"], {})
+    source = registered.get("source")
+    return (registered.get("source_type") == "local" and isinstance(source, str)
+            and io_path(Path(source)) == io_path(Path(record["source"])))
+
+
+def local_plugin_cache_matches(record: Mapping, codex_home: Path) -> bool:
+    cache = codex_home / "plugins/cache" / record["marketplace"] / record["name"] / record["version"]
+    safe_file(cache, codex_home)
+    return cache.is_dir() and directory_digest(cache) == record["content_sha256"]
+
+
 def skill_files(repo: Path, spec: Mapping, external: Mapping[str, bytes]) -> dict[Path, bytes]:
     files = {Path(relative): data for relative, data in external.items()}
     if "path" not in spec:
@@ -352,10 +387,9 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     if layout.persistent and not local_config.is_relative_to(layout.local):
         raise HarnessError("local-config must be inside the selected state root")
     local = read_toml(local_config) if local_config.exists() else {}
-    if set(local) - {"name", "platform", "paths", "config"}:
-        raise HarnessError("Local overrides support only name, platform, paths and config")
-    variables = {"USERPROFILE": user_home.as_posix(), "CODEX_HOME": codex_home.as_posix(),
-                 "REPO_ROOT": repo.as_posix(), "STATE_ROOT": layout.local.as_posix()}
+    if set(local) - {"name", "platform", "paths", "config", "plugin_bundles"}:
+        raise HarnessError("Local overrides support paths, config and plugin_bundles")
+    variables = path_variables(repo, layout.local, user_home, codex_home)
     local = expand(local, variables)
     local_settings = local.get("config", {})
     paths = dict(local.get("paths", {}))
@@ -368,7 +402,7 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     common = read_toml(common_path)
     validate_common(common)
     registry = load_registry(repo / 'registry.toml')
-    selectors = {f"{item['name']}@{item['marketplace']}" for item in registry.plugins}
+    selectors = {f"{item['name']}@{item['marketplace']}" for item in (*registry.plugins, *registry.local_plugins)}
     if selectors.intersection(common.get('plugins', {})):
         raise HarnessError('Registered plugin selections belong in registry.toml, not common/config.toml')
     if {item['name'] for item in registry.mcp}.intersection(common.get('mcp_servers', {})):
@@ -382,6 +416,16 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     original = config_path.read_text(encoding="utf-8-sig") if config_path.exists() else ""
     old = tomlkit.parse(original)
     registered = registered_settings(registry, lock, layout.local, plan, paths, old)
+    locations = local.get("plugin_bundles", {})
+    for record in local_bundle_records(registry.local_plugins, locations, local_config.parent):
+        selector = f"{record['name']}@{record['marketplace']}"
+        if (local_marketplace_matches(record, old) and selector in old.get("plugins", {})
+                and local_plugin_cache_matches(record, codex_home)):
+            registered.setdefault("plugins", {})[selector] = {"enabled": record["enabled"]}
+        else:
+            plan.missing.append(f"Local bundle installation differs for {selector}; run task install")
+    for market in sorted({item["marketplace"] for item in registry.local_plugins} - set(locations)):
+        plan.notes.append(f"Optional local marketplace {market}: no plugin_bundles path configured")
     if "node_repl" not in old.get("mcp_servers", {}):
         plan.missing.append("Local Codex runtime configuration is missing: open Codex on this PC first (node_repl)")
     merged = tomlkit.parse(original)

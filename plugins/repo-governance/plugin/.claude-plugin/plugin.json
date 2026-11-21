@@ -1,0 +1,11 @@
+{
+  "name": "repo-governance",
+  "version": "0.2.0",
+  "description": "일곱 저장소 공통 규약·읽기 전용 검사기·작업 에이전트 지침.",
+  "license": "UNLICENSED",
+  "skills": "./skills/",
+  "hooks": "./hooks/claude-code.json",
+  "author": {
+    "name": "RoyLabsTeam"
+  }
+}

@@ -1,0 +1,122 @@
+version: '3'
+
+tasks:
+  default:
+    silent: true
+    desc: 사용 가능한 명령 보기
+    cmds:
+      - task --list
+
+  demo:
+    silent: true
+    desc: 이름 형식 위반을 읽기 전용으로 재현
+    cmds:
+      - node scripts/task-cli.mjs demo
+
+  check:
+    silent: true
+    desc: '읽기 검사: task check REQUEST=요청.json [BUNDLE=묶음.json] [REPOSITORY=제품폴더] [PRODUCT=제품입력.json]'
+    requires:
+      vars: [REQUEST]
+    cmds:
+      - >-
+        REPO_GOVERNANCE_REQUEST={{.REQUEST | shellQuote}}
+        REPO_GOVERNANCE_BUNDLE={{.BUNDLE | default "" | shellQuote}}
+        REPO_GOVERNANCE_REPOSITORY={{.REPOSITORY | default "" | shellQuote}}
+        REPO_GOVERNANCE_PRODUCT={{.PRODUCT | default "" | shellQuote}}
+        REPO_GOVERNANCE_POLICY={{.POLICY | default "" | shellQuote}}
+        REPO_GOVERNANCE_DEPRECATED_CATALOG={{.CATALOG | default "" | shellQuote}}
+        node scripts/task-cli.mjs check
+
+  verify:bundle:
+    silent: true
+    desc: 실제 리소스 바이트·버전·npm pack 포함 확인
+    cmds:
+      - node scripts/task-cli.mjs verify-bundle
+
+  verify:native:
+    silent: true
+    desc: 실제 하네스 검증 절차와 제공된 증거 확인
+    requires:
+      vars: [HARNESS]
+    cmds:
+      - >-
+        REPO_GOVERNANCE_HARNESS={{.HARNESS | shellQuote}}
+        REPO_GOVERNANCE_EVIDENCE={{.EVIDENCE | default "" | shellQuote}}
+        node scripts/task-cli.mjs verify-native
+
+  doctor:
+    silent: true
+    desc: 검사기·리소스 진단과 실제 연결 검증의 미관측 상태 확인
+    cmds:
+      - node scripts/task-cli.mjs doctor
+
+  show:product:
+    silent: true
+    desc: '제품 입력 출력·새 외부 파일 저장: [TARGET=제품폴더 | PRODUCT=기존입력.json] [OUTPUT=새파일.json]'
+    cmds:
+      - >-
+        REPO_GOVERNANCE_TARGET={{.TARGET | default "" | shellQuote}}
+        REPO_GOVERNANCE_PRODUCT={{.PRODUCT | default "" | shellQuote}}
+        REPO_GOVERNANCE_OUTPUT={{.OUTPUT | default "" | shellQuote}}
+        node scripts/task-cli.mjs show-product
+
+  show:ci:
+    silent: true
+    desc: 원격 변경 없이 CI 템플릿 출력
+    cmds:
+      - node scripts/task-cli.mjs show-ci
+
+  adopt:
+    silent: true
+    desc: '로컬 clone의 저장소 규약 도입: TARGET=제품폴더'
+    requires:
+      vars: [TARGET]
+    cmds:
+      - REPO_GOVERNANCE_TARGET={{.TARGET | shellQuote}} node scripts/task-cli.mjs adopt
+
+  bind:product:
+    silent: true
+    desc: '현재 worktree의 규약 도입과 제품 입력 연결: TARGET=제품폴더 PRODUCT=제품입력.json [BACKUP=새외부백업.json]'
+    requires:
+      vars: [TARGET, PRODUCT]
+    cmds:
+      - >-
+        REPO_GOVERNANCE_TARGET={{.TARGET | shellQuote}}
+        REPO_GOVERNANCE_PRODUCT={{.PRODUCT | shellQuote}}
+        REPO_GOVERNANCE_BACKUP={{.BACKUP | default "" | shellQuote}}
+        node scripts/task-cli.mjs bind-product
+
+  setup:codex:
+    desc: 현재 배포본을 Codex에 설치
+    cmds:
+      - task: update:codex
+        vars:
+          SOURCE: '{{.ROOT_DIR}}'
+
+  update:codex:
+    silent: true
+    desc: '검증한 배포본으로 Codex 설치 갱신: [SOURCE=배포폴더]'
+    dir: '{{.SOURCE | default .ROOT_DIR}}'
+    cmds:
+      - >-
+        REPO_GOVERNANCE_INSTALL_SOURCE=.
+        node {{printf "%s/scripts/task-cli.mjs" .ROOT_DIR | shellQuote}} install-codex
+
+  run:claude:
+    desc: '공통 스킬·hook을 연결한 Claude Code 실행: task run:claude [TARGET=제품폴더] [PRODUCT=제품입력.json] [-- 추가인자]'
+    interactive: true
+    dir: '{{.TARGET | default .ROOT_DIR}}'
+    cmds:
+      - >-
+        {{if .PRODUCT | default .REPO_GOVERNANCE_PRODUCT | default ""}}REPO_GOVERNANCE_PRODUCT={{.PRODUCT | default .REPO_GOVERNANCE_PRODUCT | shellQuote}}{{end}}
+        claude --plugin-dir {{.ROOT_DIR | shellQuote}} {{.CLI_ARGS}}
+
+  run:pi:
+    desc: '공통 스킬·extension을 연결한 pi 실행: task run:pi [TARGET=제품폴더] [PRODUCT=제품입력.json] [-- 추가인자]'
+    interactive: true
+    dir: '{{.TARGET | default .ROOT_DIR}}'
+    cmds:
+      - >-
+        {{if .PRODUCT | default .REPO_GOVERNANCE_PRODUCT | default ""}}REPO_GOVERNANCE_PRODUCT={{.PRODUCT | default .REPO_GOVERNANCE_PRODUCT | shellQuote}}{{end}}
+        pi -e {{printf "%s/.pi/extensions/repo-governance.ts" .ROOT_DIR | shellQuote}} --skill {{printf "%s/skills/repo-governance" .ROOT_DIR | shellQuote}} {{.CLI_ARGS}}

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="220" viewBox="0 0 1200 220" role="img" aria-labelledby="title desc">
+  <title id="title">governance-tool</title>
+  <desc id="desc">저장소 이름·설명·README·커밋·브랜치·PR·파일 포함 규약을 관리하는 공통 리소스입니다. 오른쪽은 이름 형식의 예시입니다.</desc>
+  <rect width="1200" height="220" rx="18" fill="#101923"/>
+  <path d="M718 0v220M770 0v220M822 0v220M874 0v220M926 0v220M978 0v220M1030 0v220M1082 0v220M1134 0v220M1186 0v220M718 26h482M718 78h482M718 130h482M718 182h482M718 234h482" stroke="#1b2a39" stroke-width="1"/>
+  <rect x="46" y="37" width="5" height="22" rx="2.5" fill="#a9dc76"/>
+  <text x="66" y="53" fill="#a9dc76" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="700" letter-spacing="2.1">SHARED REPOSITORY RULES</text>
+  <text x="46" y="123" fill="#f4f7fb" font-family="Segoe UI,Arial,sans-serif" font-size="58" font-weight="700" letter-spacing="-1.8">governance-tool</text>
+  <text x="49" y="161" fill="#afbdcd" font-family="Segoe UI,Malgun Gothic,Apple SD Gothic Neo,sans-serif" font-size="18">이름 · 설명 · README · 커밋 · 브랜치 · PR · 파일</text>
+  <rect x="746" y="28" width="402" height="164" rx="12" fill="#162332" stroke="#34495c"/>
+  <circle cx="766" cy="47" r="3" fill="#a9dc76"/>
+  <text x="779" y="51" fill="#90a5b8" font-family="Segoe UI,Arial,sans-serif" font-size="10" font-weight="700" letter-spacing="1.5">NAMING CONVENTION</text>
+  <g font-family="Consolas,Menlo,monospace">
+    <text x="766" y="88" fill="#90a5b8" font-size="11">system</text>
+    <text x="905" y="88" fill="#90a5b8" font-size="11">role</text>
+    <text x="1015" y="88" fill="#90a5b8" font-size="11">component</text>
+    <text x="766" y="117" fill="#e0eaf4" font-size="20">inventory</text>
+    <text x="883" y="117" fill="#5e7791" font-size="20">/</text>
+    <text x="905" y="117" fill="#e0eaf4" font-size="20">worker</text>
+    <text x="991" y="117" fill="#5e7791" font-size="20">/</text>
+    <text x="1015" y="117" fill="#e0eaf4" font-size="20">import</text>
+    <path d="M766 135h362" stroke="#34495c"/>
+    <text x="766" y="164" fill="#a9dc76" font-size="19">inventory-worker-import</text>
+  </g>
+</svg>

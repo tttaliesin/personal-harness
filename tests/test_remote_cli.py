@@ -295,6 +295,7 @@ class RemoteCliTests(unittest.TestCase):
     def legacy_source(self, change=None, pre_registry=True, *, scripts_layout=True):
         hashes = [call for call in self.calls() if call["kind"] == "wrapper"][-1]["hashes"]
         content = {name: (self.payload / name).read_bytes() for name in hashes}
+        content.pop("installer/local_plugin_bundles.py", None)
         manifest = json.loads(content["package.json"])
         registry = tomlkit.parse(content["registry.toml"].decode("utf-8"))
         legacy_skill_paths = {}
@@ -751,12 +752,16 @@ class RemoteCliTests(unittest.TestCase):
 
     def test_verified_legacy_migration_waits_for_success_and_preserves_persistent_files(self):
         self.run_cli()
+        pre_removal = self.legacy_source(pre_registry=False, scripts_layout=False)
+        manifest = json.loads((pre_removal / "package.json").read_text(encoding="utf-8"))
+        self.assertTrue({"installer", "sources"} <= set(manifest["files"]))
+        self.assertNotIn("scripts", manifest["files"])
         releases = (
             self.legacy_source(),
             self.legacy_source(b"\nolder revision\n", pre_registry=False),
-            self.legacy_source(pre_registry=False, scripts_layout=False),
+            pre_removal,
         )
-        previous = self.legacy_receipt(releases[0])
+        previous = self.legacy_receipt(pre_removal)
         sentinels = {}
         for target in (self.state / "tools/unrelated.exe", self.state / "sources/lock.json",
                        self.state / "skills/kept.md", self.state / "private.toml",
@@ -1127,6 +1132,9 @@ class RemoteCliTests(unittest.TestCase):
                 self.assertFalse(self.manager.exists())
         manifest_path = self.payload / "package.json"
         manifest = json.loads(manifest_path.read_text())
+        legacy_license = self.payload / "sources/agent-desktop-LICENSE"
+        legacy_license.parent.mkdir()
+        legacy_license.write_bytes(LEGACY_AGENT_DESKTOP_FILES["sources/agent-desktop-LICENSE"])
         for entry in ("../outside", "sources"):
             with self.subTest(entry=entry):
                 updated = {**manifest, "files": [*manifest["files"], entry]}
@@ -1205,7 +1213,7 @@ class RemoteCliTests(unittest.TestCase):
     def test_actual_npm_pack_has_complete_allowlisted_payload_and_runs_offline(self):
         self.assertTrue((ROOT / "docs/history/deployment-2026-11-12-13.md").is_file())
         skill_files = self.standalone_skill_payload_files()
-        for relative in ("AGENTS.md", ".local/private.txt", ".audit/private.txt", "tests/private.py",
+        for relative in ("AGENTS.md", ".local/private.txt", ".audit/private.txt", "plugins/example/README.md", "tests/private.py",
                          "installer/__pycache__/private.pyc", "skills/adapters/openspec-workflow/.local/private.txt"):
             path = self.payload / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -1224,9 +1232,9 @@ class RemoteCliTests(unittest.TestCase):
         for name in ("dependencies/NOTICE.md", "dependencies/dependencies.lock.json",
                      "docs/deployment.md", "docs/local.example.toml", "installer/bootstrap.ps1", "registry.toml",
                      "installer/registry.py", "installer/mcp_packages.py", "installer/windows_paths.py", "installer/share.py",
-                     "installer/external_skills.py", "installer/upstream_skill_sources.py"):
+                     "installer/external_skills.py", "installer/upstream_skill_sources.py", "installer/local_plugin_bundles.py"):
             self.assertIn(name, files)
-        self.assertFalse(any(name.startswith(("docs/history/", "hosts/", "scripts/")) for name in files))
+        self.assertFalse(any(name.startswith(("docs/history/", "hosts/", "plugins/", "scripts/")) for name in files))
         self.assertFalse(any(name.startswith(("sources/", "skills/agent-desktop/", "skills/agent-desktop-windows/"))
                              for name in files))
         self.assertNotIn("installer/test.ps1", files)
@@ -1235,6 +1243,8 @@ class RemoteCliTests(unittest.TestCase):
         self.assertFalse(any(set(name.split("/")) & {".local", ".audit", ".git", "tests", "__pycache__"} for name in files))
         unpacked = self.root / "unpacked"
         with tarfile.open(destination / package["filename"]) as archive:
+            self.assertEqual({member.name.removeprefix("package/") for member in archive.getmembers()
+                              if member.isfile()}, files)
             archive.extractall(unpacked, filter="data")
         self.payload = unpacked / "package"
         self.run_cli()

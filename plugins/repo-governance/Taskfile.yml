@@ -1,0 +1,46 @@
+version: '3'
+
+tasks:
+  default:
+    silent: true
+    desc: 개발·패키징 명령 보기
+    cmds:
+      - task --list
+
+  package:
+    silent: true
+    desc: 'plugin/ 전체를 새 외부 폴더에 준비: task package DEST=배포폴더'
+    requires:
+      vars: [DEST]
+    cmds:
+      - REPO_GOVERNANCE_DEST={{.DEST | shellQuote}} node scripts/package.mjs
+
+  bundle:build:
+    silent: true
+    desc: plugin/의 실제 파일과 내용으로 manifest 갱신
+    cmds:
+      - node scripts/bundle.mjs build
+
+  verify:bundle:
+    silent: true
+    desc: plugin/의 파일·내용과 npm 배포 파일 확인
+    cmds:
+      - node scripts/bundle.mjs verify
+
+  test:
+    silent: true
+    desc: 개발 소스의 로컬 테스트 실행
+    cmds:
+      - node --test {{.CLI_ARGS}}
+
+  verify:coverage:
+    silent: true
+    desc: 규약 사례 원문과 개발 fixture 연결 확인
+    cmds:
+      - node scripts/verify.mjs coverage
+
+  verify:mechanical:
+    silent: true
+    desc: 원격 없는 임시 저장소에서 일곱 기계 검사 재현
+    cmds:
+      - node scripts/verify.mjs mechanical

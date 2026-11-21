@@ -23,6 +23,7 @@ class Registry:
     mcp: tuple[dict, ...]
     fingerprint: str
     skills: tuple[dict, ...] = ()
+    local_plugins: tuple[dict, ...] = ()
 
 
 def declaration_hash(spec: Mapping) -> str:
@@ -111,6 +112,29 @@ def normalize_plugin(spec: Mapping) -> dict:
         normalized["ref"] = ref
     else:
         raise ValueError("Invalid plugin channel")
+    return normalized
+
+
+def normalize_local_plugin(spec: Mapping) -> dict:
+    required = {"name", "marketplace", "version", "bundle_sha256"}
+    _fields(spec, required | {"enabled", "source_path"}, required, "local plugin")
+    version, bundle_sha256 = spec["version"], spec["bundle_sha256"]
+    enabled = spec.get("enabled", True)
+    if (not isinstance(version, str) or not re.fullmatch(r"[0-9][A-Za-z0-9_.+-]{0,127}", version)
+            or version.endswith(".")):
+        raise ValueError("Invalid local plugin version")
+    if not isinstance(bundle_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", bundle_sha256):
+        raise ValueError("Invalid local plugin bundle_sha256")
+    if type(enabled) is not bool:
+        raise ValueError("Invalid local plugin enabled field")
+    name = _name(spec["name"], "plugin name")
+    normalized = {"name": name,
+                  "marketplace": _name(spec["marketplace"], "marketplace name"),
+                  "version": version, "bundle_sha256": bundle_sha256, "enabled": enabled}
+    if "source_path" in spec:
+        if spec["source_path"] != f"plugins/{name}":
+            raise ValueError("Invalid local plugin source_path")
+        normalized["source_path"] = spec["source_path"]
     return normalized
 
 
@@ -255,11 +279,13 @@ def parse_registry(text: str) -> Registry:
         raw = tomlkit.parse(text.lstrip("\ufeff")).unwrap()
     except tomlkit.exceptions.TOMLKitError:
         raise ValueError("Invalid registry TOML") from None
-    _fields(raw, {"schema_version", "plugins", "mcp", "skills"}, {"schema_version"}, "registry")
+    _fields(raw, {"schema_version", "plugins", "local_plugins", "mcp", "skills"}, {"schema_version"}, "registry")
     if type(raw["schema_version"]) is not int or raw["schema_version"] != 1:
         raise ValueError("Unsupported registry schema_version")
     groups = {}
     for key, normalize, identity in (("plugins", normalize_plugin, lambda p: (p["marketplace"], p["name"])),
+                                     ("local_plugins", normalize_local_plugin,
+                                      lambda p: (p["marketplace"], p["name"])),
                                      ("skills", normalize_skill, lambda p: p["name"]),
                                      ("mcp", normalize_mcp, lambda p: p["name"])):
         entries = raw.get(key, [])
@@ -278,8 +304,14 @@ def parse_registry(text: str) -> Registry:
         previous = marketplaces.setdefault(plugin["marketplace"].casefold(), policy)
         if previous != policy:
             raise ValueError(f"Conflicting marketplace selection policy for {plugin['marketplace']}")
+    for plugin in groups["local_plugins"]:
+        policy = (plugin["marketplace"], "local-bundle", plugin["bundle_sha256"])
+        previous = marketplaces.setdefault(plugin["marketplace"].casefold(), policy)
+        if previous != policy:
+            raise ValueError(f"Conflicting marketplace selection policy for {plugin['marketplace']}")
     fingerprint = declaration_hash({"schema_version": 1, "plugins": groups["plugins"], "mcp": groups["mcp"]})
-    return Registry(tuple(groups["plugins"]), tuple(groups["mcp"]), fingerprint, tuple(groups["skills"]))
+    return Registry(plugins=tuple(groups["plugins"]), mcp=tuple(groups["mcp"]), fingerprint=fingerprint,
+                    local_plugins=tuple(groups["local_plugins"]), skills=tuple(groups["skills"]))
 
 
 def lock_issues(registry: Registry, lock: Mapping) -> list[str]:

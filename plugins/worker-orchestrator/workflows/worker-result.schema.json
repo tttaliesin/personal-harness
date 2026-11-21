@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Worker run result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runId", "status", "summary", "verification", "pendingRequests"],
+  "properties": {
+    "runId": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["running", "waiting_approval", "waiting_input", "completed", "failed", "unknown"] },
+    "summary": { "type": "string", "minLength": 1 },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidenceRefs"],
+      "properties": {
+        "status": { "enum": ["passed", "failed", "not_run", "unknown"] },
+        "evidenceRefs": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "pendingRequests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "summary"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["approval", "input"] },
+          "summary": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "enum": ["waiting_approval", "waiting_input"] } } },
+      "then": { "properties": { "pendingRequests": { "minItems": 1 } } }
+    }
+  ]
+}

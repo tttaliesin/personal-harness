@@ -152,6 +152,18 @@ Steiger는 FSD 저장소별 구조 검사기로, ArchUnitNET은 C# 저장소별 
 - 외부 서비스 시뮬레이터만 요청하면 해당 스킬의 시뮬레이터 참조를 사용한다.
 <!-- development-environment-routing:end -->
 
+<!-- windows-development-plugins:start -->
+## Windows 개발 플러그인
+
+- Windows 프로젝트에서 개발 도구나 작업 실행기의 실제 상태를 점검할 때 Windows Agent Devkit의 `environment-doctor`를 자율적으로 선택한다.
+- Worker Orchestrator는 사용자가 해당 프로젝트의 워커 운영을 위임했거나 현재 턴에 유효한 워커 배정 또는 콜백이 있을 때 선택한다.
+  채택이 확인되지 않은 프로젝트의 일반 요청은 기존 작업 방식으로 처리한다.
+- 두 플러그인에 Node.js 24 이상이 필요하면 이미 설치된 호환 실행 파일을 사용한다.
+  기본 `node`가 요구 버전보다 낮으면 `mise`를 사용하는 PC의 `%LOCALAPPDATA%/mise/installs/node` 등 기존 설치 위치에서 실행 파일을 찾는다.
+  PowerShell 7이 필요하면 기존 Codex 런타임 또는 PC에 설치된 실행 파일을 사용한다.
+  런타임 선택은 플러그인 실행에만 적용한다.
+<!-- windows-development-plugins:end -->
+
 <!-- repository-artifacts-routing:start -->
 ## 공유 문서와 로컬 산출물
 

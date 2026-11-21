@@ -1,0 +1,92 @@
+name: Repository governance
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+permissions:
+  contents: read
+jobs:
+  mechanical-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.3'
+      - name: Require a fixed governance commit
+        env:
+          REPO_GOVERNANCE_REF: ${{ vars.REPO_GOVERNANCE_REF }}
+        run: >-
+          node -e "if (!/^[0-9a-f]{40}$/.test(process.env.REPO_GOVERNANCE_REF || '')) throw new Error('REPO_GOVERNANCE_REF must be a full commit OID')"
+      - uses: actions/checkout@v4
+        with:
+          path: product
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.REPO_GOVERNANCE_REPOSITORY }}
+          ref: ${{ vars.REPO_GOVERNANCE_REF }}
+          token: ${{ secrets.REPO_GOVERNANCE_READ_TOKEN || github.token }}
+          path: governance
+          persist-credentials: false
+      - name: Check supplied PR and fixed revision
+        env:
+          REPO_GOVERNANCE_PRODUCT: ${{ github.workspace }}/product/.repo-governance/product.json
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { existsSync } from 'node:fs';
+          import { lstat, readFile } from 'node:fs/promises';
+          import { spawnSync } from 'node:child_process';
+          import { resolve } from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          const plugin = resolve('governance/plugin');
+          const skill = resolve(existsSync(plugin) ? plugin : resolve('governance'), 'skills/repo-governance');
+          const { runCheck } = await import(pathToFileURL(resolve(skill, 'scripts/check.mjs')).href);
+          const event = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, 'utf8'));
+          const pr = event.pull_request;
+          if (!pr) throw Error('An actual pull_request event is required.');
+          const repository = resolve('product');
+          const git = (args, failure) => {
+            const result = spawnSync('git', ['-C', repository, ...args], {
+              encoding: 'utf8', shell: false, windowsHide: true, timeout: 10000, maxBuffer: 64 * 1024,
+              env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }
+            });
+            if (result.error || result.status !== 0) throw Error(failure);
+            return result.stdout.trim();
+          };
+          const commit = (value, label) => {
+            if (typeof value !== 'string' || !/^[0-9a-f]{40}$/.test(value)) throw Error(label + ' must be a full commit OID.');
+            const oid = git(['rev-parse', '--verify', '--end-of-options', value + '^{commit}'], label + ' commit is unavailable.');
+            if (oid !== value) throw Error(label + ' must identify a commit OID.');
+            return oid;
+          };
+          const headOid = commit(pr.head?.sha, 'PR head');
+          const baseOid = commit(pr.base?.sha, 'PR base');
+          const mergeBases = git(['merge-base', '--all', headOid, baseOid], 'A unique PR merge base is required.').split(/\r?\n/);
+          if (mergeBases.length !== 1) throw Error('A unique PR merge base is required.');
+          const mergeBaseOid = commit(mergeBases[0], 'PR merge base');
+          const context = {
+            repository,
+            bundlePath: resolve(skill, 'assets/bundle.json'),
+            baseRef: baseOid
+          };
+          const productPath = process.env.REPO_GOVERNANCE_PRODUCT;
+          if (productPath) {
+            try {
+              await lstat(productPath);
+              context.productPath = productPath;
+            } catch (error) {
+              if (error.code !== 'ENOENT') throw error;
+            }
+          }
+          const requests = [
+            { check: 'pull-request', sources: [{ kind: 'pr', number: pr.number, headOid, baseOid, title: pr.title, body: pr.body ?? '' }], context },
+            { check: 'file-scope', sources: [{ kind: 'revision', revision: headOid }], context: { ...context, baseRef: mergeBaseOid } }
+          ];
+          for (const request of requests) {
+            const result = await runCheck(JSON.stringify({ schemaVersion: 3, operation: 'check', ...request }));
+            process.stdout.write(result.line);
+            if (result.exitCode !== 0) process.exitCode = result.exitCode;
+          }
+          NODE

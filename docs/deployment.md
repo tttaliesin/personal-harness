@@ -140,3 +140,58 @@ PC의 전역 Git 설정은 유지한다.
 
 `task apply`의 파일 백업은 의존성 설치 전체를 되돌리는 기능이 아니다.
 설치 실패 시 기록된 lock과 오류를 확인하고 같은 명령을 다시 실행한다.
+
+## 로컬 플러그인 번들
+
+[registry.toml](../registry.toml)의 `[[local_plugins]]`에서 마켓플레이스 이름과 플러그인 ID를 등록한다.
+각 항목의 `version`과 `bundle_sha256`은 이미 배포한 번들을 고정한다.
+
+1. 해당 PC에 배포가 허용된 번들의 압축을 풀어 지속적으로 사용할 수 있는 폴더에 둔다.
+2. [로컬 설정 예시](local.example.toml)의 `[plugin_bundles]`를 PC별 TOML에 복사해 마켓플레이스별 경로를 지정한다.
+   체크아웃에서 기본 설정 파일은 `.local/<hostname>.toml`이다.
+   상대 경로는 설정 파일이 있는 폴더를 기준으로 해석한다.
+3. `task install`로 번들을 설치한다.
+   기록한 의존성을 재현할 때는 `task install -- -Locked`를 사용한다.
+   설치기는 번들을 검증한 뒤 공식 Codex CLI로 마켓플레이스와 플러그인을 등록한다.
+4. `task check`로 등록 출처와 설치 캐시를 확인한다.
+   설치 전에는 `task plan`으로 현재 설치 상태를 확인할 수 있다.
+
+PC별 경로를 지정하지 않은 마켓플레이스의 기존 등록은 보존한다.
+이 경우 공통 의존성 설치는 계속 진행한다.
+
+번들 해시는 숨김 파일을 포함한 전체 일반 파일을 대상으로 계산한다.
+설치기는 `/` 구분자를 쓴 상대 경로와 파일별 소문자 SHA-256을 JSON 객체에 담는다.
+경로를 정렬하고 공백을 생략한 ASCII 이스케이프 JSON의 UTF-8 바이트를 SHA-256으로 해시한다. [번들 검증 구현](../installer/local_plugin_bundles.py)
+
+Windows Agent Devkit과 Worker Orchestrator는 Node.js 24 이상에서 실행한다.
+PC의 기본 Node.js가 이전 버전이면 호환되는 기존 실행 파일을 사용한다. [Windows Agent Devkit 요구 사항](../plugins/windows-agent-devkit/package.json) · [Worker Orchestrator 요구 사항](../plugins/worker-orchestrator/package.json)
+
+`repo-governance`의 제품별 설정은 해당 작업트리에서 `task bind:product`로 연결한다. [제품 설정 연결 절차](../plugins/repo-governance/plugin/skills/repo-governance/references/repository-policy.md)
+
+## 자체 플러그인 소스
+
+Personal Harness의 공개 GitHub `main`에는 세 플러그인의 공용 소스와 테스트를 둔다.
+각 플러그인의 소스 경로는 `[[local_plugins]]`의 `source_path`에 기록한다.
+PC별 설치 경로, 개인·조직별 설정, 제품별 설정과 작업 기록은 해당 환경에서 관리한다.
+새 번들 게시와 기존 설치 경로 전환은 별도 작업으로 진행한다.
+
+| 소스 | 소스 버전 | 이관 기준 커밋 |
+|---|---|---|
+| [Windows Agent Devkit](../plugins/windows-agent-devkit) | `0.3.5` | `2ccf5538f6ebfd6c0179c9467ae53c10a18f76d4` |
+| [Worker Orchestrator](../plugins/worker-orchestrator) | `0.1.7-local.1` | `7b2d76691bd677f72aaa63f5f674d8eb7ac2d79b` |
+| [repo-governance](../plugins/repo-governance) | `0.2.0` | `441a74e4334d1240319ce635e10cc3c6062a4825` |
+
+설치기는 소스 이관 후에도 등록한 번들 고정값을 사용한다.
+Worker Orchestrator의 설치 대상은 게시한 `0.1.6` 번들이다. [등록 목록](../registry.toml)
+
+각 플러그인 디렉터리에서 다음 명령을 실행한다.
+회귀 테스트는 각 디렉터리의 `npm test`로 실행한다.
+
+| 소스 | 배포본 생성과 검사 |
+|---|---|
+| Windows Agent Devkit | `npm ci --ignore-scripts`, `npm run build`, `npm run package`, `npm run check -- --packaged` |
+| Worker Orchestrator | `npm run build`, `npm run check` |
+| repo-governance | `npm run bundle:build`, `npm run verify:bundle`, `task package DEST=../../.local/artifacts/repo-governance-runtime` |
+
+`repo-governance`를 패키징할 때는 출력 경로의 상위 폴더인 `.local/artifacts`를 먼저 준비한다.
+`DEST`는 아직 존재하지 않는 폴더를 지정한다. [패키징 명령](../plugins/repo-governance/Taskfile.yml)

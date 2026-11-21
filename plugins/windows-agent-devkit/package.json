@@ -1,0 +1,26 @@
+{
+  "name": "windows-agent-devkit",
+  "version": "0.3.5",
+  "private": true,
+  "type": "module",
+  "description": "Windows 개발환경의 프로젝트 요구와 실행 경로를 점검하는 로컬 CLI",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "doctor": "node src/cli.mjs",
+    "test": "node --test",
+    "check": "node scripts/check-package.mjs",
+    "build": "node scripts/build.mjs",
+    "package": "node scripts/package-plugin.mjs"
+  },
+  "dependencies": {
+    "@renovatebot/pep440": "6.0.0",
+    "semver": "7.8.6",
+    "smol-toml": "1.9.1",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

@@ -262,7 +262,8 @@ class UpdateTests(unittest.TestCase):
                     stack.enter_context(patch.object(installer, "git_output", side_effect=git))
                     stack.enter_context(patch.object(installer, "fetch", side_effect=AssertionError("network")))
                     operations = [stack.enter_context(patch.object(installer, name)) for name in (
-                        "install_codegraph", "install_openspec", "install_plugins", "save_paths")]
+                        "install_codegraph", "install_openspec", "install_plugins", "install_local_plugins",
+                        "save_paths")]
                     operations.append(stack.enter_context(patch.object(installer.mcp_packages, "install")))
                     with self.assertRaisesRegex(installer.HarnessError, "Unsupported plugin source entry"):
                         installer.resolve_plugins(desired.plugins)
@@ -347,7 +348,8 @@ class UpdateTests(unittest.TestCase):
                 with ExitStack() as stack:
                     stack.enter_context(patch.object(installer, "fetch", side_effect=AssertionError("network")))
                     operations = [stack.enter_context(patch.object(installer, name)) for name in (
-                        "install_codegraph", "install_openspec", "install_plugins", "save_paths", "atomic_write")]
+                        "install_codegraph", "install_openspec", "install_plugins", "install_local_plugins",
+                        "save_paths", "atomic_write")]
                     self.assertEqual(self.run_main(repo, "--install", "--locked"), 2)
                 for operation in operations:
                     operation.assert_not_called()
@@ -392,7 +394,8 @@ class UpdateTests(unittest.TestCase):
                 execute = stack.enter_context(patch.object(installer.subprocess, "run",
                     return_value=subprocess.CompletedProcess([], 0, "v22.11.9\n")))
                 operations = [stack.enter_context(patch.object(installer, name)) for name in (
-                    "install_codegraph", "install_openspec", "install_plugins", "save_paths", "atomic_write")]
+                    "install_codegraph", "install_openspec", "install_plugins", "install_local_plugins",
+                    "save_paths", "atomic_write")]
                 stack.enter_context(redirect_stdout(io.StringIO()))
                 stack.enter_context(redirect_stderr(output))
                 self.assertEqual(installer.main(["--install", "--host", "homelab-desktop", "--codex-home",
@@ -998,7 +1001,8 @@ class UpdateTests(unittest.TestCase):
                                                            side_effect=preflight))
                 stack.enter_context(patch.object(installer, "fetch", side_effect=AssertionError("network")))
                 operations = [stack.enter_context(patch.object(installer, name)) for name in (
-                    "install_codegraph", "install_openspec", "install_plugins", "save_paths", "atomic_write")]
+                    "install_codegraph", "install_openspec", "install_plugins", "install_local_plugins",
+                    "save_paths", "atomic_write")]
                 operations.append(stack.enter_context(patch.object(installer.mcp_packages, "install")))
                 self.assertEqual(self.run_main(repo, "--install", "--locked"), 2)
             validate.assert_called_once_with(record)

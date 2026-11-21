@@ -22,7 +22,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 try {
     $dependencyArguments = @{ HostName = $HostName; Install = $Install; Locked = $Locked }
-    foreach ($name in @('CodexHome', 'Codex', 'LocalConfig', 'StateRoot', 'Python')) {
+    foreach ($name in @('HomeDirectory', 'CodexHome', 'Codex', 'LocalConfig', 'StateRoot', 'Python')) {
         if ($PSBoundParameters.ContainsKey($name)) { $dependencyArguments[$name] = $PSBoundParameters[$name] }
     }
     if ($PSBoundParameters.ContainsKey('HomeDirectory') -and -not $PSBoundParameters.ContainsKey('CodexHome')) {

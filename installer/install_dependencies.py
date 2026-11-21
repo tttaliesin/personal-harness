@@ -19,13 +19,15 @@ import urllib.request
 
 import tomlkit
 from harness import (
-    REPO, HarnessError, atomic_write, read_toml, require_supported_host, safe_file, select_layout,
+    REPO, HarnessError, atomic_write, expand, local_bundle_records, local_marketplace_matches,
+    local_plugin_cache_matches, path_variables, read_toml, require_supported_host, safe_file, select_layout,
     skill_files,
 )
 from external_skills import CACHE_NAME as EXTERNAL_SKILL_CACHE, encode_cache, load_cache
-from upstream_skill_sources import fetch_skill
+from local_plugin_bundles import directory_digest
 import mcp_packages
 from registry import Registry, declaration_hash, load_registry, lock_issues
+from upstream_skill_sources import fetch_skill
 
 
 def digest(data: bytes) -> str:
@@ -35,6 +37,7 @@ def digest(data: bytes) -> str:
 @dataclass
 class Resolution:
     lock: dict
+    local_plugins: tuple[dict, ...] = ()
 
 
 def fetch(url: str) -> bytes:
@@ -215,7 +218,7 @@ def validate_openspec(record) -> None:
 
 def resolve(lock: dict, locked: bool = False, registry: Registry | None = None) -> Resolution:
     registry = registry if registry is not None else load_registry(REPO / "registry.toml")
-    result = Resolution(copy.deepcopy(lock))
+    result = Resolution(copy.deepcopy(lock), local_plugins=registry.local_plugins)
     candidate = result.lock
     candidate.pop("ego_lite", None)
     candidate.pop("agent_desktop", None)
@@ -367,6 +370,8 @@ def register_marketplace(plugin: dict, codex: str, codex_home: Path, environment
     safe_file(config, codex_home)
     old = read_toml(config) if config.exists() else {}
     previous = old.get("marketplaces", {}).get(plugin["marketplace"])
+    if previous and previous.get("source_type") == "local":
+        raise HarnessError(f"Git installation would replace local marketplace {plugin['marketplace']}")
     selections = {key: copy.deepcopy(value) for key, value in old.get("plugins", {}).items()
                   if key.endswith("@" + plugin["marketplace"])}
     base = [codex, "plugin", "marketplace"]
@@ -446,6 +451,80 @@ def install_plugins(plugins: list, codex: str, codex_home: Path):
                 raise HarnessError(f"Installed plugin source content does not match the resolved commit: {selector}")
 
 
+def install_local_plugins(plugins: list[dict], codex: str, codex_home: Path):
+    groups = {}
+    for plugin in plugins:
+        groups.setdefault(plugin["marketplace"], []).append(plugin)
+    environment = {**os.environ, "CODEX_HOME": str(codex_home)}
+    config = codex_home / "config.toml"
+    safe_file(config, codex_home)
+
+    def run(*args):
+        subprocess.run([codex, "plugin", *args, "--json"], check=True, env=environment, capture_output=True)
+
+    for marketplace, group in groups.items():
+        before = read_toml(config) if config.exists() else {}
+        previous = before.get("marketplaces", {}).get(marketplace)
+        selected = before.get("plugins", {})
+        records = {f"{p['name']}@{marketplace}": p for p in group}
+        leader = group[0]
+        same_source = local_marketplace_matches(leader, before)
+        pending = [selector for selector, record in records.items()
+                   if not same_source or selector not in selected or not local_plugin_cache_matches(record, codex_home)]
+        if not pending:
+            continue
+
+        if directory_digest(Path(leader["source"])) != leader["bundle_sha256"]:
+            raise HarnessError(f"Local bundle changed before installation: {marketplace}")
+        previous_source = previous.get("source") if previous else None
+        if previous and not same_source:
+            other = [selector for selector in selected if selector.endswith("@" + marketplace) and selector not in records]
+            if previous.get("source_type") != "local" or other:
+                raise HarnessError(f"Local installation would replace an unrelated registration for {marketplace}")
+            if not isinstance(previous_source, str) or not Path(previous_source).is_dir():
+                raise HarnessError(f"Previous local source is unavailable for rollback: {marketplace}")
+
+        failed = False
+        try:
+            if not same_source:
+                if previous:
+                    run("marketplace", "remove", marketplace)
+                run("marketplace", "add", leader["source"])
+            for selector in pending:
+                run("add", selector)
+            current = read_toml(config)
+            if not local_marketplace_matches(leader, current):
+                raise HarnessError(f"Local marketplace registered an unexpected source: {marketplace}")
+            for selector, record in records.items():
+                if selector not in current.get("plugins", {}) or not local_plugin_cache_matches(record, codex_home):
+                    raise HarnessError(f"Installed local plugin does not match the bundle: {selector}")
+        except Exception:
+            failed = True
+            if not same_source:
+                current = read_toml(config) if config.exists() else {}
+                if local_marketplace_matches(leader, current):
+                    run("marketplace", "remove", marketplace)
+                if previous and current.get("marketplaces", {}).get(marketplace) != previous:
+                    run("marketplace", "add", previous_source)
+                    for selector in records.keys() & selected.keys():
+                        run("add", selector)
+            raise
+        finally:
+            if config.exists():
+                current = read_toml(config)
+                selection = current.get("plugins", {})
+                changed = False
+                for selector in records:
+                    if selector in selected and selection.get(selector) != selected[selector]:
+                        current.setdefault("plugins", tomlkit.table())[selector] = selected[selector]
+                        changed = True
+                    elif failed and selector not in selected and selector in selection:
+                        del selection[selector]
+                        changed = True
+                if changed:
+                    atomic_write(config, tomlkit.dumps(current).encode("utf-8"))
+
+
 def save_paths(path: Path, codegraph: Path, openspec: Path | None = None):
     local = read_toml(path) if path.exists() else tomlkit.document()
     if "paths" not in local:
@@ -467,7 +546,8 @@ def main(argv=None) -> int:
     parser.add_argument("--install", action="store_true")
     parser.add_argument("--locked", action="store_true", help="Use the existing exact lock without latest metadata lookups")
     parser.add_argument("--host", default=os.environ.get("COMPUTERNAME", "").lower())
-    parser.add_argument("--codex-home", type=Path, default=Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))))
+    parser.add_argument("--home", type=Path, default=Path.home())
+    parser.add_argument("--codex-home", type=Path)
     parser.add_argument("--codex")
     parser.add_argument("--local-config", type=Path)
     parser.add_argument("--state-root", type=Path)
@@ -490,6 +570,11 @@ def main(argv=None) -> int:
             validate_openspec(lock["openspec"])
         for record in lock.get("mcp", []):
             mcp_packages.preflight(record)
+        user_home = args.home.resolve()
+        codex_home = (args.codex_home or Path(os.environ.get("CODEX_HOME", user_home / ".codex"))).resolve()
+        settings = read_toml(config) if config.exists() else {}
+        locations = expand(settings.get("plugin_bundles", {}), path_variables(REPO.resolve(), local, user_home, codex_home))
+        bundles = local_bundle_records(result.local_plugins, locations, config.parent)
         external_specs = tuple(spec for spec in registry.skills if "source" in spec
                                and ("requires" not in spec or spec["requires"] in lock))
         cache_path = local / EXTERNAL_SKILL_CACHE
@@ -507,7 +592,6 @@ def main(argv=None) -> int:
             for spec in external_specs:
                 skill_files(REPO, spec, external[spec["name"]][1])
 
-        codex_home = args.codex_home.resolve()
         codex = find_codex(args.codex, codex_home)
         print(f"{lock['codegraph']['package']}@{lock['codegraph']['version']} -> {local / 'tools/codegraph'}")
         if "openspec" in lock:
@@ -516,6 +600,9 @@ def main(argv=None) -> int:
             print("OpenSpec absent from legacy lock; skipped. Run an ordinary update to add it.")
         for item in lock["plugins"]:
             print(f"{item['name']}@{item['marketplace']} version {item['version']}: {item['source']} ref {item['ref']}")
+        for item in result.local_plugins:
+            state = "bundle verified" if item["marketplace"] in locations else "optional path not configured"
+            print(f"{item['name']}@{item['marketplace']} version {item['version']} ({state})")
         for item in lock.get("mcp", []):
             print(f"MCP {item['name']} ({item['kind']})")
         for name, (revision, _) in external.items():
@@ -535,6 +622,8 @@ def main(argv=None) -> int:
         codegraph = install_codegraph(lock["codegraph"], local, npm)
         openspec = install_openspec(lock["openspec"], local, npm) if "openspec" in lock else None
         install_plugins(lock["plugins"], codex, codex_home)
+        if bundles:
+            install_local_plugins(bundles, codex, codex_home)
         for record in lock.get("mcp", []):
             mcp_packages.install(record, local, guard=safe_file)
         save_paths(config, codegraph, openspec)

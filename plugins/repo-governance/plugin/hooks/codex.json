@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "Checking repository conventions",
+            "command": "node \"${PLUGIN_ROOT}/hooks/run.mjs\" --harness codex",
+            "timeout": 10,
+            "commandWindows": "node \"$env:PLUGIN_ROOT/hooks/run.mjs\" --harness codex"
+          }
+        ]
+      }
+    ]
+  }
+}
