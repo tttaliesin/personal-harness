@@ -22,6 +22,7 @@ except ImportError:
     raise SystemExit("Install the repository requirements first: python -m pip install -r requirements.txt")
 
 from registry import load_registry, lock_issues
+from external_skills import CACHE_NAME as EXTERNAL_SKILL_CACHE, load_cache
 import mcp_packages
 from windows_paths import io_path
 
@@ -344,6 +345,29 @@ def registered_settings(registry, lock: Mapping, state: Path, plan: Plan,
     return overlay
 
 
+def skill_files(repo: Path, spec: Mapping, external: Mapping[str, bytes]) -> dict[Path, bytes]:
+    files = {Path(relative): data for relative, data in external.items()}
+    if "path" not in spec:
+        return files
+    source = repo / spec["path"]
+    safe_file(source, repo)
+    if not (source / "SKILL.md").is_file():
+        raise HarnessError(f"Missing source skill: {spec['name']} ({spec['path']})")
+    external_names = {relative.casefold() for relative in external}
+    external_parents = {parent.as_posix().casefold() for path in files for parent in path.parents}
+    for file in source.rglob("*"):
+        if not file.is_file():
+            continue
+        safe_file(file, repo)
+        relative = file.relative_to(source)
+        name = relative.as_posix().casefold()
+        if (name in external_names or name in external_parents
+                or any(parent.as_posix().casefold() in external_names for parent in relative.parents)):
+            raise HarnessError(f"External skill source overlaps local {spec['name']} at {relative}")
+        files[relative] = file.read_bytes()
+    return files
+
+
 def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None = None,
                local_config: Path | None = None, state_root: Path | None = None) -> Plan:
     repo = repo.resolve()
@@ -454,23 +478,29 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     if (codex_home / "AGENTS.override.md").exists():
         plan.missing.append("AGENTS.override.md shadows the shared AGENTS.md; reconcile the local override before applying")
     applied_files = previously_applied_files(codex_home)
-    skills = [
-        (spec["name"], repo / spec["path"], repo, user_home / ".agents")
-        for spec in registry.skills
-        if "requires" not in spec or spec["requires"] in lock
-    ]
+    skills = tuple(spec for spec in registry.skills if "requires" not in spec or spec["requires"] in lock)
+    external_specs = tuple(spec for spec in skills if "source" in spec)
+    cached = {}
+    if external_specs:
+        cache_path = layout.local / EXTERNAL_SKILL_CACHE
+        safe_file(cache_path, layout.local)
+        try:
+            cached = load_cache(cache_path, external_specs)
+        except ValueError as exc:
+            plan.missing.append(str(exc))
+    targets = [(spec, repo, user_home / ".agents") for spec in skills]
     if official_ready:
-        skills.extend(
-            (name, layout.sources / "skills" / name, layout.sources, codex_home)
+        targets.extend(
+            ({"name": name, "path": f"skills/{name}"}, layout.sources, codex_home)
             for name in AGENT_DESKTOP_SKILLS
         )
-    for skill, source, source_root, root in skills:
-        safe_file(source, source_root)
-        if not (source / "SKILL.md").is_file():
-            raise HarnessError(f"Missing source skill: {skill} ({source.relative_to(source_root).as_posix()})")
+    for spec, source_root, root in targets:
+        skill = spec["name"]
+        if "source" in spec and skill not in cached:
+            continue
+        source_files = skill_files(source_root, spec, cached[skill][1] if skill in cached else {})
         destination_root = root / "skills" / skill
         safe_file(destination_root, root)
-        source_files = {p.relative_to(source): p for p in source.rglob("*") if p.is_file()}
         if destination_root.is_dir() and not destination_root.is_symlink():
             extra = [p for p in destination_root.rglob("*") if p.is_file() and p.relative_to(destination_root) not in source_files]
             unknown = []
@@ -482,9 +512,8 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
                     unknown.append(path)
             if unknown:
                 plan.missing.append(f"Unmanaged files in {destination_root}: reconcile them before applying")
-        for relative, file in sorted(source_files.items()):
-            safe_file(file, source_root)
-            plan.add(destination_root / relative, file.read_bytes(), root)
+        for relative, data in sorted(source_files.items()):
+            plan.add(destination_root / relative, data, root)
     return plan
 
 

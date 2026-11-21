@@ -1,6 +1,5 @@
-"""Check the pinned Korean writing imports and the portable Codex runtime."""
+"""Check the Korean writing source declarations and the Windows adapter."""
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -10,69 +9,84 @@ import sys
 import tempfile
 import unittest
 
+import tomlkit
+
 
 ROOT = Path(__file__).resolve().parents[1]
-HUMANIZE_SKILL = ROOT / "dependencies/skills/humanize-korean"
-STE_KO_ADAPTER = ROOT / "skills/writing/ste-ko"
+
+EDITOR_PREPARE_FIXTURE = """\
+import argparse
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--run-dir", type=Path, required=True)
+parser.add_argument("--genre", choices=["report"], required=True)
+run = parser.parse_args().run_dir
+original = (run / "01_input.txt").read_bytes()
+(run / "00_metrics.json").write_text('{"route_hint": "heavy"}', encoding="utf-8")
+(run / "01_input_with_metrics.txt").write_bytes(b"Fixture metrics\\n" + original)
+"""
+
+EDITOR_VERIFY_FIXTURE = """\
+import argparse
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--before", type=Path, required=True)
+parser.add_argument("--after", type=Path, required=True)
+parser.add_argument("--genre", choices=["report"], required=True)
+parser.add_argument("--json", action="store_true", required=True)
+args = parser.parse_args()
+if args.before.read_bytes() != args.after.read_bytes():
+    raise SystemExit("The fixture expected identical input and output bytes")
+"""
 
 
 class KoreanWritingSourceTests(unittest.TestCase):
-    def test_complete_imports_match_the_pinned_upstream_files(self):
-        provenance = json.loads(
-            (ROOT / "dependencies/korean-development-writing.json").read_text(encoding="utf-8")
-        )["skills"]
-        self.assertEqual(set(provenance), {"ste-ko", "humanize-korean"})
-        for name, skill in (("ste-ko", STE_KO_ADAPTER), ("humanize-korean", HUMANIZE_SKILL)):
-            with self.subTest(skill=name):
-                source = provenance[name]
-                self.assertRegex(source["source_commit"], r"^[0-9a-f]{40}$")
-                actual = {
-                    path.relative_to(skill).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-                    for path in skill.rglob("*") if path.is_file()
-                }
-                if name == "ste-ko":
-                    self.assertIn("references/SPEC.md", actual)
-                    actual.pop("SKILL.md")
-                self.assertEqual(actual, {path: file["sha256"] for path, file in source["files"].items()})
-                self.assertIn("LICENSE", actual)
+    def setUp(self):
+        registry = tomlkit.parse((ROOT / "registry.toml").read_text(encoding="utf-8"))
+        self.skills = {entry["name"]: entry for entry in registry["skills"]}
 
-    def test_editor_runs_in_an_independent_workspace_and_flags_weakened_obligation(self):
-        scripts = HUMANIZE_SKILL / "scripts"
-        text = "릴리스 담당자는 테스트를 통과한 경우에만 배포 기록을 남겨야 한다. 긴급 수정에는 별도 절차를 적용한다."
-        with tempfile.TemporaryDirectory(prefix="korean-writing-") as temporary:
-            workspace = Path(temporary)
-            run = workspace / "검토 문서"
-            run.mkdir()
-            before = run / "01_input.txt"
-            after = run / "final.md"
-            before.write_text(text, encoding="utf-8")
-            prepare = subprocess.run(
-                [sys.executable, "-B", str(scripts / "prepare_monolith_input.py"),
-                 "--run-dir", str(run), "--genre", "report"],
-                cwd=workspace, capture_output=True, timeout=20,
-            )
-            self.assertEqual(prepare.returncode, 0, prepare.stdout + prepare.stderr)
-            metrics = json.loads((run / "00_metrics.json").read_text(encoding="utf-8"))
-            self.assertIn(metrics["route_hint"], {"light", "standard", "heavy"})
-            self.assertEqual(before.read_text(encoding="utf-8"), text)
+    def test_humanize_manifest_maps_the_codex_skill_and_portable_scripts(self):
+        scripts = ("checks", "console", "lexical_layer", "prepare_monolith_input", "reassemble_chunks",
+                   "restore_modality", "sanitize_text", "strip_injected_commas", "verify_change_rate", "verify_gates")
+        self.assertEqual(self.skills["humanize-korean"], {
+            "name": "humanize-korean",
+            "role": "upstream",
+            "source": "https://github.com/epoko77-ai/im-not-ai.git",
+            "channel": "latest-release",
+            "files": {
+                "LICENSE": "LICENSE",
+                "SKILL.md": "codex/skills/humanize-korean/SKILL.md",
+                "agents": "codex/skills/humanize-korean/agents",
+                "references": "skills/humanize-korean/references",
+                **{f"scripts/{name}.py": f"scripts/{name}.py" for name in scripts},
+            },
+        })
 
-            for candidate, expected in ((text, 0), (text.replace("남겨야 한다", "남긴다"), 1)):
-                with self.subTest(expected_gate_exit=expected):
-                    after.write_text(candidate, encoding="utf-8")
-                    gate = subprocess.run(
-                        [sys.executable, "-B", str(scripts / "verify_gates.py"),
-                         "--before", str(before), "--after", str(after), "--genre", "report", "--json"],
-                        cwd=workspace, capture_output=True, timeout=20,
-                    )
-                    self.assertEqual(gate.returncode, expected, gate.stdout + gate.stderr)
-                    report = json.loads(gate.stdout[gate.stdout.index(b"{"):])
-                    self.assertEqual(len(report["modality"]["lost_pairs"]), expected)
+    def test_ste_ko_manifest_maps_references_and_license_onto_the_local_adapter(self):
+        self.assertEqual(self.skills["ste-ko"], {
+            "name": "ste-ko",
+            "role": "adapter",
+            "path": "skills/adapters/ste-ko",
+            "adapts": "beamonic/ste-ko",
+            "source": "https://github.com/beamonic/ste-ko.git",
+            "channel": "default-branch",
+            "files": {
+                "LICENSE": "LICENSE",
+                "references/README.md": "README.md",
+                "references/SPEC.md": "SPEC.md",
+                "references/benchmarks": "benchmarks",
+                "references/dictionary.md": "dictionary.md",
+                "references/tasks.md": "tasks.md",
+            },
+        })
 
     @unittest.skipUnless(sys.platform == "win32", "Windows PowerShell workflow")
     def test_preparation_and_verification_reuse_run_directory_across_process_temp_changes(self):
         powershell = shutil.which("powershell.exe")
         self.assertIsNotNone(powershell)
-        prepare = ROOT / "skills/writing/humanize-windows-runtime/scripts/prepare.ps1"
+        prepare = ROOT / "skills/adapters/humanize-windows-runtime/scripts/prepare.ps1"
         text = "릴리스 담당자는 테스트가 통과한 경우에만 배포 기록을 남겨야 한다."
         command = (
             "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\n"
@@ -80,28 +94,37 @@ class KoreanWritingSourceTests(unittest.TestCase):
             "-ScratchRoot $env:POLISH_TEST_SCRATCH -InputText $env:POLISH_TEST_SOURCE "
             "-Genre report -Python $env:POLISH_TEST_PYTHON"
         )
-        with tempfile.TemporaryDirectory(prefix="writing-runtime-") as temp:
+        scratch = ROOT / ".local"
+        scratch.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="writing-runtime-", dir=scratch) as temp:
             workspace = Path(temp)
+            editor = workspace / "editor fixture"
+            scripts = editor / "scripts"
+            scripts.mkdir(parents=True)
+            (scripts / "prepare_monolith_input.py").write_text(EDITOR_PREPARE_FIXTURE, encoding="utf-8")
+            verify = scripts / "verify_gates.py"
+            verify.write_text(EDITOR_VERIFY_FIXTURE, encoding="utf-8")
             first = workspace / "#!sandbox.{a}" / "Temp"
             second = workspace / "#!sandbox.{b}" / "Temp"
             first.mkdir(parents=True)
             second.mkdir(parents=True)
             shared = workspace / "shared run files"
             environment = {
-                **os.environ, "POLISH_TEST_SCRIPT": str(prepare), "POLISH_TEST_SKILL": str(HUMANIZE_SKILL),
+                **os.environ, "POLISH_TEST_SCRIPT": str(prepare), "POLISH_TEST_SKILL": str(editor),
                 "POLISH_TEST_SOURCE": text, "POLISH_TEST_PYTHON": sys.executable,
                 "TEMP": str(first), "TMP": str(first),
             }
 
             def prepare_in(root):
                 return subprocess.run(
-                    [powershell, "-NoProfile", "-NonInteractive", "-Command", command],
+                    [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command],
                     env={**environment, "POLISH_TEST_SCRATCH": str(root)},
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=25,
                 )
 
             rejected = prepare_in(first / "invalid")
             self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn(b"Choose a shared scratch path", rejected.stderr)
             self.assertFalse((first / "invalid").exists())
 
             prepared = prepare_in(shared)
@@ -109,14 +132,14 @@ class KoreanWritingSourceTests(unittest.TestCase):
             result = json.loads(prepared.stdout.decode("utf-8-sig"))
             run = Path(result["runDir"])
             self.assertEqual(run.parent.resolve(), shared.resolve())
-            self.assertIn(result["route"], {"light", "standard", "heavy"})
+            self.assertEqual(result["route"], "heavy")
             before = run / "01_input.txt"
-            self.assertIn(text, (run / "01_input_with_metrics.txt").read_text(encoding="utf-8"))
-            self.assertEqual(before.read_text(encoding="utf-8"), text)
+            self.assertEqual(before.read_bytes(), text.encode("utf-8"))
+            self.assertEqual((run / "01_input_with_metrics.txt").read_bytes(), b"Fixture metrics\n" + before.read_bytes())
             after = run / "final.md"
             after.write_text(text, encoding="utf-8")
             gate = subprocess.run(
-                [result["python"], "-B", "-X", "utf8", str(HUMANIZE_SKILL / "scripts/verify_gates.py"),
+                [result["python"], "-B", "-X", "utf8", str(verify),
                  "--before", str(before), "--after", str(after), "--genre", "report", "--json"],
                 cwd=second, env={**os.environ, "TEMP": str(second), "TMP": str(second)},
                 capture_output=True, timeout=25,

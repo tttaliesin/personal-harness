@@ -161,7 +161,9 @@ class DependencyTests(unittest.TestCase):
             dependencies.mkdir()
             dependencies.joinpath("dependencies.lock.json").write_bytes(
                 installer.REPO.joinpath("dependencies/dependencies.lock.json").read_bytes())
-            repo.joinpath("registry.toml").write_bytes(installer.REPO.joinpath("registry.toml").read_bytes())
+            registry = tomlkit.parse(installer.REPO.joinpath("registry.toml").read_text(encoding="utf-8"))
+            registry["skills"] = [skill for skill in registry["skills"] if "source" not in skill]
+            repo.joinpath("registry.toml").write_text(tomlkit.dumps(registry), encoding="utf-8")
             repo.joinpath("package.json").write_bytes(installer.REPO.joinpath("package.json").read_bytes())
             before = set(repo.rglob("*"))
             with patch.object(installer, "REPO", repo), patch.object(installer, "find_codex", return_value=None), \

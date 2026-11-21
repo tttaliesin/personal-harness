@@ -25,6 +25,7 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 저장소는 공개로 운영한다.
 소스는 명령 실행 중에만 사용하고 종료할 때 삭제한다.
 PC별 경로와 의존성 기록은 `%LOCALAPPDATA%/PersonalHarness/state`에 보관한다.
+이 상태 경로에는 외부 스킬 캐시도 둔다.
 Codex가 생성한 런타임과 인증은 기존 Codex 홈에서 유지한다.
 기존 저장소의 `.local`을 재사용하거나 설치 경로를 지정하는 방법은 [설치 문서](docs/remote-install.md)를 참고한다.
 
@@ -89,6 +90,7 @@ task plan
 `task`는 사용 가능한 명령을 표시한다.
 `task setup`은 Python 가상환경과 저장소 실행에 필요한 패키지를 준비한다.
 `task plan`은 변경할 파일과 공통 설정, 누락된 의존성을 표시한다.
+외부 스킬 캐시가 없거나 현재 등록과 다르면 일반 설치로 캐시를 준비한다.
 
 ```powershell
 # 공식 최신 안정판을 조회하고 설치 계획을 확인한다.
@@ -138,7 +140,16 @@ task plan -- -HomeDirectory 'D:/Test Profile'
 ## 최신 버전으로 갱신하기
 
 `task install`과 `task update`는 같은 설치·적용 절차를 사용한다.
-기록된 버전을 재현할 때는 `-Locked`를 사용한다.
+일반 설치와 갱신은 외부 스킬의 `channel`에 맞는 커밋을 조회한다.
+설치기는 선택한 커밋과 검증한 파일 내용을 담은 캐시를 원자적으로 교체한다.
+외부 원본의 조회, 다운로드 또는 파일 검증에 실패하면 이전 캐시를 보존하고 오류를 반환한다.
+
+체크아웃의 기본 캐시는 `.local/external-skills.json`이다.
+상태 루트를 지정하면 `<state-root>/external-skills.json`을 쓴다.
+`task plan`, `task check`, `task apply`는 외부 스킬을 이 캐시에서 오프라인으로 읽는다.
+
+기록한 버전을 재현할 때는 `-Locked`를 사용한다.
+외부 스킬을 잠금 모드에서 읽으려면 현재 등록과 호환되는 기존 캐시가 필요하다.
 
 ```powershell
 task install -- -Locked
@@ -155,25 +166,38 @@ task install -- -Locked
 | [common/AGENTS.md](common/AGENTS.md) | 전역 사용자 지침. `${CODEX_HOME}`은 적용 대상 PC에서 치환 |
 | [common/config.toml](common/config.toml) | 모델, 사용자 정책, Windows sandbox와 Desktop 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
 | `.local/<hostname>.toml` | 해당 PC에서만 사용하는 경로와 선택적 설정 덮어쓰기. Git 제외 |
-| [registry.toml](registry.toml) | 단독 스킬, 외부 플러그인과 MCP의 등록 정보 |
-| [skills/engineering/](skills/engineering) | `development-environment`, `openspec-workflow`, `repository-artifacts` |
-| [skills/writing/](skills/writing) | `create-readme`, STE-KO 원본 참조를 함께 둔 `ste-ko`, `humanize-windows-runtime` |
-| [skills/design/](skills/design) | `korean-typography`, `taste-windows-runtime` |
-| [dependencies/skills/](dependencies/skills) | `feature-sliced-design`과 `humanize-korean`의 외부 원본 디렉터리 전체 |
+| [registry.toml](registry.toml) | 단독 스킬과 외부 참조의 출처, 외부 플러그인과 MCP의 등록 정보 |
+| [skills/custom/](skills/custom) | 자체 스킬인 `create-readme`, `development-environment`, `korean-typography`, `repository-artifacts` |
+| [skills/adapters/](skills/adapters) | 연동·호환 어댑터인 `openspec-workflow`, `ste-ko`, `taste-windows-runtime`, `humanize-windows-runtime` |
+| `.local/external-skills.json` | 외부 스킬과 참조 자료의 로컬 캐시. Git 제외 |
 | [skills/agent-desktop/](skills/agent-desktop), [skills/agent-desktop-windows/](skills/agent-desktop-windows) | 공식 릴리스에서 검증하고 Codex 홈의 `skills/`에 복사하는 스킬과 참조 문서 |
 | [sources/agent-desktop-LICENSE](sources/agent-desktop-LICENSE) | 공식 스킬 갱신 시 검증하는 Agent Desktop 라이선스 |
 | [dependencies/dependencies.lock.json](dependencies/dependencies.lock.json) | 체크아웃에서 설치하고 검증한 의존성의 버전, 커밋, 배포 해시 |
 | [dependencies/NOTICE.md](dependencies/NOTICE.md) | 외부 원본의 출처와 라이선스 안내 |
-| [dependencies/](dependencies)의 출처 JSON | 고정 커밋과 파일 해시 ([FSD](dependencies/feature-sliced-skill.json), [한국어 개발 문서](dependencies/korean-development-writing.json), [Roylabs 기준 구성](dependencies/roylabs-2026-11-12.json)) |
+| [dependencies/roylabs-2026-11-12.json](dependencies/roylabs-2026-11-12.json) | 초기 Roylabs 기준 구성의 출처와 파일 해시 |
 | [installer/](installer) | Task와 원격 명령이 사용하는 설치·갱신·적용 구현 |
 | [bin/](bin) | `npx` 명령의 진입점 |
 | [Taskfile.yml](Taskfile.yml) | 저장소 루트에서 사용하는 준비, 설치, 갱신, 적용과 검증 명령 |
 | [package.json](package.json) | Git 패키지의 실행 명령, 배포 파일, 설치 대상 PC 이름 |
 | [docs/repository-workflows.md](docs/repository-workflows.md) | 개발환경·문서·테스트 산출물의 자율 판단과 저장소 governance 역할 경계 |
 
-단독 스킬을 배포하려면 `registry.toml`의 `[[skills]]`에 설치 폴더 이름 `name`과 저장소 루트 기준 경로 `path`를 적는다.
-설치기는 `path`가 가리키는 디렉터리의 파일 전체를 `~/.agents/skills/<name>/`에 복사한다.
-`upstream`에는 외부 스킬이나 함께 보관하는 외부 참조의 출처 URL을 기록할 수 있다.
+단독 스킬을 배포하려면 `registry.toml`의 `[[skills]]`에 설치 폴더 이름 `name`과 원본의 역할을 나타내는 `role`을 적는다.
+자체 스킬은 `role = "custom"`으로, 어댑터는 `role = "adapter"`로 선언한다.
+두 역할 모두 저장소 루트 기준 원본 경로를 `path`에 적는다.
+어댑터의 연동 대상은 `adapts`에 적는다. [스킬과 외부 도구](docs/baseline.md#스킬과-외부-도구)
+
+`feature-sliced-design`과 `humanize-korean`은 `role = "upstream"`으로 등록한다.
+외부 원본의 `source`에는 HTTPS GitHub 저장소를 지정한다.
+`channel`은 기본 브랜치의 `default-branch` 또는 최신 안정 릴리스의 `latest-release`다.
+`files`의 키는 설치할 스킬 폴더를 기준으로 한 경로다.
+각 키의 값은 외부 저장소 안의 상대 경로다.
+키가 `"."`이면 지정한 원본 디렉터리의 내용 전체를 스킬 폴더에 배치한다.
+
+`ste-ko`는 로컬 `SKILL.md`를 사용하며 외부 참조 자료는 같은 출처 필드로 선언한다.
+외부 단독 스킬과 STE-KO 원본 참조 자료는 로컬 캐시에 보관한다.
+`role`과 `adapts`가 모두 없는 기존 로컬 스킬에는 기존 등록 규칙을 적용한다.
+
+설치기는 등록한 로컬 파일과 캐시의 외부 파일을 `~/.agents/skills/<name>/`에 배치한다.
 `requires`를 지정한 스킬은 잠금 파일에 해당 의존성이 있을 때 설치한다.
 `openspec-workflow`의 `requires`는 `openspec`이다.
 작업 중 스킬을 사용하는 기준은 `common/AGENTS.md`에서 관리한다.
@@ -187,7 +211,12 @@ flowchart LR
     H[PC 로컬 설정] --> M
     R[해당 PC의 Codex 런타임 설정] --> M
     M --> P[사전 검사와 적용 계획]
-    S[registry.toml에 등록한 단독 스킬] --> P
+    SC["자체 스킬 · skills/custom/"] --> S
+    SA["어댑터 · skills/adapters/"] --> S
+    SU["외부 원본 선언 · registry.toml"] --> F["일반 설치와 갱신에서 원본 확인"]
+    F --> E["로컬 캐시 · external-skills.json"]
+    E --> S
+    S[등록한 단독 스킬의 설치 파일] --> P
     P --> A[백업 후 적용]
     A --> O[Codex 홈의 공통 지침과 설정 및 공식 Agent Desktop 스킬]
     A --> D["사용자 홈의 .agents/skills/"]

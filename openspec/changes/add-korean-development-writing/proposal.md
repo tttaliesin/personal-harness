@@ -22,5 +22,6 @@
 
 ## Impact
 
-공통 사용자 지침, 배포 스킬 목록, 원본 출처 기록과 Windows 배포 검증을 갱신한다.
+공통 사용자 지침과 Windows 배포 검증을 갱신한다.
+배포 목록은 `ste-ko` 어댑터의 외부 참조와 `humanize-korean`의 원본 경로를 선언한다.
 기존 저장소의 문서 계약과 repo-governance를 우선한다.

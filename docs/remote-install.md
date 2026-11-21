@@ -51,7 +51,9 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 Python이나 Codex를 자동으로 찾지 못하면 `--python 'D:/Python/python.exe'` 또는 `--codex 'D:/tools/codex.exe'`를 추가한다.
 WindowsApps의 Python 실행 별칭은 인터프리터로 사용하지 않는다.
 기록한 의존성 버전을 재현할 때는 `--locked`를 추가한다.
-`--locked`도 없는 배포물은 다운로드한다.
+잠금 모드는 현재 등록과 호환되는 기존 캐시에서 외부 스킬을 읽는다.
+외부 스킬 캐시가 없거나 등록과 다르면 일반 설치나 갱신을 실행한다.
+다른 의존성의 배포물이 로컬에 없으면 잠금 모드에서도 다운로드한다.
 등록 대상은 루트의 [registry.toml](../registry.toml)에서 관리한다.
 새 항목을 등록하거나 설치 출처를 바꾼 뒤에는 일반 `update`로 해당 PC의 정확한 버전 기록을 갱신한다.
 `--locked`는 현재 등록 목록과 기록이 일치할 때 사용한다.
@@ -87,7 +89,8 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 | `<상태 루트>/skills` | 같은 잠금에 대응하는 공식 Agent Desktop 스킬 원본 |
 | `<상태 루트>/sources/agent-desktop-LICENSE` | 같은 잠금에 대응하는 공식 Agent Desktop 라이선스 |
 | `<상태 루트>/source-backups` | 공식 스킬 원본 갱신 전 백업 |
-| `~/.agents/skills/<name>/` | `registry.toml`의 `[[skills]]`에 등록한 스킬 디렉터리의 파일 전체 |
+| `<상태 루트>/external-skills.json` | 외부 스킬의 선택한 커밋과 검증한 파일 내용 |
+| `~/.agents/skills/<name>/` | `registry.toml`에 등록한 로컬 스킬과 캐시에서 배포한 외부 파일 |
 | `<Codex 홈>/harness-backups` | 공통 파일 적용 전 백업 |
 
 기본 상태 루트는 `<설치 루트>/state`다.
@@ -99,6 +102,11 @@ npm이 내려받은 압축 배포물 캐시는 npm의 일반 캐시 정책을 �
 PC별 상태 잠금의 기본 초기값은 배포 소스의 [dependencies/dependencies.lock.json](../dependencies/dependencies.lock.json)이다.
 기존 상태 잠금이 있으면 설치기는 해당 파일을 사용한다.
 설치 대상은 현재 등록 목록으로 정하므로 기존 상태 잠금에 없던 새 항목도 일반 업데이트에 포함된다.
+
+일반 설치와 갱신에서 설치기는 등록한 채널의 외부 스킬 원본을 조회한다.
+매핑한 파일을 모두 검증하면 새 커밋과 파일로 캐시를 원자적으로 교체한다.
+외부 원본 조회, 다운로드 또는 검증에 실패하면 이전 캐시를 보존한다.
+
 인증, 계정, 세션, 프로젝트 신뢰와 앱이 생성한 런타임은 기존 Codex 프로필에 남는다.
 등록된 MCP의 인증 변수는 해당 PC에서 제공한다.
 설치와 설정 검사 성공은 외부 서비스 인증 완료를 뜻하지 않는다.
@@ -113,6 +121,7 @@ flowchart LR
     R[해당 PC의 기존 Codex 런타임] --> I
     I --> C[해당 PC의 Harness]
     I --> P[영속 도구·잠금·공식 스킬 원본]
+    I --> E["외부 스킬 캐시 · external-skills.json"]
     I --> D[실행 소스 삭제]
 ```
 

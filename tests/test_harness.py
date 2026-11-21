@@ -192,18 +192,21 @@ class FakeRepository:
             "agent-desktop": self.repo / "fake-bin" / "agent-desktop.cmd",
         }
         self.skills = [
-            {"name": "create-readme", "path": "skills/writing/create-readme"},
-            {"name": "development-environment", "path": "skills/engineering/development-environment"},
-            {"name": "repository-artifacts", "path": "skills/engineering/repository-artifacts"},
-            {"name": "openspec-workflow", "path": "skills/engineering/openspec-workflow", "requires": "openspec"},
-            {"name": "korean-typography", "path": "skills/design/korean-typography"},
+            {"name": "create-readme", "path": "skills/custom/create-readme", "role": "custom"},
+            {"name": "development-environment", "path": "skills/custom/development-environment", "role": "custom"},
+            {"name": "repository-artifacts", "path": "skills/custom/repository-artifacts", "role": "custom"},
+            {"name": "openspec-workflow", "path": "skills/adapters/openspec-workflow", "role": "adapter",
+             "adapts": "openspec", "requires": "openspec"},
+            {"name": "korean-typography", "path": "skills/custom/korean-typography", "role": "custom"},
             {"name": "feature-sliced-design", "path": "dependencies/skills/feature-sliced-design",
              "upstream": "https://github.com/feature-sliced/skills"},
-            {"name": "ste-ko", "path": "skills/writing/ste-ko", "upstream": "https://github.com/beamonic/ste-ko"},
+            {"name": "ste-ko", "path": "skills/adapters/ste-ko", "role": "adapter", "adapts": "beamonic/ste-ko"},
             {"name": "humanize-korean", "path": "dependencies/skills/humanize-korean",
              "upstream": "https://github.com/epoko77-ai/im-not-ai"},
-            {"name": "humanize-windows-runtime", "path": "skills/writing/humanize-windows-runtime"},
-            {"name": "taste-windows-runtime", "path": "skills/design/taste-windows-runtime"},
+            {"name": "humanize-windows-runtime", "path": "skills/adapters/humanize-windows-runtime", "role": "adapter",
+             "adapts": "humanize-korean"},
+            {"name": "taste-windows-runtime", "path": "skills/adapters/taste-windows-runtime", "role": "adapter",
+             "adapts": "taste-skill"},
         ]
         self.skill_sources = {item["name"]: self.repo / item["path"] for item in self.skills}
         self.skill_files = {
@@ -1141,19 +1144,26 @@ url = "https://public.example.test/mcp"
 class BuildPlanTests(TemporaryHarnessTestCase):
     def test_packaged_standalone_registry_contains_the_repository_skills(self):
         registry = harness.load_registry(harness.REPO / "registry.toml")
-        self.assertCountEqual(registry.skills, self.fixture.skills)
+        expected = {skill["name"]: skill for skill in self.fixture.skills}
+        self.assertCountEqual([skill["name"] for skill in registry.skills], expected.keys())
         for skill in registry.skills:
             with self.subTest(skill=skill["name"]):
-                self.assertTrue((harness.REPO / skill["path"] / "SKILL.md").is_file())
+                if skill["role"] == "upstream":
+                    self.assertNotIn("path", skill)
+                    self.assertIn("source", skill)
+                else:
+                    local = {key: value for key, value in skill.items() if key not in ("source", "channel", "files")}
+                    self.assertEqual(local, expected[skill["name"]])
+                    self.assertTrue((harness.REPO / skill["path"] / "SKILL.md").is_file())
 
     def test_newly_registered_skill_plans_all_files_under_its_flat_name(self):
         name = "fixture-review"
-        relative = f"skills/writing/{name}"
-        self.fixture.write_registry(f'[[skills]]\nname = "{name}"\npath = "{relative}"\n')
+        relative = f"skills/custom/{name}"
+        self.fixture.write_registry(f'[[skills]]\nname = "{name}"\npath = "{relative}"\nrole = "custom"\n')
         files = {"SKILL.md": b"# Fixture review\n", "references/examples/payload.bin": b"\x00\xff\r\n"}
         for filename, payload in files.items():
             write_file(self.fixture.repo / relative / filename, payload)
-        write_file(self.fixture.repo / "skills/writing/unregistered/SKILL.md", b"# Unregistered\n")
+        write_file(self.fixture.repo / "skills/custom/unregistered/SKILL.md", b"# Unregistered\n")
 
         before = tree_snapshot(self.root)
         plan = self.build()

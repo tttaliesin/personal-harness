@@ -8,7 +8,7 @@ Provide consistent guidance for drafting Korean development documents and preser
 
 ### Requirement: STE-KO for Korean development documents
 
-The harness SHALL deploy the STE-KO document guidance and pinned references on both Windows profiles.
+The harness SHALL deploy the local STE-KO document adapter together with its declared upstream references on both Windows profiles.
 It SHALL select the document guidance for Korean development documents and honor the repository's established document rules.
 
 #### Scenario: Author a Korean procedure
@@ -23,7 +23,8 @@ It SHALL select the document guidance for Korean development documents and honor
 
 ### Requirement: Optional meaning-preserving polishing
 
-The harness SHALL make the pinned Codex `humanize-korean` skill available for autonomous selection when a Korean development document needs polishing.
+The harness SHALL make the upstream Codex `humanize-korean` skill available for autonomous selection when a Korean development document needs polishing.
+The deployment SHALL include the entrypoint, references, and runtime scripts.
 It SHALL exclude STE80 from this workflow and keep editor artefacts local.
 
 #### Scenario: Polish a draft that needs editing

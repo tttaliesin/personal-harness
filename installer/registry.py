@@ -11,6 +11,11 @@ import urllib.parse
 
 import tomlkit
 
+if __package__:
+    from .upstream_skill_sources import validate_skill_file_path
+else:
+    from upstream_skill_sources import validate_skill_file_path
+
 
 @dataclass(frozen=True)
 class Registry:
@@ -110,17 +115,73 @@ def normalize_plugin(spec: Mapping) -> dict:
 
 
 def normalize_skill(spec: Mapping) -> dict:
-    _fields(spec, {"name", "path", "upstream", "requires"}, {"name", "path"}, "skill")
+    remote_fields = {"source", "channel", "files"}
+    _fields(spec, {"name", "path", "role", "adapts", "upstream", "requires"} | remote_fields, {"name"}, "skill")
     name = _name(spec["name"], "skill name")
-    path = spec["path"]
-    if not isinstance(path, str):
-        raise ValueError("Invalid skill path")
-    parts = tuple(_name(part, "skill path component") for part in path.split("/"))
-    local = len(parts) >= 2 and parts[0] == "skills"
-    imported = len(parts) >= 3 and parts[:2] == ("dependencies", "skills")
-    if parts[-1] != name or not (local or imported) or (imported and "upstream" not in spec):
-        raise ValueError("Invalid skill path or missing upstream source")
-    normalized = {"name": name, "path": path}
+    normalized = {"name": name}
+    role = spec.get("role")
+    role_paths = {
+        "custom": ("skills", "custom"),
+        "adapter": ("skills", "adapters"),
+        "upstream": ("dependencies", "skills"),
+    }
+    if "role" in spec:
+        if not isinstance(role, str) or role not in role_paths:
+            raise ValueError("Invalid skill role")
+        normalized["role"] = role
+    remote = bool(remote_fields & spec.keys())
+    if "path" in spec:
+        path = spec["path"]
+        if not isinstance(path, str):
+            raise ValueError("Invalid skill path")
+        parts = tuple(_name(part, "skill path component") for part in path.split("/"))
+        local = len(parts) >= 2 and parts[0] == "skills"
+        imported = len(parts) >= 3 and parts[:2] == ("dependencies", "skills")
+        if parts[-1] != name or not (local or imported) or (imported and "upstream" not in spec):
+            raise ValueError("Invalid skill path or missing upstream source")
+        if role and role_paths[role] != parts[:-1]:
+            raise ValueError("Skill role does not match its source path")
+        normalized["path"] = path
+    if role == "upstream" and remote:
+        if "path" in spec:
+            raise ValueError("An external upstream skill uses source instead of a local path")
+    elif "path" not in spec:
+        raise ValueError("Missing skill path")
+    if role == "adapter":
+        adapts = spec.get("adapts")
+        if not isinstance(adapts, str) or adapts.count("/") > 1:
+            raise ValueError("Adapter skill must declare adapts as a component name or owner/repository")
+        normalized["adapts"] = "/".join(_name(part, "adapted component") for part in adapts.split("/"))
+    elif "adapts" in spec:
+        raise ValueError("Only an adapter skill can declare adapts")
+
+    if remote:
+        if role not in ("upstream", "adapter") or not remote_fields <= spec.keys() or "upstream" in spec:
+            raise ValueError("External skill sources require role, source, channel and files")
+        source = _url(spec["source"], "skill source", git=True)
+        url = urllib.parse.urlsplit(source)
+        repo = url.path.strip("/").removesuffix(".git").split("/")
+        if url.netloc != "github.com" or len(repo) != 2:
+            raise ValueError("External skill source must be a GitHub repository")
+        for component in repo:
+            _name(component, "skill source repository")
+        channel = spec["channel"]
+        if channel not in ("default-branch", "latest-release"):
+            raise ValueError("Invalid external skill channel")
+        files = spec["files"]
+        if not isinstance(files, Mapping) or not files:
+            raise ValueError("External skill source must map at least one file or directory")
+        destinations = {}
+        for destination, upstream in files.items():
+            if destination != ".":
+                validate_skill_file_path(destination)
+            if role == "adapter" and (destination == "." or destination.casefold() == "skill.md"):
+                raise ValueError("An external reference cannot provide an adapter's SKILL.md")
+            destinations[destination] = validate_skill_file_path(upstream)
+        if len({path.casefold() for path in destinations}) != len(destinations):
+            raise ValueError("Duplicate external skill destination")
+        normalized.update(source=source, channel=channel, files=destinations)
+
     if "upstream" in spec:
         normalized["upstream"] = _url(spec["upstream"], "skill upstream")
     if "requires" in spec:

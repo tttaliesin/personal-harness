@@ -22,7 +22,10 @@ import urllib.request
 import tomlkit
 from harness import (
     REPO, HarnessError, atomic_write, official_source_files, read_toml, require_supported_host, safe_file, select_layout,
+    skill_files,
 )
+from external_skills import CACHE_NAME as EXTERNAL_SKILL_CACHE, encode_cache, load_cache
+from upstream_skill_sources import fetch_skill
 import mcp_packages
 from registry import Registry, declaration_hash, load_registry, lock_issues
 
@@ -594,7 +597,8 @@ def main(argv=None) -> int:
         if not config.is_relative_to(local):
             raise HarnessError("Dependency installer local-config must be inside the selected state root (.local by default)")
         seed = lock_path if lock_path.exists() else layout.seed_lock
-        result = resolve(json.loads(seed.read_text(encoding="utf-8")), locked=args.locked)
+        registry = load_registry(REPO / "registry.toml")
+        result = resolve(json.loads(seed.read_text(encoding="utf-8")), locked=args.locked, registry=registry)
         lock = result.lock
         if "openspec" in lock:
             validate_openspec(lock["openspec"])
@@ -602,6 +606,23 @@ def main(argv=None) -> int:
             mcp_packages.preflight(record)
         if layout.persistent:
             official_source_files(lock)
+        external_specs = tuple(spec for spec in registry.skills if "source" in spec
+                               and ("requires" not in spec or spec["requires"] in lock))
+        cache_path = local / EXTERNAL_SKILL_CACHE
+        external = {}
+        if external_specs:
+            safe_file(cache_path, local)
+            if args.locked:
+                external = load_cache(cache_path, external_specs)
+            else:
+                for spec in external_specs:
+                    try:
+                        external[spec["name"]] = fetch_skill(spec, fetch=fetch, github=github, release=release)
+                    except OSError:
+                        raise HarnessError(f"Cannot download upstream source for {spec['name']}") from None
+            for spec in external_specs:
+                skill_files(REPO, spec, external[spec["name"]][1])
+
         codex_home = args.codex_home.resolve()
         codex = find_codex(args.codex, codex_home)
         print(f"Agent desktop {lock['agent_desktop']['version']} -> {local / 'tools/agent-desktop'} (SHA256 verified on install)")
@@ -614,6 +635,8 @@ def main(argv=None) -> int:
             print(f"{item['name']}@{item['marketplace']} version {item['version']}: {item['source']} ref {item['ref']}")
         for item in lock.get("mcp", []):
             print(f"MCP {item['name']} ({item['kind']})")
+        for name, (revision, _) in external.items():
+            print(f"External skill {name} ({revision})")
         print(f"Codex CLI: {codex or '(specify --codex)'}\nCodex home: {codex_home}\nLocal paths: {config}")
         if not args.install:
             print("Preview only. Pass -Install to install dependencies. No files were written.")
@@ -639,6 +662,8 @@ def main(argv=None) -> int:
             sync_sources(result, REPO)
         save_paths(config, agent, codegraph, openspec)
         atomic_write(lock_path, (json.dumps(lock, indent=2) + "\n").encode("utf-8"))
+        if external_specs and not args.locked:
+            atomic_write(cache_path, encode_cache(external_specs, external))
         print(f"Dependencies installed and lock saved. Run harness.ps1 apply/check -HostName {host}.")
         return 0
     except (HarnessError, OSError, ValueError, KeyError, tarfile.TarError, subprocess.CalledProcessError, tomlkit.exceptions.TOMLKitError) as exc:

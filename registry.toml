@@ -1,49 +1,92 @@
 schema_version = 1
 
-# Standalone skill source paths are relative to the repository.
-[[skills]]
-name = "development-environment"
-path = "skills/engineering/development-environment"
-
-[[skills]]
-name = "openspec-workflow"
-path = "skills/engineering/openspec-workflow"
-requires = "openspec"
-
-[[skills]]
-name = "repository-artifacts"
-path = "skills/engineering/repository-artifacts"
-
+# Independent skills maintained in this repository.
 [[skills]]
 name = "create-readme"
-path = "skills/writing/create-readme"
+role = "custom"
+path = "skills/custom/create-readme"
 
 [[skills]]
-name = "ste-ko"
-path = "skills/writing/ste-ko"
-upstream = "https://github.com/beamonic/ste-ko"
-
-[[skills]]
-name = "humanize-windows-runtime"
-path = "skills/writing/humanize-windows-runtime"
+name = "development-environment"
+role = "custom"
+path = "skills/custom/development-environment"
 
 [[skills]]
 name = "korean-typography"
-path = "skills/design/korean-typography"
+role = "custom"
+path = "skills/custom/korean-typography"
+
+[[skills]]
+name = "repository-artifacts"
+role = "custom"
+path = "skills/custom/repository-artifacts"
+
+# Local adapters for external tools and specifications.
+[[skills]]
+name = "humanize-windows-runtime"
+role = "adapter"
+path = "skills/adapters/humanize-windows-runtime"
+adapts = "humanize-korean"
+
+[[skills]]
+name = "openspec-workflow"
+role = "adapter"
+path = "skills/adapters/openspec-workflow"
+adapts = "openspec"
+requires = "openspec"
+
+[[skills]]
+name = "ste-ko"
+role = "adapter"
+path = "skills/adapters/ste-ko"
+adapts = "beamonic/ste-ko"
+source = "https://github.com/beamonic/ste-ko.git"
+channel = "default-branch"
+
+[skills.files]
+"LICENSE" = "LICENSE"
+"references/README.md" = "README.md"
+"references/SPEC.md" = "SPEC.md"
+"references/benchmarks" = "benchmarks"
+"references/dictionary.md" = "dictionary.md"
+"references/tasks.md" = "tasks.md"
 
 [[skills]]
 name = "taste-windows-runtime"
-path = "skills/design/taste-windows-runtime"
+role = "adapter"
+path = "skills/adapters/taste-windows-runtime"
+adapts = "taste-skill"
 
+# Upstream skills fetched during install and update.
 [[skills]]
 name = "feature-sliced-design"
-path = "dependencies/skills/feature-sliced-design"
-upstream = "https://github.com/feature-sliced/skills"
+role = "upstream"
+source = "https://github.com/feature-sliced/skills.git"
+channel = "default-branch"
+files = { "." = "feature-sliced-design" }
 
 [[skills]]
 name = "humanize-korean"
-path = "dependencies/skills/humanize-korean"
-upstream = "https://github.com/epoko77-ai/im-not-ai"
+role = "upstream"
+source = "https://github.com/epoko77-ai/im-not-ai.git"
+channel = "latest-release"
+
+# Codex copy-install layout, with the original references and runtime scripts.
+[skills.files]
+"LICENSE" = "LICENSE"
+"SKILL.md" = "codex/skills/humanize-korean/SKILL.md"
+"agents" = "codex/skills/humanize-korean/agents"
+"references" = "skills/humanize-korean/references"
+"scripts/checks.py" = "scripts/checks.py"
+"scripts/console.py" = "scripts/console.py"
+"scripts/lexical_layer.py" = "scripts/lexical_layer.py"
+"scripts/prepare_monolith_input.py" = "scripts/prepare_monolith_input.py"
+"scripts/reassemble_chunks.py" = "scripts/reassemble_chunks.py"
+"scripts/restore_modality.py" = "scripts/restore_modality.py"
+"scripts/sanitize_text.py" = "scripts/sanitize_text.py"
+"scripts/strip_injected_commas.py" = "scripts/strip_injected_commas.py"
+"scripts/verify_change_rate.py" = "scripts/verify_change_rate.py"
+"scripts/verify_gates.py" = "scripts/verify_gates.py"
 
 [[mcp]]
 name = "microsoft-learn"

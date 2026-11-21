@@ -1,6 +1,6 @@
 # Imported user harness sources
 
-`common/AGENTS.md` and `skills/writing/create-readme/SKILL.md` came from the user's Roylabs Codex profile on 2026-11-12.
+`common/AGENTS.md` and `skills/custom/create-readme/SKILL.md` came from the user's Roylabs Codex profile on 2026-11-12.
 The one absolute Codex home path in `AGENTS.md` was replaced with `${CODEX_HOME}`.
 The original SHA256 values and imported skill hashes are recorded in [roylabs-2026-11-12.json](roylabs-2026-11-12.json).
 
@@ -46,33 +46,37 @@ The harness does not add project SDK declarations or change target frameworks, g
 Package metadata is reference material and does not supersede repository or user constraints.
 See the [official NuGet MCP documentation](https://learn.microsoft.com/en-us/nuget/concepts/nuget-mcp-server).
 
-`dependencies/skills/feature-sliced-design` contains the complete, unmodified skill directory from [feature-sliced/skills](https://github.com/feature-sliced/skills).
-The [official FSD documentation](https://fsd.how/docs/llms/) identifies it as an official community-driven skill and links its installation source.
-The exact source commit and every imported file hash are recorded in [feature-sliced-skill.json](feature-sliced-skill.json).
-The upstream [README](feature-sliced-skills-README.md), including its MIT license declaration, is preserved separately.
-The full skill, references and evals are deployable source data; no upstream files are patched.
-The methodology version 2.1 is not a package release number.
+## External standalone skills and references
+
+The registry declares the upstream repositories, update channels, and file mappings. [registry.toml](../registry.toml)
+Ordinary installation and update select a commit for each source and validate the mapped files.
+The installer atomically stores the selected commits and verified files in the local `external-skills.json` cache.
+The upstream repositories carry their MIT license notices.
+
+`feature-sliced-design` installs the original skill directory, including its references and evals, from the default branch. [feature-sliced/skills](https://github.com/feature-sliced/skills)
+The official FSD documentation identifies it as a community-driven skill and links its installation source. [FSD documentation](https://fsd.how/docs/llms/)
+The skill follows FSD methodology version 2.1.
 Autonomous selection is limited to repositories already adopting FSD by `common/AGENTS.md`.
 Steiger and ArchUnitNET remain per-repository tools rather than global harness dependencies.
 
-`skills/writing/ste-ko` is a document-scoped adapter for [beamonic/ste-ko](https://github.com/beamonic/ste-ko).
-It carries the original specification, dictionary, task reference, and supporting documentation under the upstream MIT license.
-The adapter selects STE-KO's document rules for Korean development documents.
-`dependencies/skills/humanize-korean` contains the original Codex entrypoint and the complete portable copy-install payload from [epoko77-ai/im-not-ai](https://github.com/epoko77-ai/im-not-ai).
-The installer resolves the upstream reference link and script launchers by copying the referenced files from the pinned commit.
-Both MIT licenses, exact upstream revisions, and file hashes are recorded with the [Korean writing sources](korean-development-writing.json).
+`skills/adapters/ste-ko` contains the harness's document-scoped `SKILL.md`.
+The installer adds the declared STE-KO references and license from the default branch. [beamonic/ste-ko](https://github.com/beamonic/ste-ko)
+
+`humanize-korean` installs the original Codex entrypoint, references, runtime scripts, and license from the latest stable GitHub release. [epoko77-ai/im-not-ai](https://github.com/epoko77-ai/im-not-ai)
 The common routing selects the Korean editor when a draft needs polishing and compares changed clauses with the original.
-`skills/writing/humanize-windows-runtime` supplies repository-authored Windows preparation for the upstream package.
+`skills/adapters/humanize-windows-runtime` supplies repository-authored Windows preparation for the upstream package.
 It allocates a shared run path and passes it to the original script.
 
-`skills/engineering/openspec-workflow` is a Personal Harness adapter authored in this repository.
+## Maintained local skills and adapters
+
+`skills/adapters/openspec-workflow` is a Personal Harness adapter authored in this repository.
 It uses the official OpenSpec CLI's schema and instructions instead of distributing modified upstream workflow skills.
 The initial adapter was checked against `@fission-ai/openspec` 2.0.0 and the [official CLI reference](https://github.com/Fission-AI/OpenSpec/blob/main/docs/cli.md).
-`skills/design/korean-typography` is authored in this repository for Korean web typography.
+`skills/custom/korean-typography` is authored in this repository for Korean web typography.
 Its references link to original font publishers and W3C layout/CSS guidance.
 It distributes no font binaries and does not modify Taste Skill or other upstream packages.
 
-`skills/engineering/development-environment` and `skills/engineering/repository-artifacts` are authored in this repository.
+`skills/custom/development-environment` and `skills/custom/repository-artifacts` are authored in this repository.
 They provide task-based development environment and artifact disposition guidance while deferring to adopted repository governance.
 They contain no third-party binaries, runtime installers, hooks, or changes to repo-governance.
 pstack and EGM were removed from managed dependencies on 2026-11-16.
@@ -80,6 +84,6 @@ The original pstack import used the upstream tag for Roylabs' installed version 
 
 ## Windows Taste 실행 호환
 
-`skills/design/taste-windows-runtime`은 이 저장소에서 작성한 실행 어댑터다.
+`skills/adapters/taste-windows-runtime`은 이 저장소에서 작성한 실행 어댑터다.
 원본 Taste 플러그인을 포함하거나 패치하지 않는다.
 선택한 브라우저와 Node 실행 옵션은 검사 자식 프로세스에만 전달한다.

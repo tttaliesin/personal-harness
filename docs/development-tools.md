@@ -141,10 +141,11 @@ React나 일반 프런트엔드 작업, `pages`·`shared`·`features` 폴더 이
 기존 FSD 버전·예외·프레임워크·라우팅·SSR·API·배포 규칙과 repo-governance를 우선한다.
 스킬 사용만으로 FSD 도입·전환·기존 레이어 제거를 시작하지 않는다.
 
-[FSD 공식 문서](https://fsd.how/docs/llms/)가 직접 안내하는 [feature-sliced/skills](https://github.com/feature-sliced/skills)의 원본을 사용한다.
-원본은 [dependencies/skills/feature-sliced-design/](../dependencies/skills/feature-sliced-design)에 둔다.
-정확한 커밋과 참조·평가 파일을 포함한 모든 파일의 해시는 [출처 기록](../dependencies/feature-sliced-skill.json)에 있다.
-원본을 고치지 않고 상위 사용자 지침에서 선택 범위를 제한한다.
+FSD 공식 문서가 안내하는 원본 스킬을 사용한다. [FSD 공식 문서](https://fsd.how/docs/llms/)
+일반 설치와 갱신은 등록한 기본 브랜치에서 스킬 디렉터리 전체를 가져온다. [feature-sliced/skills](https://github.com/feature-sliced/skills)
+선택한 커밋과 참조·평가 자료를 포함한 검증 파일은 PC의 `external-skills.json`에 보관한다.
+설치기는 원본 파일을 그대로 배치한다.
+공통 사용자 지침은 스킬을 선택하는 범위를 정한다.
 공식 배포 여부는 모델 답변 품질 인증과 구분한다.
 원본 CI는 형식·참조를 검사하며 의미적 답변 정확도는 별도 평가 대상이다.
 
@@ -185,10 +186,10 @@ Taste를 사용할 때도 기존 브랜드 서체와 프로젝트 토큰을 우�
 한글을 지원하는 서체를 선택하고 실제 렌더링된 글꼴과 혼합 문자열을 확인한다.
 Latin-only 폰트의 선언이나 다운로드 성공만으로 한글이 같은 서체로 표시됐다고 판단하지 않는다.
 
-후보 서체와 출처는 [서체 참조](../skills/design/korean-typography/references/fonts.md)에 있다.
+후보 서체와 출처는 [서체 참조](../skills/custom/korean-typography/references/fonts.md)에 있다.
 이 후보를 모두 로드하거나 모든 화면을 같은 서체로 통일할 필요는 없다.
 폰트는 필요한 프로젝트에서만 연결하며 OS 전체 서체를 설치하지 않는다.
-수치·줄바꿈·CSS 적용 예시는 [조판 패턴](../skills/design/korean-typography/references/patterns.md)에 있다.
+수치·줄바꿈·CSS 적용 예시는 [조판 패턴](../skills/custom/korean-typography/references/patterns.md)에 있다.
 
 이 지침은 일반 한국어 대화나 백엔드 작업의 필수 단계가 아니다.
 기존 스택과 repo-governance, Taste 원본은 보존한다.
@@ -196,7 +197,7 @@ Latin-only 폰트의 선언이나 다운로드 성공만으로 한글이 같은 
 
 ## Windows의 Taste 브라우저 검사
 
-Windows에서는 [taste-windows-runtime](../skills/design/taste-windows-runtime/SKILL.md)을 함께 선택한다.
+Windows에서는 [taste-windows-runtime](../skills/adapters/taste-windows-runtime/SKILL.md)을 함께 선택한다.
 기존 명령의 원본 스크립트와 인수를 이 스킬의 `scripts/run.mjs`에 전달한다.
 실행기는 검사 프로세스에만 설치된 브라우저 경로와 선택된 Edge의 headless 실행 플래그를 적용한다.
 원본 캐시와 페이지를 고치지 않으며 검사 결과와 종료 코드를 그대로 반환한다.
@@ -211,7 +212,7 @@ Windows에서는 [taste-windows-runtime](../skills/design/taste-windows-runtime/
 한 명령 설치에서는 `%LOCALAPPDATA%/PersonalHarness/state`를 사용한다.
 각 PC의 기존 경로 덮어쓰기는 보존한다.
 
-[openspec-workflow](../skills/engineering/openspec-workflow/SKILL.md)의 `requires`는 `registry.toml`의 `[[skills]]`에서 `openspec`으로 지정한다.
+[openspec-workflow](../skills/adapters/openspec-workflow/SKILL.md)의 `requires`는 `registry.toml`의 `[[skills]]`에서 `openspec`으로 지정한다.
 설치기는 잠금 파일에 `openspec`이 있으면 해당 스킬을 `~/.agents/skills/openspec-workflow/`에 복사한다.
 실제 CLI가 PATH 밖에 있으면 생성된 사용자 지침의 `Local tool executables`에 실행 경로를 기록한다.
 이 기록은 셸이나 실행 중인 Codex의 PATH를 바꾸지 않는다.

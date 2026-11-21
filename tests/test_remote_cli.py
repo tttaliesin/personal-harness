@@ -13,12 +13,34 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
+import tomlkit
+
 
 ROOT = Path(__file__).resolve().parents[1]
 NODE = shutil.which("node")
 POWERSHELL = shutil.which("powershell.exe")
 NPM = shutil.which("npm.cmd")
 WINDOWS = os.name == "nt" and NODE and POWERSHELL
+
+PRE_ROLE_SKILL_PATHS = {
+    "skills/custom/create-readme": "skills/writing/create-readme",
+    "skills/custom/development-environment": "skills/engineering/development-environment",
+    "skills/custom/korean-typography": "skills/design/korean-typography",
+    "skills/custom/repository-artifacts": "skills/engineering/repository-artifacts",
+    "skills/adapters/humanize-windows-runtime": "skills/writing/humanize-windows-runtime",
+    "skills/adapters/openspec-workflow": "skills/engineering/openspec-workflow",
+    "skills/adapters/ste-ko": "skills/writing/ste-ko",
+    "skills/adapters/taste-windows-runtime": "skills/design/taste-windows-runtime",
+}
+HISTORICAL_SKILL_FIXTURE = b"# Historical skill fixture\n"
+VENDORED_EXTERNAL_PREFIXES = (
+    "dependencies/skills/", "skills/feature-sliced-design/", "skills/humanize-korean/",
+    "skills/writing/ste-ko/", "skills/adapters/ste-ko/references/",
+)
+VENDORED_EXTERNAL_FILES = {
+    "dependencies/feature-sliced-skill.json", "dependencies/feature-sliced-skills-readme.md",
+    "dependencies/korean-development-writing.json", "skills/adapters/ste-ko/license",
+}
 
 PYTHON_STUB = r'''
 using System;
@@ -248,32 +270,55 @@ class RemoteCliTests(unittest.TestCase):
     def receipt(self, manager=None):
         return json.loads(((manager or self.manager) / "active.json").read_text(encoding="utf-8"))
 
-    def imported_skill_payload_files(self):
+    def standalone_skill_payload_files(self):
         files = set()
-        for relative in ("dependencies/skills/feature-sliced-design", "dependencies/skills/humanize-korean",
-                         "skills/writing/ste-ko", "skills/writing/humanize-windows-runtime"):
-            source = self.payload / relative
+        registry = tomlkit.parse((self.payload / "registry.toml").read_text(encoding="utf-8"))
+        for skill in registry["skills"]:
+            if "path" not in skill:
+                continue
+            source = self.payload / skill["path"]
             self.assertTrue((source / "SKILL.md").is_file())
             files.update(path.relative_to(self.payload).as_posix()
                          for path in source.rglob("*") if path.is_file())
         return files
 
+    def assert_no_vendored_external_skills(self, paths):
+        vendored = {path for path in paths if path.casefold() in VENDORED_EXTERNAL_FILES
+                    or path.casefold().startswith(VENDORED_EXTERNAL_PREFIXES)}
+        self.assertEqual(vendored, set())
+
     def legacy_source(self, change=None, pre_registry=True, *, scripts_layout=True):
         hashes = [call for call in self.calls() if call["kind"] == "wrapper"][-1]["hashes"]
         content = {name: (self.payload / name).read_bytes() for name in hashes}
         manifest = json.loads(content["package.json"])
+        registry = tomlkit.parse(content["registry.toml"].decode("utf-8"))
+        legacy_skill_paths = {}
+        for skill in registry["skills"]:
+            path = skill.get("path", f"dependencies/skills/{skill['name']}")
+            legacy_path = f"skills/{skill['name']}" if scripts_layout else PRE_ROLE_SKILL_PATHS.get(path, path)
+            legacy_skill_paths[path] = legacy_path
+            if "path" not in skill:
+                content[f"{path}/SKILL.md"] = HISTORICAL_SKILL_FIXTURE
+            if not pre_registry:
+                skill["path"] = legacy_path
+                if "source" in skill:
+                    skill["upstream"] = skill.pop("source").removesuffix(".git")
+                for field in ("role", "adapts", "channel", "files"):
+                    skill.pop(field, None)
+        if not pre_registry:
+            content["registry.toml"] = tomlkit.dumps(registry).encode("utf-8")
+        legacy_roots = {"installer": "scripts", "dependencies": "sources"} if scripts_layout else {}
+        legacy_content = {}
+        for name, data in content.items():
+            parts = name.split("/")
+            skill_path = legacy_skill_paths.get("/".join(parts[:3]))
+            if skill_path is not None:
+                legacy_name = "/".join([skill_path, *parts[3:]])
+            else:
+                legacy_name = "/".join([legacy_roots.get(parts[0], parts[0]), *parts[1:]])
+            legacy_content[legacy_name] = data
+        content = legacy_content
         if scripts_layout:
-            legacy_roots = {"installer": "scripts", "dependencies": "sources"}
-            legacy_content = {}
-            for name, data in content.items():
-                parts = name.split("/")
-                grouped_skill = parts[0] == "skills" and parts[1] in {"design", "engineering", "writing"}
-                if grouped_skill or parts[:2] == ["dependencies", "skills"]:
-                    legacy_name = "/".join(["skills", *parts[2:]])
-                else:
-                    legacy_name = "/".join([legacy_roots.get(parts[0], parts[0]), *parts[1:]])
-                legacy_content[legacy_name] = data
-            content = legacy_content
             content.pop("scripts/share.py", None)
             manifest["files"].remove("sources")
             manifest["files"] = [legacy_roots.get(name, name) for name in manifest["files"]]
@@ -345,10 +390,11 @@ class RemoteCliTests(unittest.TestCase):
                      "dependencies/dependencies.lock.json", "dependencies/NOTICE.md", "docs/local.example.toml"):
             with self.subTest(payload_file=name):
                 self.assertIn(name, wrapper["hashes"].keys())
-        for name in self.imported_skill_payload_files():
-            with self.subTest(imported_skill_file=name):
+        for name in self.standalone_skill_payload_files():
+            with self.subTest(skill_file=name):
                 self.assertEqual(wrapper["hashes"][name],
                                  hashlib.sha256((self.payload / name).read_bytes()).hexdigest())
+        self.assert_no_vendored_external_skills(wrapper["hashes"])
         for name in ("scripts/test.ps1", "installer/test.ps1", "AGENTS.md", "Taskfile.yml", "__pycache__"):
             self.assertNotIn(name, wrapper["hashes"])
 
@@ -719,8 +765,11 @@ class RemoteCliTests(unittest.TestCase):
             sentinels[target] = target.read_bytes()
         self.run_cli("update", expected=43, environment=dict(self.environment, HARNESS_FIXTURE_FAIL_STAGE="check"))
         self.assertEqual((self.manager / "active.json").read_bytes(), previous)
-        for release in releases:
-            self.assertEqual({name: (release / name).read_bytes() for name in official}, expected)
+        for release, prefix in zip(releases, ("skills", "skills", "dependencies/skills"), strict=True):
+            source = Path("\\\\?\\" + str(release))
+            self.assertEqual({name: (source / name).read_bytes() for name in official}, expected)
+            for name in ("feature-sliced-design", "humanize-korean"):
+                self.assertEqual((source / prefix / name / "SKILL.md").read_bytes(), HISTORICAL_SKILL_FIXTURE)
         self.run_cli("update")
         for release in releases:
             self.assertFalse(release.exists(), release)
@@ -1164,13 +1213,15 @@ class RemoteCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         package = json.loads(result.stdout)[0]
         files = {item["path"] for item in package["files"]}
-        self.assertTrue(self.imported_skill_payload_files().issubset(files))
+        self.assertEqual(self.standalone_skill_payload_files() - files, set())
+        self.assert_no_vendored_external_skills(files)
         lock = json.loads((self.payload / "dependencies/dependencies.lock.json").read_bytes())
         self.assertEqual(set(lock["agent_desktop"]["files_sha256"]) - files, set())
         for name in ("skills/agent-desktop/references/commands-system.md", "skills/agent-desktop-windows/references/troubleshooting.md",
                      "sources/agent-desktop-LICENSE", "dependencies/NOTICE.md", "dependencies/dependencies.lock.json",
                      "docs/deployment.md", "docs/local.example.toml", "installer/bootstrap.ps1", "registry.toml",
-                     "installer/registry.py", "installer/mcp_packages.py", "installer/windows_paths.py", "installer/share.py"):
+                     "installer/registry.py", "installer/mcp_packages.py", "installer/windows_paths.py", "installer/share.py",
+                     "installer/external_skills.py", "installer/upstream_skill_sources.py"):
             self.assertIn(name, files)
         self.assertFalse(any(name.startswith(("docs/history/", "hosts/", "scripts/")) for name in files))
         self.assertEqual({name for name in files if name.startswith("sources/")}, {"sources/agent-desktop-LICENSE"})

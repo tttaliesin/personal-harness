@@ -26,6 +26,11 @@ class RegistryTests(unittest.TestCase):
                 "source": "https://github.com/example/plugins.git", "channel": "latest-release",
                 "manifest": "plugins/example/.codex-plugin/plugin.json", **changes}
 
+    def upstream_skill(self, **changes):
+        return {"name": "example", "role": "upstream", "source": "https://github.com/owner/project.git",
+                "channel": "default-branch", "files": {"SKILL.md": "example/SKILL.md", "references": "docs"},
+                **changes}
+
     def load(self, **changes):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "registry.toml"
@@ -73,6 +78,104 @@ class RegistryTests(unittest.TestCase):
             with patch.object(installer, "REPO", Path(directory)):
                 with self.assertRaises(FileNotFoundError):
                     installer.resolve({"schema_version": 1}, locked=True)
+
+    def test_adapter_retains_target_dependency_and_optional_upstream(self):
+        adapter = {"name": "example", "path": "skills/adapters/example", "role": "adapter",
+                   "requires": "example-cli", "upstream": "https://github.com/owner/project"}
+        for target in ("example-cli", "owner/project"):
+            with self.subTest(target=target):
+                entry = {**adapter, "adapts": target}
+                self.assertEqual(self.load(skills=[entry]).skills, (entry,))
+
+    def test_local_and_legacy_skill_roles_require_exact_source_paths(self):
+        upstream = "https://github.com/owner/project"
+        for role, directory, fields in (
+            ("custom", "skills/custom", {}),
+            ("adapter", "skills/adapters", {"adapts": "example-cli"}),
+            ("upstream", "dependencies/skills", {"upstream": upstream}),
+        ):
+            entry = {"name": "example", "role": role, "path": f"{directory}/example", **fields}
+            with self.subTest(role=role):
+                self.assertEqual(self.load(skills=[entry]).skills, (entry,))
+            wrong_directory = "skills/adapters" if role == "custom" else "skills/custom"
+            for path in (f"{directory}/group/example", f"{wrong_directory}/example"):
+                with self.subTest(role=role, path=path), self.assertRaisesRegex(ValueError, "role"):
+                    self.load(skills=[{**entry, "path": path}])
+        with self.assertRaisesRegex(ValueError, "upstream"):
+            self.load(skills=[{"name": "example", "path": "dependencies/skills/example", "role": "upstream"}])
+
+    def test_skill_adapts_is_required_and_valid_only_for_adapters(self):
+        adapter = {"name": "example", "path": "skills/adapters/example", "role": "adapter"}
+        with self.assertRaisesRegex(ValueError, "adapts"):
+            self.load(skills=[adapter])
+        for target in ("", 123, "owner/", "owner//project", "owner/project/component", "../project"):
+            with self.subTest(target=target), self.assertRaises(ValueError):
+                self.load(skills=[{**adapter, "adapts": target}])
+        for entry in (
+            {"path": "skills/custom/example", "role": "custom"},
+            {"path": "dependencies/skills/example", "role": "upstream", "upstream": "https://github.com/owner/project"},
+            {"path": "skills/writing/example"},
+        ):
+            with self.subTest(entry=entry), self.assertRaisesRegex(ValueError, "adapts"):
+                self.load(skills=[{"name": "example", "adapts": "example-cli", **entry}])
+
+    def test_legacy_skill_schema_keeps_roleless_paths_and_metadata(self):
+        skills = [
+            {"name": "create-readme", "path": "skills/create-readme"},
+            {"name": "feature-sliced-design", "path": "dependencies/skills/feature-sliced-design",
+             "upstream": "https://github.com/feature-sliced/skills"},
+            {"name": "openspec-workflow", "path": "skills/engineering/openspec-workflow", "requires": "openspec"},
+            {"name": "ste-ko", "path": "skills/writing/ste-ko", "upstream": "https://github.com/beamonic/ste-ko"},
+        ]
+        self.assertEqual(self.load(skills=skills).skills, tuple(skills))
+
+    def test_upstream_skill_accepts_branch_and_release_declarations_without_a_local_path(self):
+        for channel, files in (
+            ("default-branch", {".": "example"}),
+            ("latest-release", {"SKILL.md": "example/SKILL.md", "references/usage.md": "docs/usage.md"}),
+        ):
+            with self.subTest(channel=channel):
+                entry = self.upstream_skill(channel=channel, files=files)
+                self.assertEqual(self.load(skills=[entry]).skills, (entry,))
+
+    def test_upstream_skill_requires_complete_github_declaration(self):
+        for missing in ("source", "channel", "files"):
+            entry = self.upstream_skill()
+            del entry[missing]
+            with self.subTest(missing=missing), self.assertRaises(ValueError):
+                self.load(skills=[entry])
+
+        for changes in (
+            {"source": "http://github.com/owner/project"},
+            {"source": "https://git.example.test/owner/project"},
+            {"source": "https://github.com/owner/project/tree/main"},
+            {"channel": "git-ref"},
+            {"files": {}},
+            {"files": ["example/SKILL.md"]},
+            {"path": "dependencies/skills/example", "upstream": "https://github.com/owner/project"},
+            {"role": "custom", "path": "skills/custom/example"},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.load(skills=[self.upstream_skill(**changes)])
+
+    def test_upstream_skill_rejects_unsafe_mapping_paths(self):
+        for path in ("../outside", "/absolute", "C:/absolute", "dir\\windows", "dir/../file", "dir//file"):
+            for files in ({path: "example/SKILL.md"}, {"SKILL.md": path}):
+                with self.subTest(files=files), self.assertRaises(ValueError):
+                    self.load(skills=[self.upstream_skill(files=files)])
+
+    def test_adapter_can_overlay_a_remote_license_and_references(self):
+        entry = self.upstream_skill(role="adapter", path="skills/adapters/example", adapts="owner/project",
+                                    files={"LICENSE": "LICENSE", "references/spec.md": "docs/spec.md"})
+        self.assertEqual(self.load(skills=[entry]).skills, (entry,))
+        for missing in ("path", "adapts"):
+            incomplete = entry.copy()
+            del incomplete[missing]
+            with self.subTest(missing=missing), self.assertRaises(ValueError):
+                self.load(skills=[incomplete])
+        for destination in ("SKILL.md", "."):
+            with self.subTest(destination=destination), self.assertRaises(ValueError):
+                self.load(skills=[{**entry, "files": {destination: "remote"}}])
 
     def test_rejects_unknown_fields_duplicates_and_unsafe_plugin_paths(self):
         for data in ({"schema_version": 9}, {"auth": "secret"}, {"plugins": {}},
