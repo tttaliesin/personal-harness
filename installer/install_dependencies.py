@@ -593,6 +593,7 @@ def main(argv=None) -> int:
         layout = select_layout(REPO, args.state_root)
         lock_path = layout.lock
         local = layout.local
+        safe_file(lock_path, local)
         config = (args.local_config or local / f"{host}.toml").resolve()
         if not config.is_relative_to(local):
             raise HarnessError("Dependency installer local-config must be inside the selected state root (.local by default)")
@@ -649,7 +650,6 @@ def main(argv=None) -> int:
         if "openspec" in lock:
             check_openspec_node(shutil.which("node"))
         safe_file(config, local)
-        safe_file(lock_path, local if layout.persistent else REPO)
         agent = install_agent(lock["agent_desktop"], local, result.archive)
         codegraph = install_codegraph(lock["codegraph"], local, npm)
         openspec = install_openspec(lock["openspec"], local, npm) if "openspec" in lock else None

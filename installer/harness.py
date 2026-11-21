@@ -22,7 +22,7 @@ except ImportError:
     raise SystemExit("Install the repository requirements first: python -m pip install -r requirements.txt")
 
 from registry import load_registry, lock_issues
-from external_skills import CACHE_NAME as EXTERNAL_SKILL_CACHE, load_cache
+from external_skills import CACHE_NAME as EXTERNAL_SKILL_CACHE, load_available_cache
 import mcp_packages
 from windows_paths import io_path
 
@@ -60,7 +60,7 @@ def select_layout(repo: Path, state_root: Path | None = None) -> Layout:
             if adjacent.is_file():
                 seed = adjacent
                 break
-    return Layout(local, local / "sources/dependencies.lock.json" if persistent else seed,
+    return Layout(local, local / "sources/dependencies.lock.json",
                   seed, local if persistent else repo, local / "source-backups", persistent)
 
 
@@ -212,6 +212,7 @@ class Plan:
     missing: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     settings: list[str] = field(default_factory=list)
+    deferred: list[str] = field(default_factory=list)
 
     def add(self, target: Path, data: bytes | None, root: Path):
         safe_file(target, root)
@@ -400,7 +401,11 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
         raise HarnessError('Registered plugin selections belong in registry.toml, not common/config.toml')
     if {item['name'] for item in registry.mcp}.intersection(common.get('mcp_servers', {})):
         raise HarnessError('Registered MCP settings belong in registry.toml, not common/config.toml')
-    lock = json.loads(layout.lock.read_text(encoding='utf-8')) if layout.lock.exists() else {}
+    lock_path = layout.lock
+    safe_file(lock_path, layout.local)
+    if not layout.persistent and not lock_path.exists():
+        lock_path = layout.seed_lock
+    lock = json.loads(lock_path.read_text(encoding="utf-8")) if lock_path.exists() else {}
     config_path = codex_home / "config.toml"
     original = config_path.read_text(encoding="utf-8-sig") if config_path.exists() else ""
     old = tomlkit.parse(original)
@@ -438,7 +443,6 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     openspec = tool_path("openspec", paths) if "openspec" in lock else None
     if "openspec" in lock and not openspec:
         plan.missing.append("openspec CLI: run installer/install-dependencies.ps1 or set [paths].openspec locally")
-    lock_path = layout.lock
     official_ready = not layout.persistent
     if lock_path.exists():
         if layout.persistent:
@@ -453,8 +457,6 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
                 plan.missing.append(f"Pinned plugin version is missing: {item['name']}@{item['version']}; run installer/install-dependencies.ps1")
     elif layout.persistent:
         plan.missing.append(f"Persistent dependency lock is missing: {lock_path}; run installer/install-dependencies.ps1")
-    if not old.get("model_catalog_json"):
-        plan.notes.append("No local model catalog configured; verify gpt-6.1-sol/max availability with your provider")
     rendered = tomlkit.dumps(merged)
     tomlkit.parse(rendered)
     plan.settings = changed_settings(old, merged, common)
@@ -483,11 +485,12 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     cached = {}
     if external_specs:
         cache_path = layout.local / EXTERNAL_SKILL_CACHE
-        safe_file(cache_path, layout.local)
         try:
-            cached = load_cache(cache_path, external_specs)
-        except ValueError as exc:
-            plan.missing.append(str(exc))
+            safe_file(cache_path, layout.local)
+            cached, deferred = load_available_cache(cache_path, external_specs)
+            plan.deferred.extend(deferred)
+        except (HarnessError, OSError) as exc:
+            plan.deferred.append(f"External skill cache is unavailable: {exc}")
     targets = [(spec, repo, user_home / ".agents") for spec in skills]
     if official_ready:
         targets.extend(
@@ -601,14 +604,24 @@ def main(argv=None) -> int:
             print(f"{action} {change.path}")
         for item in plan.missing:
             print(f"MISSING {item}")
+        for item in plan.deferred:
+            print(f"DEFERRED {item}")
         for item in plan.notes:
             print(f"NOTE {item}")
-        print(f"{len(plan.changes)} files, {len(plan.missing)} missing prerequisites")
+        summary = f"{len(plan.changes)} files, {len(plan.missing)} missing prerequisites"
+        if plan.deferred:
+            summary += f", {len(plan.deferred)} external skill cache issues"
+        print(summary)
         if args.command == "apply":
             backup = apply_plan(plan)
-            print(f"Applied. Backup: {backup}" if backup else "Already up to date.")
+            if backup:
+                print(f"Applied. Backup: {backup}")
+            elif plan.deferred:
+                print("Available files are up to date.")
+            else:
+                print("Already up to date.")
         if args.command == "check":
-            return 1 if plan.changes or plan.missing else 0
+            return 1 if plan.changes or plan.missing or plan.deferred else 0
         return 2 if plan.missing else 0
     except (HarnessError, OSError, ValueError, tomlkit.exceptions.TOMLKitError) as exc:
         print(f"ERROR {exc}", file=sys.stderr)

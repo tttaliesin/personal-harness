@@ -38,7 +38,6 @@
 
 | 항목 | 기준 값 |
 |---|---|
-| 모델 / 추론 | `gpt-6.1-sol` / `max` |
 | 응답 상세도 / 추론 요약 | `high` / `detailed` |
 | 서비스 수준 | `default` |
 | 승인 정책 | `on-request` |
@@ -53,7 +52,6 @@
 
 이 sandbox 값은 Roylabs 사용자가 설정한 기준이다.
 현재 채팅에 적용되는 관리형 권한이나 조직 정책을 해제하지 않는다.
-모델 공급자와 모델 카탈로그는 해당 PC에서 유지하므로 `gpt-6.1-sol / max` 사용 가능 여부도 해당 공급자에서 확인한다.
 
 ## 스킬과 외부 도구
 
@@ -111,7 +109,10 @@ Windows에서는 준비 단계가 반환한 작업 폴더의 절대 경로를 �
 초기 스킬 파일 11개의 SHA256은 [Roylabs 원본 기록](../dependencies/roylabs-2026-11-12.json)에 있다.
 외부 스킬의 설치에 사용할 커밋과 검증한 파일 내용은 PC의 `external-skills.json`에 기록한다.
 Steiger와 ArchUnitNET의 도입은 저장소별로 결정하며 하네스 전역 의존성이나 자동 hook으로 등록하지 않는다.
-체크아웃에서 설치하고 검증한 의존성의 버전은 [dependencies.lock.json](../dependencies/dependencies.lock.json)에 기록한다.
+
+설치기는 검증한 의존성의 버전을 `<state-root>/sources/dependencies.lock.json`에 기록한다.
+체크아웃의 기본 경로는 `.local/sources/dependencies.lock.json`이다.
+[저장소의 잠금 파일](../dependencies/dependencies.lock.json)은 설치 상태가 없을 때 사용하는 읽기 전용 초기값이다.
 
 Ego와 `ego-browser` 스킬은 각 PC의 브라우저가 소유한다.
 이 저장소는 앱이나 스킬의 설치·업데이트·버전 검사·링크 생성에 관여하지 않는다.
@@ -123,11 +124,16 @@ Ego가 없거나 스킬이 다른 경로에 연결돼 있어도 Harness 적용�
 |---|---|
 | `notify`, `mcp_servers.node_repl` 전체 | Codex 앱 버전, 실행 파일, 브라우저 서비스, 실행 중 생성되는 파이프에 의존 |
 | OpenAI 번들 marketplace의 로컬 경로 | 앱과 런타임 설치 위치에 의존 |
+| `model`, `model_reasoning_effort` | 해당 PC에서 선택한 모델과 추론 수준 |
+| `desktop.composer-predictions-enabled` | 해당 PC에서 선택한 입력 제안 설정 |
 | `model_catalog_json`, OpenCodex URL | 해당 PC의 로컬 공급자 구성 |
 | `projects` | 해당 PC의 저장소 경로와 신뢰 등록 |
 | `computer_use.windows.always_allowed_app_ids` | 해당 PC의 앱 권한 |
 | `hooks.state` | 해당 PC에서 실제로 신뢰한 hook 기록 |
 | 계정 연결과 인증 자료 | 계정 및 설치 환경에서 별도로 관리 |
+
+하네스 적용은 기존 모델, 추론 수준, 입력 제안 설정을 유지한다.
+로컬 TOML에서 해당 키를 지정하면 그 값이 우선한다.
 
 전역 지침의 `AGENTS.override.md`가 있으면 적용을 중단한다.
 관리 대상 스킬에 사용자가 수정하거나 추가한 잔여 파일이 있으면 먼저 조정하도록 알린다.

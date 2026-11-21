@@ -149,10 +149,17 @@ class ExternalSkillDeploymentTests(unittest.TestCase):
     def installed(self, path):
         return self.home / ".agents/skills" / path
 
+    def run_harness(self, command):
+        self.output = io.StringIO()
+        with (patch.object(harness, "REPO", self.repo),
+              redirect_stdout(self.output), redirect_stderr(self.output)):
+            return harness.main([command, "--host", self.host, "--home", str(self.home),
+                                 "--codex-home", str(self.codex), "--state-root", str(self.state)])
+
     def test_first_install_refresh_and_offline_replay(self):
         self.assertEqual(self.run_installer(), 0, self.output.getvalue())
         self.assertFalse(self.state.exists())
-        self.assertIn("External skill cache is missing", " ".join(self.plan().missing))
+        self.assertEqual(self.plan().deferred, ["External skill cache is missing. Run ordinary install or update."])
         self.requests.clear()
         self.assertEqual(self.run_installer("--install", "--locked"), 2)
         self.assertIn("External skill cache is missing", self.output.getvalue())
@@ -160,8 +167,11 @@ class ExternalSkillDeploymentTests(unittest.TestCase):
         self.assertEqual(self.install_calls, 0)
         self.assertFalse(self.state.exists())
 
+        self.write(self.cache, b"not JSON")
+        self.assertEqual(self.plan().deferred, ["Invalid external skill cache. Run ordinary install or update."])
         self.assertEqual(self.run_installer("--install"), 0, self.output.getvalue())
         self.assertEqual(self.plan().missing, [])
+        self.assertEqual(self.plan().deferred, [])
         harness.apply_plan(self.plan())
         for path in ("skills/agent-desktop/SKILL.md", "skills/agent-desktop-windows/SKILL.md"):
             self.assertEqual((self.codex / path).read_bytes(), self.agent_sources[path])
@@ -186,10 +196,15 @@ class ExternalSkillDeploymentTests(unittest.TestCase):
         self.assertEqual(self.cache.read_bytes(), before)
         self.assertFalse(self.plan().changes)
         manifest = self.repo / "registry.toml"
-        manifest.write_text(manifest.read_text(encoding="utf-8").replace("default-branch", "latest-release"),
-                            encoding="utf-8")
-        self.assertEqual(self.run_installer("--locked"), 2)
-        self.assertIn("cache does not match", self.output.getvalue())
+        declarations = tomlkit.parse(manifest.read_text(encoding="utf-8"))
+        declarations["skills"][0]["channel"] = "latest-release"
+        manifest.write_text(tomlkit.dumps(declarations), encoding="utf-8")
+        stale = self.plan()
+        self.assertEqual(stale.missing, [])
+        self.assertEqual(stale.deferred, ["External skill cache does not match layout. Run ordinary install or update."])
+        self.assertEqual(self.run_installer("--install", "--locked"), 2)
+        self.assertIn("cache does not match layout", self.output.getvalue())
+        self.assertEqual(self.install_calls, 0)
         self.assertEqual(self.requests, [])
 
     def test_failed_update_keeps_cache_and_profile(self):
@@ -206,11 +221,37 @@ class ExternalSkillDeploymentTests(unittest.TestCase):
         self.assertEqual(lock.read_bytes(), lock_before)
         self.assertFalse(self.plan().changes)
 
-        corrupt = json.loads(before)
-        corrupt["skills"]["layout"]["files"]["SKILL.md"] = "Y2hhbmdlZA=="
-        self.write(self.cache, json.dumps(corrupt).encode())
-        failed = self.plan()
-        self.assertIn("Invalid external skill payload", " ".join(failed.missing))
-        with self.assertRaises(harness.HarnessError):
-            harness.apply_plan(failed)
         self.assertEqual(self.installed("layout/SKILL.md").read_bytes(), b"layout at " + b"1" * 40)
+        self.assertEqual(self.installed("words/references/SPEC.md").read_bytes(), b"official rules at " + b"1" * 40)
+
+    def test_apply_updates_available_skill_and_common_files_despite_corrupt_record(self):
+        self.assertEqual(self.run_installer("--install"), 0, self.output.getvalue())
+        harness.apply_plan(self.plan())
+        self.revision = "2" * 40
+        self.assertEqual(self.run_installer("--install"), 0, self.output.getvalue())
+        corrupt = json.loads(self.cache.read_bytes())
+        corrupt["skills"]["layout"]["files"]["SKILL.md"] = "Y2hhbmdlZA=="
+        damaged_cache = json.dumps(corrupt).encode()
+        self.write(self.cache, damaged_cache)
+        self.write(self.repo / "common/AGENTS.md", b"# Updated instructions\n")
+        config = self.repo / "common/config.toml"
+        config.write_bytes(b"[features]\nmulti_agent = true\n\n" + config.read_bytes())
+
+        plan = self.plan()
+        self.assertEqual(plan.missing, [])
+        self.assertEqual(plan.deferred, ["Invalid external skill payload for layout. Run ordinary install or update."])
+        self.assertEqual({change.path.relative_to(self.home).as_posix() for change in plan.changes}, {
+            ".agents/skills/words/references/SPEC.md", ".codex/AGENTS.md", ".codex/config.toml",
+        })
+        self.assertEqual(self.run_harness("apply"), 0, self.output.getvalue())
+        self.assertEqual(self.installed("words/references/SPEC.md").read_bytes(),
+                         f"official rules at {self.revision}".encode())
+        self.assertTrue((self.codex / "AGENTS.md").read_bytes().startswith(b"# Updated instructions\n"))
+        merged = tomlkit.parse((self.codex / "config.toml").read_text(encoding="utf-8"))
+        self.assertTrue(merged["features"]["multi_agent"])
+        self.assertEqual(self.installed("layout/SKILL.md").read_bytes(), b"layout at " + b"1" * 40)
+        self.assertEqual(self.installed("layout/references/old.md").read_bytes(), b"old reference")
+        self.assertEqual(self.cache.read_bytes(), damaged_cache)
+        self.assertEqual(self.plan().changes, [])
+        self.assertEqual(self.run_harness("check"), 1, self.output.getvalue())
+        self.assertIn(f"DEFERRED {plan.deferred[0]}", self.output.getvalue())

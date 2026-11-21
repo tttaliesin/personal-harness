@@ -1211,6 +1211,25 @@ class BuildPlanTests(TemporaryHarnessTestCase):
                 self.assertTrue(any(expected in message for message in plan.missing), plan.missing)
         self.process.assert_not_called()
 
+    def test_default_plan_reads_seed_until_active_lock_exists(self):
+        repo = self.fixture.repo
+        seed = repo / "dependencies/dependencies.lock.json"
+        active = repo / ".local/sources/dependencies.lock.json"
+        legacy = seed.read_bytes()
+        changed_seed = json.loads(legacy)
+        changed_seed["openspec"] = {"package": "@fission-ai/openspec", "version": "2.0.0"}
+        write_file(seed, json.dumps(changed_seed))
+
+        before = tree_snapshot(self.root)
+        plan = self.build()
+        self.assertTrue(any("openspec CLI" in message for message in plan.missing), plan.missing)
+        self.assertEqual(tree_snapshot(self.root), before)
+
+        write_file(active, legacy)
+        before = tree_snapshot(self.root)
+        self.assertEqual(self.build().missing, [])
+        self.assertEqual(tree_snapshot(self.root), before)
+
     def test_planned_config_preserves_existing_runtime_comments_and_unknown_values(self):
         plan = self.build()
         config = next(change for change in plan.changes if change.path == self.fixture.codex / "config.toml")
@@ -1451,6 +1470,31 @@ class ApplyPlanTests(TemporaryHarnessTestCase):
                     write.assert_not_called()
                 self.assertEqual(tree_snapshot(self.root), before)
                 self.assertFalse(self.fixture.home.exists())
+
+    def test_apply_packaged_config_preserves_pc_model_and_composer_preferences(self):
+        shared = (harness.REPO / "common/config.toml").read_bytes()
+        write_file(self.fixture.repo / "common/config.toml", shared)
+        config = write_file(self.fixture.codex / "config.toml", """\
+model = "workstation-model"
+model_reasoning_effort = "high"
+
+[desktop]
+composer-predictions-enabled = false
+
+[mcp_servers.node_repl]
+command = "node"
+""")
+        harness.apply_plan(self.build())
+        applied = tomllib.loads(config.read_text(encoding="utf-8"))
+        self.assertEqual(applied["model"], "workstation-model")
+        self.assertEqual(applied["model_reasoning_effort"], "high")
+        self.assertIs(applied["desktop"]["composer-predictions-enabled"], False)
+
+        defaults = tomllib.loads(shared.decode("utf-8"))
+        self.assertNotIn("model", defaults)
+        self.assertNotIn("model_reasoning_effort", defaults)
+        self.assertNotIn("composer-predictions-enabled", defaults["desktop"])
+        self.assertEqual(applied["desktop"]["autoArchiveAfterDays"], defaults["desktop"]["autoArchiveAfterDays"])
 
     def test_apply_backs_up_original_bytes_and_second_plan_has_no_changes(self):
         fixture = self.fixture

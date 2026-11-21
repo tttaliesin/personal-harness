@@ -391,6 +391,8 @@ class UpdateTests(unittest.TestCase):
     def test_openspec_missing_locked_record_skips_install_and_keeps_existing_path(self):
         with TemporaryDirectory() as directory:
             repo = self.make_repo(directory)
+            seed = repo / "dependencies/dependencies.lock.json"
+            legacy = seed.read_bytes()
             config = repo / ".local/homelab-desktop.toml"
             config.parent.mkdir()
             config.write_text('[paths]\nopenspec = "D:/private/openspec.cmd"\n', encoding="utf-8")
@@ -403,7 +405,9 @@ class UpdateTests(unittest.TestCase):
                     patch.object(installer, "install_plugins"), patch.object(installer, "sync_sources"):
                 self.assertEqual(self.run_main(repo, "--install", "--locked"), 0)
             openspec.assert_not_called()
-            self.assertNotIn("openspec", json.loads((repo / "dependencies/dependencies.lock.json").read_bytes()))
+            self.assertEqual(seed.read_bytes(), legacy)
+            saved = json.loads((repo / ".local/sources/dependencies.lock.json").read_bytes())
+            self.assertNotIn("openspec", saved)
             self.assertEqual(tomlkit.parse(config.read_text(encoding="utf-8"))["paths"]["openspec"],
                              "D:/private/openspec.cmd")
 
@@ -518,6 +522,39 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(result.lock["schema_version"], 2)
         self.assertIsNone(result.archive)
 
+    def test_default_install_writes_active_lock_and_prefers_it_after_seed_changes(self):
+        expected = self.resolve().lock
+        with TemporaryDirectory() as directory:
+            repo = self.make_repo(directory)
+            state = repo / ".local"
+            seed = repo / "dependencies/dependencies.lock.json"
+            active = state / "sources/dependencies.lock.json"
+            original_seed = seed.read_bytes()
+            self.assertFalse(active.exists())
+            with patch.object(installer, "fetch", side_effect=self.fetch), \
+                    patch.object(installer, "resolve", wraps=installer.resolve) as resolve, \
+                    patch.object(installer.platform, "machine", return_value="AMD64"), \
+                    patch.object(installer.shutil, "which", return_value="fixture"), \
+                    patch.object(installer, "install_agent", return_value=state / "tools/agent.exe"), \
+                    patch.object(installer, "install_codegraph", return_value=state / "tools/graph.cmd") as graph, \
+                    patch.object(installer, "install_openspec", return_value=state / "tools/openspec.cmd"), \
+                    patch.object(installer, "install_plugins"), patch.object(installer, "sync_sources"):
+                self.assertEqual(self.run_main(repo, "--install"), 0)
+                self.assertEqual(resolve.call_args.args[0], self.lock)
+                graph.assert_called_once_with(expected["codegraph"], state, "fixture")
+                self.assertEqual(seed.read_bytes(), original_seed)
+                installed = active.read_bytes()
+                self.assertEqual(json.loads(installed), expected)
+
+                updated_seed = copy.deepcopy(self.lock)
+                updated_seed["codegraph"]["version"] = "99.0.0"
+                updated_seed_bytes = json.dumps(updated_seed).encode()
+                seed.write_bytes(updated_seed_bytes)
+                self.assertEqual(self.run_main(repo, "--install"), 0)
+                self.assertEqual(resolve.call_args.args[0], expected)
+                self.assertEqual(active.read_bytes(), installed)
+                self.assertEqual(seed.read_bytes(), updated_seed_bytes)
+
     def test_latest_query_failure_preserves_old_lock_without_fallback(self):
         with TemporaryDirectory() as directory:
             repo = self.make_repo(directory)
@@ -534,8 +571,11 @@ class UpdateTests(unittest.TestCase):
         for failing in (*operations, None):
             with self.subTest(failing=failing), TemporaryDirectory() as directory:
                 repo = self.make_repo(directory)
-                lock_path = repo / "dependencies/dependencies.lock.json"
-                old = lock_path.read_bytes()
+                seed = repo / "dependencies/dependencies.lock.json"
+                old = seed.read_bytes()
+                lock_path = repo / ".local/sources/dependencies.lock.json"
+                lock_path.parent.mkdir(parents=True)
+                lock_path.write_bytes(old)
                 with ExitStack() as stack:
                     stack.enter_context(patch.object(installer, "resolve", return_value=result))
                     stack.enter_context(patch.object(installer.platform, "machine", return_value="AMD64"))
@@ -548,7 +588,11 @@ class UpdateTests(unittest.TestCase):
                             return repo / name
                         stack.enter_context(patch.object(installer, name, side_effect=operation))
                     self.assertEqual(self.run_main(repo, "--install"), 2 if failing else 0)
-                self.assertEqual(lock_path.read_bytes(), old) if failing else self.assertEqual(json.loads(lock_path.read_bytes()), result.lock)
+                self.assertEqual(seed.read_bytes(), old)
+                if failing:
+                    self.assertEqual(lock_path.read_bytes(), old)
+                else:
+                    self.assertEqual(json.loads(lock_path.read_bytes()), result.lock)
 
     def test_sync_preserves_official_bytes_backs_up_and_removes_stale_managed_files(self):
         result = self.resolve()

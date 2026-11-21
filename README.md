@@ -90,7 +90,6 @@ task plan
 `task`는 사용 가능한 명령을 표시한다.
 `task setup`은 Python 가상환경과 저장소 실행에 필요한 패키지를 준비한다.
 `task plan`은 변경할 파일과 공통 설정, 누락된 의존성을 표시한다.
-외부 스킬 캐시가 없거나 현재 등록과 다르면 일반 설치로 캐시를 준비한다.
 
 ```powershell
 # 공식 최신 안정판을 조회하고 설치 계획을 확인한다.
@@ -107,22 +106,23 @@ NuGet MCP는 공식 `NuGet.Mcp.Server`와 하네스 전용 .NET 실행 환경을
 기존 프로젝트의 .NET 버전과 전역 PATH를 유지하며 C# 패키지 작업에서 필요할 때 자율적으로 선택한다.
 공식 .NET·Windows 자료가 필요하면 명시적인 호출 없이 선택하며 자세한 기준은 [개발 도구 사용](docs/development-tools.md#microsoft-learn-선택과-연결-구성)에 있다.
 실제 설치에 사용할 commit과 배포 해시를 확정한 뒤 도구를 설치한다.
-설치와 검증을 마치면 그 결과를 `dependencies/dependencies.lock.json`에 기록한다.
+설치기는 검증한 의존성의 버전과 배포 해시를 `<state-root>/sources/dependencies.lock.json`에 기록한다.
+체크아웃의 기본 경로는 Git에서 제외되는 `.local/sources/dependencies.lock.json`이다.
 agent-desktop의 공식 스킬과 참조 문서도 같은 릴리스로 갱신한다.
 생성한 PC 경로는 Git에서 제외되는 `.local/<hostname>.toml`에 저장한다.
 Codex 실행 파일을 찾지 못하면 `task install -- -Codex 'D:/tools/codex.exe'`로 지정한다.
 Ego lite와 함께 제공되는 `ego-browser` 스킬은 각 PC의 브라우저가 관리한다.
 이 저장소는 Ego의 설치 여부나 버전을 검사하지 않고, 브라우저의 스킬 파일과 링크를 만들거나 수정하지 않는다.
 
-공통 파일만 다시 적용할 때는 다음 명령을 사용한다.
+새 의존성을 설치하지 않고 공통 파일을 다시 적용할 때는 다음 명령을 사용한다.
 
 ```powershell
 task apply
 task check
 ```
 
-`task apply`는 사전 검사가 통과한 경우에만 쓰고, 기존 파일을 Codex 홈의 `harness-backups`에 백업한다.
-`task check`는 공통 구성과 일치하고 의존성이 준비돼 있으면 성공한다.
+`task apply`는 사전 검사를 통과하면 기존 파일을 Codex 홈의 `harness-backups`에 백업한 뒤 변경을 적용한다.
+`task check`는 적용할 변경과 미해결 항목이 없을 때 성공한다.
 적용 후 Codex를 재시작하거나 새 채팅에서 지침과 도구 구성을 확인한다.
 설치 과정에서 요구하는 hook 신뢰 승인은 해당 PC에서 처리한다.
 
@@ -147,9 +147,13 @@ task plan -- -HomeDirectory 'D:/Test Profile'
 체크아웃의 기본 캐시는 `.local/external-skills.json`이다.
 상태 루트를 지정하면 `<state-root>/external-skills.json`을 쓴다.
 `task plan`, `task check`, `task apply`는 외부 스킬을 이 캐시에서 오프라인으로 읽는다.
+`task plan`과 `task apply`는 캐시에서 누락됐거나 검증을 통과하지 못한 외부 스킬을 건너뛴다.
+두 명령은 `DEFERRED` 줄에 사유를 표시한다.
+다른 사전 검사를 통과하면 `task apply`는 적용 가능한 변경을 반영한다.
+`task check`는 보류 항목이 남아 있으면 0이 아닌 종료 코드를 반환한다.
 
 기록한 버전을 재현할 때는 `-Locked`를 사용한다.
-외부 스킬을 잠금 모드에서 읽으려면 현재 등록과 호환되는 기존 캐시가 필요하다.
+잠금 설치에서 필요한 캐시가 없거나 현재 등록과 호환되지 않으면 명령은 실패한다.
 
 ```powershell
 task install -- -Locked
@@ -164,7 +168,7 @@ task install -- -Locked
 | 위치 | 역할 |
 |---|---|
 | [common/AGENTS.md](common/AGENTS.md) | 전역 사용자 지침. `${CODEX_HOME}`은 적용 대상 PC에서 치환 |
-| [common/config.toml](common/config.toml) | 모델, 사용자 정책, Windows sandbox와 Desktop 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
+| [common/config.toml](common/config.toml) | 사용자 정책, Windows sandbox와 Desktop 공통 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
 | `.local/<hostname>.toml` | 해당 PC에서만 사용하는 경로와 선택적 설정 덮어쓰기. Git 제외 |
 | [registry.toml](registry.toml) | 단독 스킬과 외부 참조의 출처, 외부 플러그인과 MCP의 등록 정보 |
 | [skills/custom/](skills/custom) | 자체 스킬인 `create-readme`, `development-environment`, `korean-typography`, `repository-artifacts` |
@@ -172,7 +176,8 @@ task install -- -Locked
 | `.local/external-skills.json` | 외부 스킬과 참조 자료의 로컬 캐시. Git 제외 |
 | [skills/agent-desktop/](skills/agent-desktop), [skills/agent-desktop-windows/](skills/agent-desktop-windows) | 공식 릴리스에서 검증하고 Codex 홈의 `skills/`에 복사하는 스킬과 참조 문서 |
 | [sources/agent-desktop-LICENSE](sources/agent-desktop-LICENSE) | 공식 스킬 갱신 시 검증하는 Agent Desktop 라이선스 |
-| [dependencies/dependencies.lock.json](dependencies/dependencies.lock.json) | 체크아웃에서 설치하고 검증한 의존성의 버전, 커밋, 배포 해시 |
+| `.local/sources/dependencies.lock.json` | 기본 상태 루트에 설치한 의존성의 버전, 커밋, 배포 해시. Git 제외 |
+| [dependencies/dependencies.lock.json](dependencies/dependencies.lock.json) | 설치 상태가 없을 때 읽는 초기 잠금 파일 |
 | [dependencies/NOTICE.md](dependencies/NOTICE.md) | 외부 원본의 출처와 라이선스 안내 |
 | [dependencies/roylabs-2026-11-12.json](dependencies/roylabs-2026-11-12.json) | 초기 Roylabs 기준 구성의 출처와 파일 해시 |
 | [installer/](installer) | Task와 원격 명령이 사용하는 설치·갱신·적용 구현 |
@@ -226,6 +231,9 @@ flowchart LR
 한 명령 설치에서는 같은 형식의 설정을 설치 상태 경로의 `<hostname>.toml`에 둔다.
 설정 병합 순서는 **현재 설정 → 공통 설정 → 등록한 플러그인·MCP 설정 → PC 로컬 덮어쓰기**다.
 공통 파일에서 지정한 키만 덮어쓰며, 사용자 스킬의 선택 목록은 이름 또는 경로를 기준으로 병합한다.
+
+설치기는 `model`, `model_reasoning_effort`, `desktop.composer-predictions-enabled`의 기존 프로필 값을 유지한다.
+PC별 TOML에 같은 키를 지정하면 그 값이 우선한다.
 
 ## 검증
 

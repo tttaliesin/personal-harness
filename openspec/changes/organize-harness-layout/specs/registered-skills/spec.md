@@ -88,11 +88,25 @@
 - **WHEN** 현재 등록과 호환되는 캐시가 있고 `task plan`, `task check` 또는 `task apply`를 실행한다.
 - **THEN** 각 명령은 네트워크 조회 없이 캐시의 외부 파일을 사용한다.
 
-#### Scenario: The offline cache is missing or incompatible
+#### Scenario: Defer skills when the cache file is unavailable
 
-- **WHEN** `task plan`, `task check` 또는 `task apply`에 필요한 캐시가 없거나 현재 등록과 호환되지 않는다.
-- **THEN** 명령은 캐시 오류를 표시한다.
-- **AND** 적용은 사용자 파일을 쓰기 전에 중단한다.
+- **WHEN** `task plan` 또는 `task apply`를 실행하는데 외부 스킬 캐시 파일이 없거나 유효하지 않다.
+- **THEN** 명령은 `DEFERRED` 줄에 캐시를 사용할 수 없는 이유를 표시한다.
+- **AND** 해당 캐시가 필요한 스킬만 배포 대상에서 제외한다.
+- **AND** 나머지 사전 검사를 통과하면 공통 파일과 로컬 스킬을 계획하거나 적용한다.
+
+#### Scenario: Defer only the external skill with an invalid entry
+
+- **WHEN** 한 외부 스킬의 캐시 항목이 없거나 검증에 실패하고 다른 외부 스킬의 캐시 항목은 유효하다.
+- **THEN** `task plan`과 `task apply`는 문제 항목과 사유를 `DEFERRED`로 표시한다.
+- **AND** 유효한 외부 스킬은 배포 대상에 남긴다.
+- **AND** 적용은 보류한 스킬의 기존 설치 파일을 보존한다.
+
+#### Scenario: Full check reports deferred external skills
+
+- **WHEN** 다른 파일과 의존성은 모두 준비됐지만 외부 스킬이 하나 이상 보류됐다.
+- **THEN** `task check`는 `DEFERRED` 줄에 사유를 표시한다.
+- **AND** 보류 항목이 있으면 0이 아닌 종료 코드를 반환한다.
 
 #### Scenario: Reproduce an external skill in locked mode
 
@@ -101,6 +115,6 @@
 
 #### Scenario: Locked mode lacks a compatible cache
 
-- **WHEN** `-Locked`를 지정했으나 필요한 외부 스킬의 캐시가 없거나 등록과 호환되지 않는다.
+- **WHEN** `-Locked`를 지정했으나 필요한 외부 스킬의 캐시가 없거나 검증에 실패한다.
 - **THEN** 명령은 캐시를 요구하는 오류를 반환한다.
 - **AND** 외부 스킬의 최신 커밋을 조회하지 않는다.

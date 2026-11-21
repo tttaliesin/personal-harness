@@ -52,11 +52,15 @@ Python이나 Codex를 자동으로 찾지 못하면 `--python 'D:/Python/python.
 WindowsApps의 Python 실행 별칭은 인터프리터로 사용하지 않는다.
 기록한 의존성 버전을 재현할 때는 `--locked`를 추가한다.
 잠금 모드는 현재 등록과 호환되는 기존 캐시에서 외부 스킬을 읽는다.
-외부 스킬 캐시가 없거나 등록과 다르면 일반 설치나 갱신을 실행한다.
+필요한 캐시 항목이 없거나 유효하지 않으면 잠금 설치는 실패한다.
+일반 설치나 갱신으로 캐시를 다시 준비한다.
 다른 의존성의 배포물이 로컬에 없으면 잠금 모드에서도 다운로드한다.
 등록 대상은 루트의 [registry.toml](../registry.toml)에서 관리한다.
 새 항목을 등록하거나 설치 출처를 바꾼 뒤에는 일반 `update`로 해당 PC의 정확한 버전 기록을 갱신한다.
 `--locked`는 현재 등록 목록과 기록이 일치할 때 사용한다.
+
+설치기는 기존 Codex 프로필의 모델, 추론 수준, 입력 제안을 유지한다.
+이 설정을 PC별로 덮어쓰려면 상태 루트의 `<hostname>.toml`에 값을 지정한다. [PC별 설정 방법](deployment.md#적용-절차)
 
 ## 다른 PC에 공유할 항목 올리기
 
@@ -99,13 +103,16 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 이전 형식의 사본은 `scripts/`와 `sources/` 등 해당 배포에서 사용한 경로를 기준으로 검사한다.
 변경됐거나 실제 도구가 참조하는 사본은 삭제하지 않고 오류로 알린다.
 npm이 내려받은 압축 배포물 캐시는 npm의 일반 캐시 정책을 따른다.
-PC별 상태 잠금의 기본 초기값은 배포 소스의 [dependencies/dependencies.lock.json](../dependencies/dependencies.lock.json)이다.
-기존 상태 잠금이 있으면 설치기는 해당 파일을 사용한다.
-설치 대상은 현재 등록 목록으로 정하므로 기존 상태 잠금에 없던 새 항목도 일반 업데이트에 포함된다.
+
+설치기는 상태 루트의 활성 잠금을 우선 읽는다.
+활성 잠금이 없으면 배포 소스의 [dependencies/dependencies.lock.json](../dependencies/dependencies.lock.json)을 읽기 전용 초기값으로 사용한다.
+설치 결과는 상태 루트의 `sources/dependencies.lock.json`에 기록한다.
+일반 업데이트는 현재 등록 목록에서 새 항목을 가져온다.
 
 일반 설치와 갱신에서 설치기는 등록한 채널의 외부 스킬 원본을 조회한다.
 매핑한 파일을 모두 검증하면 새 커밋과 파일로 캐시를 원자적으로 교체한다.
 외부 원본 조회, 다운로드 또는 검증에 실패하면 이전 캐시를 보존한다.
+이 경우 설치 명령은 오류로 종료한다.
 
 인증, 계정, 세션, 프로젝트 신뢰와 앱이 생성한 런타임은 기존 Codex 프로필에 남는다.
 등록된 MCP의 인증 변수는 해당 PC에서 제공한다.
@@ -145,9 +152,9 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 
 기존 `<hostname>.toml`의 경로와 설정은 유지한다.
 새 로컬 설정을 작성할 때는 [로컬 설정 예시](local.example.toml)를 참고한다.
-상태 잠금이 아직 없으면 설치기는 인접한 체크아웃의 `dependencies/dependencies.lock.json`을 초기값으로 사용한다.
+상태 잠금이 아직 없으면 설치기는 인접한 체크아웃의 `dependencies/dependencies.lock.json`을 읽는다.
 이전 체크아웃의 `sources/dependencies.lock.json`도 초기값으로 사용할 수 있다.
-원래 저장소의 잠금은 변경하지 않는다.
+기본 체크아웃에서 설치한 이력이 있으면 `.local/sources/dependencies.lock.json`을 사용한다.
 새로 생성하는 도구 경로는 선택한 상태 루트 안에 기록한다.
 로컬 설정의 절대경로는 계속 해당 PC에서만 관리한다.
 `${STATE_ROOT}`로 선택한 상태 루트를 참조할 수도 있다.
@@ -178,4 +185,8 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 기존 저장소의 Task 명령과도 동시에 설치하지 않는다.
 
 루트 Task 명령은 저장소에서 개발하거나 설치 계획을 검토할 때 계속 사용할 수 있다.
-`task plan`, `task check`, `task update:plan`은 기존 읽기 전용 동작을 유지한다.
+`task plan`, `task check`, `task update:plan`은 읽기 전용이다.
+외부 스킬의 캐시가 없거나 유효하지 않으면 `task plan`과 `task apply`는 `DEFERRED`로 사유를 표시한다.
+다른 사전 검사를 통과하면 `task apply`는 나머지 변경을 반영한다.
+외부 스킬 보류가 남아 있으면 `task check`는 0이 아닌 종료 코드를 반환한다.
+Task 명령에 `-StateRoot`를 명시한 경우 계획·검사·적용에는 그 경로의 활성 잠금이 필요하다.
