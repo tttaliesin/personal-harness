@@ -226,8 +226,7 @@ function Get-CapturedPayload([string]$Root, [string]$HostName, [switch]$Legacy, 
         "$installerDirectory/bootstrap.ps1", "$installerDirectory/update-dependencies.ps1",
         "$installerDirectory/install-dependencies.ps1", "$installerDirectory/harness.ps1",
         "$installerDirectory/install_dependencies.py", "$installerDirectory/harness.py",
-        'common/AGENTS.md', 'common/config.toml', "$dependencyDirectory/dependencies.lock.json",
-        'skills/agent-desktop/SKILL.md', 'skills/agent-desktop-windows/SKILL.md', 'sources/agent-desktop-LICENSE')
+        'common/AGENTS.md', 'common/config.toml', "$dependencyDirectory/dependencies.lock.json")
     if ($previousLayout) { $required += 'skills/create-readme/SKILL.md' }
     if ($hasHostProfiles) { $required += "hosts/$HostName.toml" }
     if (-not $Legacy) { $required += "$installerDirectory/share.py" }
@@ -247,7 +246,7 @@ function Get-CapturedPayload([string]$Root, [string]$HostName, [switch]$Legacy, 
     }
     $allowed = @('bin', $installerDirectory, 'common', 'skills', $dependencyDirectory,
         'docs', 'requirements.txt', 'registry.toml')
-    if (-not $previousLayout) { $allowed += 'sources' }
+    if ($Legacy -and -not $previousLayout) { $allowed += 'sources' }
     if ($hasHostProfiles) { $allowed += 'hosts' }
     foreach ($entry in $manifest.files) {
         if ($entry.StartsWith('!')) { continue }

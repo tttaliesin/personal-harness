@@ -22,7 +22,6 @@
     "common",
     "skills",
     "dependencies",
-    "sources",
     "docs",
     "!docs/history/**",
     "!**/.git/**",

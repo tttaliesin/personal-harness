@@ -29,7 +29,7 @@ from windows_paths import io_path
 REPO = Path(__file__).resolve().parents[1]
 PROTECTED = {"notify", "model_catalog_json", "openai_base_url", "experimental_realtime_ws_base_url",
              "projects", "hooks", "model_providers", "computer_use"}
-AGENT_DESKTOP_SKILLS = ("agent-desktop", "agent-desktop-windows")
+RETIRED_DESKTOP_SKILLS = ("agent-desktop", "agent-desktop-windows")
 
 
 class HarnessError(Exception):
@@ -41,8 +41,6 @@ class Layout:
     local: Path
     lock: Path
     seed_lock: Path
-    sources: Path
-    source_backups: Path
     persistent: bool
 
 
@@ -60,43 +58,7 @@ def select_layout(repo: Path, state_root: Path | None = None) -> Layout:
             if adjacent.is_file():
                 seed = adjacent
                 break
-    return Layout(local, local / "sources/dependencies.lock.json",
-                  seed, local if persistent else repo, local / "source-backups", persistent)
-
-
-def official_source_files(lock: Mapping) -> Mapping:
-    expected = lock.get("agent_desktop", {}).get("files_sha256", {})
-    required = {"sources/agent-desktop-LICENSE", "skills/agent-desktop/SKILL.md",
-                "skills/agent-desktop-windows/SKILL.md"}
-    if not required.issubset(expected):
-        raise HarnessError("Locked agent-desktop source set is incomplete")
-    for path in expected:
-        if (".." in Path(path).parts or Path(path).is_absolute() or "\\" in path
-                or (path != "sources/agent-desktop-LICENSE" and not path.startswith(
-                    ("skills/agent-desktop/", "skills/agent-desktop-windows/")))):
-            raise HarnessError(f"Unsafe managed source path: {path}")
-    return expected
-
-
-def validate_official_sources(root: Path, lock: Mapping) -> None:
-    expected = official_source_files(lock)
-    actual = set()
-    for prefix in ("skills/agent-desktop", "skills/agent-desktop-windows"):
-        directory = root / prefix
-        safe_file(directory, root)
-        for path in directory.rglob("*"):
-            safe_file(path, root)
-            if path.is_file():
-                actual.add(path.relative_to(root).as_posix())
-    license_path = root / "sources/agent-desktop-LICENSE"
-    safe_file(license_path, root)
-    if license_path.is_file():
-        actual.add("sources/agent-desktop-LICENSE")
-    if actual != set(expected):
-        raise HarnessError("Official source cache file set does not match the selected lock; run installer/install-dependencies.ps1")
-    for path, sha256 in expected.items():
-        if hashlib.sha256((root / path).read_bytes()).hexdigest() != sha256:
-            raise HarnessError(f"Official source cache digest mismatch: {path}; run installer/install-dependencies.ps1")
+    return Layout(local, local / "sources/dependencies.lock.json", seed, persistent)
 
 
 def read_toml(path: Path) -> dict:
@@ -166,6 +128,23 @@ def merge_into(target, overlay: Mapping, prefix: tuple = ()) -> None:
             target[key] = copy.deepcopy(value)
 
 
+def migrate_desktop_skills(config: Mapping, codex_home: Path) -> None:
+    selections = config.get("skills", {}).get("config")
+    if not isinstance(selections, list):
+        return
+    retired_paths = {codex_home / "skills" / name / leaf
+                     for name in RETIRED_DESKTOP_SKILLS for leaf in ("", "SKILL.md")}
+    for index in reversed(range(len(selections))):
+        selection = selections[index]
+        if not isinstance(selection, Mapping):
+            continue
+        path = selection.get("path")
+        if (selection.get("name") in RETIRED_DESKTOP_SKILLS
+                or isinstance(path, str) and Path(path) in retired_paths
+                or selection == {"name": "computer-use", "enabled": False}):
+            del selections[index]
+
+
 def expand(value, variables: Mapping):
     if isinstance(value, Mapping):
         return {key: expand(item, variables) for key, item in value.items()}
@@ -227,14 +206,7 @@ def tool_path(name: str, paths: Mapping) -> str | None:
     configured = paths.get(name)
     if configured:
         return str(configured) if Path(configured).is_file() else shutil.which(configured)
-    found = shutil.which(name.replace("_", "-"))
-    if found:
-        return found
-    if name == "agent_desktop":
-        fallback = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "agent-desktop" / "agent-desktop.exe"
-        if fallback.is_file():
-            return str(fallback)
-    return None
+    return shutil.which(name.replace("_", "-"))
 
 
 def changed_settings(old: Mapping, new: Mapping, owned: Mapping, prefix: str = "") -> list[str]:
@@ -416,6 +388,7 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     merge_into(merged, common)
     merge_into(merged, registered)
     merge_into(merged, local_settings)
+    migrate_desktop_skills(merged, codex_home)
     for spec in registry.mcp:
         server = merged.get('mcp_servers', {}).get(spec['name'], {})
         if server.get('command') and server.get('url'):
@@ -437,20 +410,10 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
         merged["mcp_servers"]["codegraph"]["command"] = codegraph
     if not codegraph:
         plan.missing.append("codegraph CLI: run installer/install-dependencies.ps1 or set [paths].codegraph locally")
-    agent_desktop = tool_path("agent_desktop", paths)
-    if not agent_desktop:
-        plan.missing.append("agent-desktop CLI: run installer/install-dependencies.ps1 or set [paths].agent_desktop locally")
     openspec = tool_path("openspec", paths) if "openspec" in lock else None
     if "openspec" in lock and not openspec:
         plan.missing.append("openspec CLI: run installer/install-dependencies.ps1 or set [paths].openspec locally")
-    official_ready = not layout.persistent
     if lock_path.exists():
-        if layout.persistent:
-            try:
-                validate_official_sources(layout.sources, lock)
-                official_ready = True
-            except HarnessError as exc:
-                plan.missing.append(str(exc))
         for item in lock["plugins"]:
             cache = codex_home / "plugins" / "cache" / item["marketplace"] / item["name"] / item["version"]
             if not ((cache / ".codex-plugin" / "plugin.json").is_file() or (cache / "plugin.json").is_file()):
@@ -470,7 +433,7 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
         plan.add(config_path, rendered.encode("utf-8"), codex_home)
     instructions = (repo / "common" / "AGENTS.md").read_text(encoding="utf-8")
     instructions = instructions.replace("${CODEX_HOME}", codex_home.as_posix())
-    executables = [("agent-desktop", agent_desktop), ("codegraph", codegraph), ("openspec", openspec)]
+    executables = [("codegraph", codegraph), ("openspec", openspec)]
     local_commands = [(name, path) for name, path in executables if path and ("/" in path or "\\" in path)]
     if local_commands:
         instructions += "\n## Local tool executables\n\nUse these executable locations for this PC when running the official CLI commands.\n"
@@ -480,6 +443,7 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
     if (codex_home / "AGENTS.override.md").exists():
         plan.missing.append("AGENTS.override.md shadows the shared AGENTS.md; reconcile the local override before applying")
     applied_files = previously_applied_files(codex_home)
+    root = user_home / ".agents"
     skills = tuple(spec for spec in registry.skills if "requires" not in spec or spec["requires"] in lock)
     external_specs = tuple(spec for spec in skills if "source" in spec)
     cached = {}
@@ -491,17 +455,11 @@ def build_plan(repo: Path, host: str, user_home: Path, codex_home: Path | None =
             plan.deferred.extend(deferred)
         except (HarnessError, OSError) as exc:
             plan.deferred.append(f"External skill cache is unavailable: {exc}")
-    targets = [(spec, repo, user_home / ".agents") for spec in skills]
-    if official_ready:
-        targets.extend(
-            ({"name": name, "path": f"skills/{name}"}, layout.sources, codex_home)
-            for name in AGENT_DESKTOP_SKILLS
-        )
-    for spec, source_root, root in targets:
+    for spec in skills:
         skill = spec["name"]
         if "source" in spec and skill not in cached:
             continue
-        source_files = skill_files(source_root, spec, cached[skill][1] if skill in cached else {})
+        source_files = skill_files(repo, spec, cached[skill][1] if skill in cached else {})
         destination_root = root / "skills" / skill
         safe_file(destination_root, root)
         if destination_root.is_dir() and not destination_root.is_symlink():

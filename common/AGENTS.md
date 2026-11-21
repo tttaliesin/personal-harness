@@ -7,14 +7,12 @@
 - Follow the user's Newton's flaming laser sword principle: distinguish observations from hypotheses; state a reproducible test and falsification condition for causal or performance claims. Do not present untestable assumptions as findings.
 - Deployment Simulator is an on-demand tool for relevant scenarios, not a mandatory step in every development task. Distinguish an explicit all-harness test from unintended automatic triggering.
 <!-- engineering-evidence-preferences:end -->
-<!-- agent-desktop-default:start -->
-## Default native desktop automation
+<!-- windows-computer-use:start -->
+## Windows app automation
 
-- Use Vercel's agent-desktop CLI as the default for native desktop GUI tasks, following the unmodified official agent-desktop and agent-desktop-windows skills installed under ${CODEX_HOME}/skills.
-- Use the official CLI commands and documented procedures directly. Do not substitute locally written test applications or cursor execution wrappers for the requested app workflow.
-- Start cursor sessions with the official `session start --cursor --multi-agent` command. For the main Codex agent, use agent id `codex` and configure its cursor with `--agent-id codex cursor-overlay enable --label Codex`. Keep the official default cursor size and colors unless the user requests a change.
-- For any actual agents sharing that desktop session, pass the same session id and assign each a distinct agent id and a label matching its real agent name. Use that agent id on its desktop actions and reuse it for that agent's later actions.
-<!-- agent-desktop-default:end -->
+- Select Codex Desktop's official Computer Use when the task requires observing or operating a Windows app's graphical interface. Infer the need from the task without requiring the user to name the skill.
+- Use the repository's tests, a CLI, or a structured tool when it can complete the task. Follow the browser routing below for web work.
+<!-- windows-computer-use:end -->
 
 <!-- removed-artiboard:start -->
 ## Removed integration
@@ -168,7 +166,7 @@ Steiger는 FSD 저장소별 구조 검사기로, ArchUnitNET은 C# 저장소별 
 - Choose Sites when creating a hosted site, publishing a site, or maintaining an existing Site is part of the requested outcome and its workflow fits the chosen destination. Treat an existing repository change as local development unless the user requests hosting or deployment work.
 - Use repository browser or E2E tests directly when they fit the verification task. For public information lookup, use available search and page-reading tools directly. Neither requires an interactive browser to be initialized first.
 - When live browser interaction is needed, choose the available tool that fits the target and session. Consider Ego for needed logged-in user context, the in-app browser for local targets, and Chrome for an existing Chrome session. Initialize and read instructions only for tools needed by the task; do not require every browser skill or runtime first.
-- If the selected browser tool is unavailable or cannot perform the needed action, use a suitable available fallback within the authorized task. Native desktop GUI work retains the agent-desktop default above.
+- If the selected browser tool is unavailable or cannot perform the needed action, use a suitable available fallback within the authorized task.
 <!-- task-tool-routing:end -->
 
 하나의 글에는 하나의 주장이나 목적만 포함하라

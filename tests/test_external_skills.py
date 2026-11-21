@@ -23,34 +23,14 @@ class ExternalSkillDeploymentTests(unittest.TestCase):
         self.codex = self.home / ".codex"
         self.host = "homelab-desktop"
         self.cache = self.state / installer.EXTERNAL_SKILL_CACHE
-        self.agent = root / "agent-desktop.exe"
         self.graph, self.openspec = (root / name for name in ("codegraph.cmd", "openspec.cmd"))
-        self.agent_commit = "a" * 40
-        self.agent_archive_url = "https://fixtures.invalid/agent.tar.gz"
-        self.agent_sources = {
-            "skills/agent-desktop/SKILL.md": b"# Official desktop fixture",
-            "skills/agent-desktop-windows/SKILL.md": b"# Official Windows fixture",
-            "LICENSE": b"Official license fixture",
-        }
-        self.write(self.agent, b"fixture")
-        self.agent_archive = self.pack_files({"agent-desktop.exe": self.agent.read_bytes()})
-        agent = {
-            "version": "1.2.3", "source": "https://github.com/vercel-labs/agent-desktop",
-            "source_commit": self.agent_commit, "url": self.agent_archive_url,
-            "sha256": installer.digest(self.agent_archive),
-            "executable_sha256": installer.digest(self.agent.read_bytes()),
-            "files_sha256": {
-                ("sources/agent-desktop-LICENSE" if path == "LICENSE" else path): installer.digest(data)
-                for path, data in self.agent_sources.items()
-            },
-        }
         self.write(self.graph, b"fixture")
         self.write(self.openspec, b"fixture")
         self.write(self.repo / "common/AGENTS.md", b"# Shared instructions")
         self.write(self.repo / "common/config.toml", b"[mcp_servers.codegraph]\ncommand = 'codegraph'\n")
         self.write(self.repo / "package.json", b'{"supportedHosts":["homelab-desktop"]}')
         self.write(self.repo / "dependencies/dependencies.lock.json", json.dumps({
-            "schema_version": 1, "plugins": [], "agent_desktop": agent,
+            "schema_version": 1, "plugins": [],
             "codegraph": {"package": "@colbymchenry/codegraph", "version": "1.2.3"},
         }).encode())
         self.write(self.codex / "config.toml", b"[mcp_servers.node_repl]\ncommand = 'fixture'\n")
@@ -84,25 +64,6 @@ class ExternalSkillDeploymentTests(unittest.TestCase):
 
     def fetch(self, url):
         self.requests.append(url)
-        agent_api = "https://api.github.com/repos/vercel-labs/agent-desktop"
-        if url == f"{agent_api}/releases/latest":
-            return json.dumps({"tag_name": "v1.2.3", "assets": [{
-                "name": "agent-desktop-v1.2.3-x86_64-pc-windows-msvc.tar.gz",
-                "browser_download_url": self.agent_archive_url,
-                "digest": "sha256:" + installer.digest(self.agent_archive),
-            }]}).encode()
-        if url == f"{agent_api}/git/ref/tags/v1.2.3":
-            return json.dumps({"object": {"type": "commit", "sha": self.agent_commit}}).encode()
-        if url == self.agent_archive_url:
-            return self.agent_archive
-        if url == f"{agent_api}/git/trees/{self.agent_commit}?recursive=1":
-            return json.dumps({"tree": [
-                {"path": path, "type": "blob", "mode": "100644", "sha": installer.blob_digest(data)}
-                for path, data in self.agent_sources.items()
-            ]}).encode()
-        agent_raw = f"https://raw.githubusercontent.com/vercel-labs/agent-desktop/{self.agent_commit}/"
-        if url.startswith(agent_raw):
-            return self.agent_sources[url.removeprefix(agent_raw)]
         if url.startswith("https://registry.npmjs.org/") and url.endswith("/latest"):
             package = "@colbymchenry/codegraph" if "codegraph" in url else "@fission-ai/openspec"
             return json.dumps({"name": package, "version": "1.2.3", "dist": {
@@ -133,14 +94,13 @@ class ExternalSkillDeploymentTests(unittest.TestCase):
               patch.object(installer, "find_codex", return_value="fixture"),
               patch.object(installer, "check_openspec_node"),
               patch.object(installer, "fetch", side_effect=self.fetch),
-              patch.object(installer, "install_agent", return_value=self.agent) as agent,
-              patch.object(installer, "install_codegraph", return_value=self.graph),
+              patch.object(installer, "install_codegraph", return_value=self.graph) as graph,
               patch.object(installer, "install_openspec", return_value=self.openspec),
               patch.object(installer, "install_plugins"),
               redirect_stdout(self.output), redirect_stderr(self.output)):
             rc = installer.main(["--host", self.host, "--codex-home", str(self.codex), "--state-root",
                                  str(self.state), *args])
-            self.install_calls = agent.call_count
+            self.install_calls = graph.call_count
         return rc
 
     def plan(self):
@@ -173,9 +133,6 @@ class ExternalSkillDeploymentTests(unittest.TestCase):
         self.assertEqual(self.plan().missing, [])
         self.assertEqual(self.plan().deferred, [])
         harness.apply_plan(self.plan())
-        for path in ("skills/agent-desktop/SKILL.md", "skills/agent-desktop-windows/SKILL.md"):
-            self.assertEqual((self.codex / path).read_bytes(), self.agent_sources[path])
-        self.assertEqual((self.state / "sources/agent-desktop-LICENSE").read_bytes(), self.agent_sources["LICENSE"])
         self.assertEqual(self.installed("layout/SKILL.md").read_bytes(), f"layout at {self.revision}".encode())
         self.assertEqual(self.installed("words/SKILL.md").read_bytes(), b"# Our document adapter\n")
         self.assertEqual(self.installed("words/references/SPEC.md").read_bytes(),

@@ -1,6 +1,5 @@
 """Offline tests for the dependency preview, integrity checks and local overrides."""
 from contextlib import redirect_stdout
-import hashlib
 import io
 import json
 import os
@@ -8,7 +7,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tarfile
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
@@ -167,59 +165,22 @@ class DependencyTests(unittest.TestCase):
             repo.joinpath("package.json").write_bytes(installer.REPO.joinpath("package.json").read_bytes())
             before = set(repo.rglob("*"))
             with patch.object(installer, "REPO", repo), patch.object(installer, "find_codex", return_value=None), \
-                    patch.object(installer, "install_agent") as agent, \
                     patch.object(installer, "install_codegraph") as graph, \
                     patch.object(installer, "install_openspec") as openspec, \
                     patch.object(installer, "install_plugins") as plugins, \
                     patch.object(installer.mcp_packages, "install") as mcp, \
                     patch.object(installer.urllib.request, "urlopen") as network, redirect_stdout(io.StringIO()):
                 self.assertEqual(installer.main(["--host", "homelab-desktop", "--locked", "--codex-home", str(repo / "fake-home")]), 0)
-                for call in (agent, graph, openspec, plugins, mcp, network):
+                for call in (graph, openspec, plugins, mcp, network):
                     call.assert_not_called()
             self.assertEqual(before, set(repo.rglob("*")))
-
-    def make_archive(self, local, executable=b"test executable"):
-        data = io.BytesIO()
-        with tarfile.open(fileobj=data, mode="w:gz") as archive:
-            for name, content in (("agent-desktop.exe", executable), ("../../outside.txt", b"never extract me")):
-                member = tarfile.TarInfo(name)
-                member.size = len(content)
-                archive.addfile(member, io.BytesIO(content))
-        sha256 = hashlib.sha256(data.getvalue()).hexdigest()
-        package = local / f"downloads/agent-desktop-v1.0.2-{sha256}.tar.gz"
-        package.parent.mkdir(parents=True)
-        package.write_bytes(data.getvalue())
-        return {"version": "1.0.2", "sha256": sha256,
-                "executable_sha256": hashlib.sha256(executable).hexdigest(), "url": "https://invalid.test/not-used"}
-
-    def test_install_agent_verifies_both_hashes_and_extracts_only_the_executable(self):
-        with TemporaryDirectory() as directory:
-            local = Path(directory) / ".local"
-            lock = self.make_archive(local)
-            with patch.object(installer.urllib.request, "urlopen") as network:
-                target = installer.install_agent(lock, local)
-                self.assertEqual(target.read_bytes(), b"test executable")
-                self.assertFalse((Path(directory) / "outside.txt").exists())
-                self.assertEqual(installer.install_agent(lock, local), target)
-                network.assert_not_called()
-
-    def test_corrupted_archive_or_executable_is_rejected_before_installation(self):
-        for field in ("sha256", "executable_sha256"):
-            with self.subTest(field=field), TemporaryDirectory() as directory:
-                local = Path(directory) / ".local"
-                lock = self.make_archive(local)
-                lock[field] = "0" * 64
-                with patch.object(installer, "fetch", return_value=next((local / "downloads").iterdir()).read_bytes()):
-                    with self.assertRaises(installer.HarnessError):
-                        installer.install_agent(lock, local)
-                self.assertFalse((local / "tools").exists())
 
     def test_local_paths_keep_private_overrides_and_comments(self):
         with TemporaryDirectory() as directory:
             local = Path(directory) / "local.toml"
             local.write_text('# keep this\n[paths]\nagent_desktop = "D:/existing.exe"\n\n[config.desktop]\nautoArchiveAfterDays = 9\n', encoding="utf-8")
             with redirect_stdout(io.StringIO()):
-                installer.save_paths(local, Path("new-agent.exe"), Path("new-codegraph.cmd"))
+                installer.save_paths(local, Path("new-codegraph.cmd"))
             result = tomlkit.parse(local.read_text(encoding="utf-8"))
             self.assertEqual(result["paths"]["agent_desktop"], "D:/existing.exe")
             self.assertEqual(result["paths"]["codegraph"], "new-codegraph.cmd")
@@ -229,19 +190,19 @@ class DependencyTests(unittest.TestCase):
     def test_optional_openspec_path_is_added_without_overwriting_private_override(self):
         with TemporaryDirectory() as directory:
             local = Path(directory) / "local.toml"
-            installer.save_paths(local, Path("agent.exe"), Path("graph.cmd"))
-            self.assertNotIn("openspec", tomlkit.parse(local.read_text(encoding="utf-8"))["paths"])
-            installer.save_paths(local, Path("agent.exe"), Path("graph.cmd"), Path("openspec.cmd"))
+            installer.save_paths(local, Path("graph.cmd"))
+            self.assertEqual(tomlkit.parse(local.read_text(encoding="utf-8"))["paths"], {"codegraph": "graph.cmd"})
+            installer.save_paths(local, Path("graph.cmd"), Path("openspec.cmd"))
             self.assertEqual(tomlkit.parse(local.read_text(encoding="utf-8"))["paths"]["openspec"], "openspec.cmd")
             original = '# keep this\n[paths]\nopenspec = "D:/private/openspec.cmd"\n'
             local.write_text(original, encoding="utf-8")
             with redirect_stdout(io.StringIO()):
-                installer.save_paths(local, Path("agent.exe"), Path("graph.cmd"), Path("managed/openspec.cmd"))
+                installer.save_paths(local, Path("graph.cmd"), Path("managed/openspec.cmd"))
             result = tomlkit.parse(local.read_text(encoding="utf-8"))
             self.assertEqual(result["paths"]["openspec"], "D:/private/openspec.cmd")
             self.assertIn("# keep this", local.read_text(encoding="utf-8"))
             before = local.read_bytes()
-            installer.save_paths(local, Path("agent.exe"), Path("graph.cmd"))
+            installer.save_paths(local, Path("graph.cmd"))
             self.assertEqual(local.read_bytes(), before)
 
 

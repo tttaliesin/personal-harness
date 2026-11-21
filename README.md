@@ -29,6 +29,9 @@ PC별 경로와 의존성 기록은 `%LOCALAPPDATA%/PersonalHarness/state`에 �
 Codex가 생성한 런타임과 인증은 기존 Codex 홈에서 유지한다.
 기존 저장소의 `.local`을 재사용하거나 설치 경로를 지정하는 방법은 [설치 문서](docs/remote-install.md)를 참고한다.
 
+Codex Desktop은 내장 Computer Use를 앱과 함께 설치한다.
+Windows 앱 화면을 확인하거나 앱에 직접 입력해야 할 때 Codex는 내장 Computer Use를 선택한다.
+
 ## 설치한 플러그인과 MCP 공유하기
 
 공유할 항목이 있는 PC에서 다음 명령을 실행한다.
@@ -100,7 +103,7 @@ task install
 ```
 
 설치 도우미는 실행할 때 `registry.toml`에 등록된 플러그인과 MCP를 각 항목의 갱신 기준으로 조회한다.
-agent-desktop의 공식 최신 안정 릴리스와 CodeGraph·OpenSpec의 npm `latest` 배포도 조회한다.
+CodeGraph와 OpenSpec의 npm `latest` 배포도 조회한다.
 Microsoft Learn MCP는 `registry.toml`의 공식 원격 HTTP 연결을 적용하며 별도 의존성 패키지를 설치하지 않는다.
 NuGet MCP는 공식 `NuGet.Mcp.Server`와 하네스 전용 .NET 실행 환경을 버전·해시로 고정해 설치한다.
 기존 프로젝트의 .NET 버전과 전역 PATH를 유지하며 C# 패키지 작업에서 필요할 때 자율적으로 선택한다.
@@ -108,7 +111,6 @@ NuGet MCP는 공식 `NuGet.Mcp.Server`와 하네스 전용 .NET 실행 환경을
 실제 설치에 사용할 commit과 배포 해시를 확정한 뒤 도구를 설치한다.
 설치기는 검증한 의존성의 버전과 배포 해시를 `<state-root>/sources/dependencies.lock.json`에 기록한다.
 체크아웃의 기본 경로는 Git에서 제외되는 `.local/sources/dependencies.lock.json`이다.
-agent-desktop의 공식 스킬과 참조 문서도 같은 릴리스로 갱신한다.
 생성한 PC 경로는 Git에서 제외되는 `.local/<hostname>.toml`에 저장한다.
 Codex 실행 파일을 찾지 못하면 `task install -- -Codex 'D:/tools/codex.exe'`로 지정한다.
 Ego lite와 함께 제공되는 `ego-browser` 스킬은 각 PC의 브라우저가 관리한다.
@@ -174,8 +176,6 @@ task install -- -Locked
 | [skills/custom/](skills/custom) | 자체 스킬인 `create-readme`, `development-environment`, `korean-typography`, `repository-artifacts` |
 | [skills/adapters/](skills/adapters) | 연동·호환 어댑터인 `openspec-workflow`, `ste-ko`, `taste-windows-runtime`, `humanize-windows-runtime` |
 | `.local/external-skills.json` | 외부 스킬과 참조 자료의 로컬 캐시. Git 제외 |
-| [skills/agent-desktop/](skills/agent-desktop), [skills/agent-desktop-windows/](skills/agent-desktop-windows) | 공식 릴리스에서 검증하고 Codex 홈의 `skills/`에 복사하는 스킬과 참조 문서 |
-| [sources/agent-desktop-LICENSE](sources/agent-desktop-LICENSE) | 공식 스킬 갱신 시 검증하는 Agent Desktop 라이선스 |
 | `.local/sources/dependencies.lock.json` | 기본 상태 루트에 설치한 의존성의 버전, 커밋, 배포 해시. Git 제외 |
 | [dependencies/dependencies.lock.json](dependencies/dependencies.lock.json) | 설치 상태가 없을 때 읽는 초기 잠금 파일 |
 | [dependencies/NOTICE.md](dependencies/NOTICE.md) | 외부 원본의 출처와 라이선스 안내 |
@@ -210,7 +210,7 @@ task install -- -Locked
 ```mermaid
 flowchart LR
     U[공식 최신 안정판 조회] --> I[버전과 해시 확정 후 설치]
-    I --> L[설치 결과와 공식 스킬 기록]
+    I --> L[PC별 상태에 의존성 잠금 기록]
     L --> M[기존 사용자 설정에 병합]
     C[공통 지침과 설정] --> M
     H[PC 로컬 설정] --> M
@@ -223,7 +223,7 @@ flowchart LR
     E --> S
     S[등록한 단독 스킬의 설치 파일] --> P
     P --> A[백업 후 적용]
-    A --> O[Codex 홈의 공통 지침과 설정 및 공식 Agent Desktop 스킬]
+    A --> O[Codex 홈의 공통 지침과 설정]
     A --> D["사용자 홈의 .agents/skills/"]
 ```
 

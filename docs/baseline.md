@@ -14,7 +14,7 @@
 
 - 실질적인 완료 시간을 줄이는 병렬 작업과 검증 가능한 근거를 사용한다.
 - 관찰과 가설을 구분하고 인과·성능 주장에 재현 시험과 반증 조건을 둔다.
-- 공식 agent-desktop CLI를 기본 데스크톱 조작 도구로 사용한다.
+- Windows 앱 화면을 확인하거나 앱에 직접 입력해야 할 때 Codex는 내장 Computer Use를 선택한다.
 - 인덱스가 있는 저장소에서는 호출 관계·구조 탐색에 CodeGraph를 선택하고, 알려진 파일 읽기와 텍스트 검색은 바로 수행한다.
 - 기존 OpenSpec 변경과 지속적인 명세가 필요한 기능·구조 변경에는 `openspec-workflow`를 선택하고, 구현 요청은 설계 이후에도 이어서 수행한다.
 - 버전별 라이브러리 API 확인이 필요하면 실제 프로젝트 의존성 버전을 먼저 확인하고 Context7을 명시적 호출 없이 선택한다.
@@ -48,7 +48,7 @@
 | 로캘 | `ko-KR` |
 | MCP | 공통 CodeGraph 실행 인자와 각 PC의 실행 파일 위치, registry의 Microsoft Learn 원격 HTTP 연결 |
 | 플러그인 | 공통 OpenAI 11개 |
-| 스킬 선택 | `computer-use` 비활성, `agent-desktop` 계열 활성 |
+| Computer Use | 내장 플러그인 `computer-use@openai-bundled` 활성 |
 
 이 sandbox 값은 Roylabs 사용자가 설정한 기준이다.
 현재 채팅에 적용되는 관리형 권한이나 조직 정책을 해제하지 않는다.
@@ -71,9 +71,7 @@
 | [taste-windows-runtime](../skills/adapters/taste-windows-runtime) | 원본 Taste 브라우저 검사에 적용하는 Windows 어댑터. `adapts = "taste-skill"` |
 | `humanize-korean` | im-not-ai의 최신 GitHub 안정 릴리스에서 Codex용 원본 스킬과 참조 문서, 실행 스크립트를 설치 |
 | `feature-sliced-design` | 기본 브랜치에서 공식 FSD 스킬 디렉터리 전체를 설치. FSD를 쓰는 저장소에서만 자율 선택 |
-| [agent-desktop](../skills/agent-desktop) | 설치한 최신 안정 릴리스의 공식 스킬과 참조 문서를 Codex 홈의 `skills`에 복사 |
-| [agent-desktop-windows](../skills/agent-desktop-windows) | 같은 릴리스의 Windows 스킬과 참조 문서를 Codex 홈의 `skills`에 복사 |
-| agent-desktop CLI | GitHub 최신 안정 릴리스의 Windows x64 배포물과 실행 파일 SHA256 확인 |
+| Computer Use | Codex Desktop이 내장 플러그인과 스킬을 설치하고 관리 |
 | CodeGraph CLI | npm `@colbymchenry/codegraph`의 `latest` 배포와 integrity 확인 |
 | OpenSpec CLI | npm `@fission-ai/openspec`의 `latest` 배포와 integrity 확인 |
 | Context7 | 공식 `context7@context7-marketplace` 플러그인을 기존 설치기 지원으로 관리하며 `git-ref: master`를 정확한 commit과 콘텐츠 digest로 lock에 고정 |

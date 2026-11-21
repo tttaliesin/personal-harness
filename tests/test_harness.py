@@ -120,8 +120,7 @@ multi_agent = true
 command = "codegraph"
 args = ["serve", "--mcp"]
 
-[[skills.config]]
-name = "agent-desktop"
+[plugins."computer-use@openai-bundled"]
 enabled = true
 '''
 
@@ -189,7 +188,6 @@ class FakeRepository:
         self.codex = root / "custom codex" if custom_codex else self.home / ".codex"
         self.commands = {
             "codegraph": self.repo / "fake-bin" / "codegraph.cmd",
-            "agent-desktop": self.repo / "fake-bin" / "agent-desktop.cmd",
         }
         self.skills = [
             {"name": "create-readme", "path": "skills/custom/create-readme", "role": "custom"},
@@ -212,6 +210,8 @@ class FakeRepository:
         self.skill_files = {
             ("create-readme", "SKILL.md"): b"# README skill\n",
             ("create-readme", "references/guide.md"): "# 사용 지침\n".encode(),
+            ("create-readme", "references/payload.bin"): b"\x00\xff\x01\r\n",
+            ("create-readme", ".metadata"): b"hidden source file\n",
             ("development-environment", "SKILL.md"): b"# Development environment\n",
             ("development-environment", "references/runtime-patterns.md"): b"# Runtime boundaries\n",
             ("repository-artifacts", "SKILL.md"): b"# Repository artifacts\n",
@@ -232,10 +232,6 @@ class FakeRepository:
             ("taste-windows-runtime", "SKILL.md"): b"# Taste Windows runtime\n",
             ("taste-windows-runtime", "scripts/run.mjs"): b"import './preload.mjs';\r\n",
             ("taste-windows-runtime", "scripts/preload.mjs"): b"export const runtime = 'windows';\n",
-            ("agent-desktop", "SKILL.md"): b"# Desktop skill\r\n",
-            ("agent-desktop", "scripts/payload.bin"): b"\x00\xff\x01\r\n",
-            ("agent-desktop-windows", "SKILL.md"): b"# Windows desktop skill\n",
-            ("agent-desktop-windows", ".metadata"): b"hidden source file\n",
         }
         write_file(self.repo / "package.json", json.dumps({
             "supportedHosts": ["homelab-desktop", "roylabs-desktop"],
@@ -248,8 +244,7 @@ class FakeRepository:
             "# 공통 지침\nSkills live in ${CODEX_HOME}/skills.\n",
         )
         for (skill, relative), payload in self.skill_files.items():
-            source = self.skill_sources.get(skill, self.repo / "skills" / skill)
-            write_file(source / relative, payload)
+            write_file(self.skill_sources[skill] / relative, payload)
         write_file(self.skill_sources["openspec-workflow"] / "SKILL.md", b"# OpenSpec workflow\n")
         if ready:
             for command in self.commands.values():
@@ -259,7 +254,6 @@ class FakeRepository:
                 b"\xef\xbb\xbf" + CURRENT_CONFIG.replace("\n", "\r\n").encode(),
             )
             write_file(self.codex / "AGENTS.md", b"\xef\xbb\xbf# Old local instructions\r\n")
-            write_file(self.codex / "skills/agent-desktop/SKILL.md", b"old desktop\r\n\x00")
             write_file(self.codex / "skills/unrelated/SKILL.md", b"do not touch\r\n")
             write_file(self.home / "unrelated.txt", b"unmanaged home file\x00\xff")
 
@@ -272,8 +266,7 @@ class FakeRepository:
         return str(command) if command is not None and command.is_file() else None
 
     def skill_target(self, skill, relative):
-        root = self.codex if skill in harness.AGENT_DESKTOP_SKILLS else self.home / ".agents"
-        return root / "skills" / skill / relative
+        return self.home / ".agents" / "skills" / skill / relative
 
     def expected_targets(self):
         return {self.codex / "config.toml", self.codex / "AGENTS.md"} | {
@@ -290,43 +283,47 @@ class PersistentStateTests(unittest.TestCase):
     def prepare(self, directory):
         fixture = FakeRepository(Path(directory))
         state = Path(directory) / "state [cache] 한글"
-        files = {"sources/agent-desktop-LICENSE": b"state license"}
         for (skill, relative), data in fixture.skill_files.items():
-            if skill in fixture.skill_sources:
-                write_file(state / "skills" / skill / relative, b"stale state:" + data)
-            else:
-                files[f"skills/{skill}/{relative}"] = b"state:" + data
-        for path, data in files.items():
-            write_file(state / path, data)
-        lock = {"schema_version": 1, "plugins": [], "agent_desktop": {"files_sha256": {
-            path: hashlib.sha256(data).hexdigest() for path, data in files.items()}}}
-        write_file(state / "sources/dependencies.lock.json", json.dumps(lock))
-        return fixture, state, files
+            write_file(state / "skills" / skill / relative, b"stale state:" + data)
+        write_file(state / "sources/dependencies.lock.json", '{"schema_version":1,"plugins":[]}')
+        return fixture, state
 
     def build(self, fixture, state, **kwargs):
         with mock.patch.object(harness.shutil, "which", side_effect=fixture.which):
             return harness.build_plan(fixture.repo, "roylabs-desktop", fixture.home,
                                       state_root=state, **kwargs)
 
-    def test_state_sources_apply_without_writing_payload_and_preserve_runtime(self):
+    def test_old_state_lock_boots_without_vercel_payload_and_uses_repository_skills(self):
         with TemporaryDirectory() as directory:
-            fixture, state, files = self.prepare(directory)
+            fixture, state = self.prepare(directory)
+            lock_path = state / "sources/dependencies.lock.json"
+            lock = json.loads(lock_path.read_bytes())
+            lock["agent_desktop"] = {
+                "version": "1.3.0",
+                "files_sha256": {
+                    "skills/agent-desktop/SKILL.md": "a" * 64,
+                    "skills/agent-desktop-windows/SKILL.md": "b" * 64,
+                    "sources/agent-desktop-LICENSE": "c" * 64,
+                },
+            }
+            write_file(lock_path, json.dumps(lock))
             graph = write_file(state / "tools/codegraph.cmd", b"fixture")
             write_file(state / "roylabs-desktop.toml",
                        '[paths]\ncodegraph = "${STATE_ROOT}/tools/codegraph.cmd"\n'
+                       'agent_desktop = "${STATE_ROOT}/tools/agent-desktop/agent-desktop.exe"\n'
                        '[config.desktop]\nstate_path = "${STATE_ROOT}"\n'
                        'source_path = "${REPO_ROOT}"\nhome_path = "${USERPROFILE}"\n')
             before = tree_snapshot(fixture.repo)
             state_before = tree_snapshot(state)
             plan = self.build(fixture, state)
             self.assertEqual(plan.missing, [])
+            self.assertEqual({change.path for change in plan.changes}, fixture.expected_targets())
             harness.apply_plan(plan)
             self.assertEqual(tree_snapshot(fixture.repo), before)
             self.assertEqual(tree_snapshot(state), state_before)
             for (skill, relative), payload in fixture.skill_files.items():
-                expected = payload if skill in fixture.skill_sources else files[f"skills/{skill}/{relative}"]
                 with self.subTest(skill=skill, relative=relative):
-                    self.assertEqual(fixture.skill_target(skill, relative).read_bytes(), expected)
+                    self.assertEqual(fixture.skill_target(skill, relative).read_bytes(), payload)
             for skill in ("korean-typography", "taste-windows-runtime", "feature-sliced-design",
                           "development-environment", "repository-artifacts", "ste-ko", "humanize-korean"):
                 with self.subTest(agents_skill=skill):
@@ -339,6 +336,7 @@ class PersistentStateTests(unittest.TestCase):
             self.assertEqual(Path(config["desktop"]["state_path"]), state)
             self.assertEqual(Path(config["desktop"]["source_path"]), fixture.repo)
             self.assertEqual(Path(config["desktop"]["home_path"]), fixture.home)
+            self.assertNotIn("agent-desktop", (fixture.codex / "AGENTS.md").read_text(encoding="utf-8"))
             before_second = tree_snapshot(Path(directory))
             second = self.build(fixture, state)
             self.assertEqual(second.missing, [])
@@ -346,27 +344,16 @@ class PersistentStateTests(unittest.TestCase):
             self.assertIsNone(harness.apply_plan(second))
             self.assertEqual(tree_snapshot(Path(directory)), before_second)
 
-    def test_missing_or_mismatched_state_never_falls_back_to_bundled_sources(self):
-        for failure in ("lock", "skill", "digest", "extra", "license"):
-            with self.subTest(failure=failure), TemporaryDirectory() as directory:
-                fixture, state, _ = self.prepare(directory)
-                if failure == "lock":
-                    (state / "sources/dependencies.lock.json").unlink()
-                elif failure in ("skill", "license"):
-                    (state / ("skills/agent-desktop/SKILL.md" if failure == "skill"
-                              else "sources/agent-desktop-LICENSE")).unlink()
-                elif failure == "digest":
-                    write_file(state / "skills/agent-desktop/SKILL.md", b"tampered")
-                else:
-                    write_file(state / "skills/agent-desktop/unlocked.txt", b"extra")
-                before = tree_snapshot(Path(directory))
-                plan = self.build(fixture, state)
-                self.assertTrue(plan.missing)
-                self.assertFalse(any(c.path.is_relative_to(fixture.codex / "skills/agent-desktop")
-                                     for c in plan.changes))
-                with self.assertRaises(harness.HarnessError):
-                    harness.apply_plan(plan)
-                self.assertEqual(tree_snapshot(Path(directory)), before)
+    def test_missing_state_lock_does_not_fall_back_to_repository_lock(self):
+        with TemporaryDirectory() as directory:
+            fixture, state = self.prepare(directory)
+            (state / "sources/dependencies.lock.json").unlink()
+            before = tree_snapshot(Path(directory))
+            plan = self.build(fixture, state)
+            self.assertTrue(any("Persistent dependency lock is missing" in item for item in plan.missing))
+            with self.assertRaises(harness.HarnessError):
+                harness.apply_plan(plan)
+            self.assertEqual(tree_snapshot(Path(directory)), before)
 
     def test_unprepared_state_plan_creates_nothing_and_rejects_external_config(self):
         with TemporaryDirectory() as directory:
@@ -379,7 +366,7 @@ class PersistentStateTests(unittest.TestCase):
 
     def test_openspec_uses_payload_skill_and_private_launcher_without_changing_mcp(self):
         with TemporaryDirectory() as directory:
-            fixture, state, _ = self.prepare(directory)
+            fixture, state = self.prepare(directory)
             skill = b"---\nname: openspec-workflow\ndescription: Fixture\n---\nworkflow\n"
             write_file(fixture.skill_sources["openspec-workflow"] / "SKILL.md", skill)
             lock_path = state / "sources/dependencies.lock.json"
@@ -404,7 +391,7 @@ class PersistentStateTests(unittest.TestCase):
 
     def test_missing_openspec_in_new_lock_prevents_all_profile_writes(self):
         with TemporaryDirectory() as directory:
-            fixture, state, _ = self.prepare(directory)
+            fixture, state = self.prepare(directory)
             write_file(fixture.skill_sources["openspec-workflow"] / "SKILL.md", b"workflow")
             lock_path = state / "sources/dependencies.lock.json"
             lock = json.loads(lock_path.read_bytes())
@@ -444,15 +431,15 @@ class ConfigPreservationTests(unittest.TestCase):
         self.assertTrue(merged["features"]["multi_agent"])
         self.assertEqual(merged["mcp_servers"]["codegraph"]["args"], ["serve", "--mcp"])
 
-    def test_packaged_common_config_keeps_desktop_skill_selections_and_shared_sandbox(self):
+    def test_packaged_common_config_keeps_bundled_computer_use_and_shared_sandbox(self):
         with (harness.REPO / "common/config.toml").open("rb") as stream:
             common = tomllib.load(stream)
         self.assertEqual(common["windows"]["sandbox"], "elevated")
         self.assertTrue(common["plugins"]["computer-use@openai-bundled"]["enabled"])
-        selections = {entry["name"]: entry["enabled"] for entry in common["skills"]["config"]}
-        self.assertFalse(selections["computer-use"])
-        self.assertTrue(selections["agent-desktop"])
-        self.assertTrue(selections["agent-desktop-windows"])
+        for entry in common.get("skills", {}).get("config", []):
+            self.assertNotIn(entry.get("name"), {"agent-desktop", "agent-desktop-windows"})
+            if entry.get("name") == "computer-use":
+                self.assertTrue(entry.get("enabled"))
 
     def test_empty_overlays_preserve_the_entire_document(self):
         self.assertEqual(merge_config_for_test(CURRENT_CONFIG, "", " \n", ""), CURRENT_CONFIG)
@@ -1206,9 +1193,10 @@ class BuildPlanTests(TemporaryHarnessTestCase):
         self.assertFalse(self.fixture.home.exists())
         self.assertEqual({change.path for change in plan.changes}, self.fixture.expected_targets())
         self.assertTrue(all(change.before is None for change in plan.changes))
-        for expected in ("node_repl", "codegraph", "agent-desktop"):
+        for expected in ("node_repl", "codegraph"):
             with self.subTest(prerequisite=expected):
                 self.assertTrue(any(expected in message for message in plan.missing), plan.missing)
+        self.assertFalse(any("agent-desktop" in message for message in plan.missing))
         self.process.assert_not_called()
 
     def test_default_plan_reads_seed_until_active_lock_exists(self):
@@ -1241,7 +1229,7 @@ class BuildPlanTests(TemporaryHarnessTestCase):
     def test_inline_skill_arrays_in_planned_config_are_valid_and_second_plan_is_stable(self):
         for storage, inline in (
             ("empty", "[]"),
-            ("populated", '[{name = "computer-use", path = "C:/local/computer-use", enabled = true, local_field = "keep"}, {name = "unrelated", enabled = false}]'),
+            ("populated", '[{name = "scoped", path = "C:/local/scoped", enabled = true, local_field = "keep"}, {name = "unrelated", enabled = false}]'),
         ):
             with self.subTest(storage=storage):
                 self.fixture = FakeRepository(self.root / storage)
@@ -1249,7 +1237,7 @@ class BuildPlanTests(TemporaryHarnessTestCase):
                 write_file(config_path, CURRENT_CONFIG + f"\n[skills]\nconfig = {inline}\n")
                 write_file(
                     self.fixture.repo / "common/config.toml",
-                    COMMON_CONFIG + '\n[[skills.config]]\nname = "computer-use"\nenabled = false\n',
+                    COMMON_CONFIG + '\n[[skills.config]]\nname = "scoped"\nenabled = false\n',
                 )
                 before = tree_snapshot(self.root)
                 plan = self.build()
@@ -1257,12 +1245,10 @@ class BuildPlanTests(TemporaryHarnessTestCase):
                 self.assertEqual(tree_snapshot(self.root), before)
                 merged = next(change.after for change in plan.changes if change.path == config_path)
                 expected_entries = [
-                    {"name": "agent-desktop", "enabled": True},
-                    {"name": "computer-use", "enabled": False},
+                    {"name": "scoped", "enabled": False},
                 ] if storage == "empty" else [
-                    {"name": "computer-use", "path": "C:/local/computer-use", "enabled": False, "local_field": "keep"},
+                    {"name": "scoped", "path": "C:/local/scoped", "enabled": False, "local_field": "keep"},
                     {"name": "unrelated", "enabled": False},
-                    {"name": "agent-desktop", "enabled": True},
                 ]
                 self.assertEqual(tomllib.loads(merged.decode())["skills"]["config"], expected_entries)
                 ConfigPreservationTests.assert_preserved(self, merged.decode())
@@ -1273,6 +1259,52 @@ class BuildPlanTests(TemporaryHarnessTestCase):
                 self.assertNotIn(config_path, [change.path for change in second.changes])
                 self.assertEqual(second.changes, [change for change in plan.changes if change.path != config_path])
                 self.assertEqual(tree_snapshot(self.root), before_second)
+
+    def test_desktop_migration_removes_only_retired_selections(self):
+        for storage in ("inline", "array-of-tables"):
+            with self.subTest(storage=storage):
+                self.fixture = FakeRepository(self.root / storage, custom_codex=True)
+                codex = self.fixture.codex
+                old_skill = write_file(codex / "skills/agent-desktop/SKILL.md", b"user-edited legacy skill")
+                retired = [
+                    {"name": "agent-desktop", "enabled": True},
+                    {"path": old_skill.as_posix(), "enabled": False},
+                    {"path": str(codex / "skills/agent-desktop-windows"), "enabled": True},
+                    {"name": "agent-desktop-windows", "enabled": True},
+                    {"name": "computer-use", "enabled": False},
+                ]
+                preserved = [
+                    {"name": "computer-use", "path": "C:/local/computer-use/SKILL.md", "enabled": False},
+                    {"name": "agent-desktop-preview", "enabled": True},
+                    {"path": (codex / "skills/agent-desktop-preview/SKILL.md").as_posix(), "enabled": False},
+                    {"path": (self.fixture.home / ".agents/skills/agent-desktop/SKILL.md").as_posix(),
+                     "enabled": True},
+                ]
+                entries = [*retired[:2], *preserved[:2], *retired[2:4], *preserved[2:], retired[4]]
+                fields = [[f"{key} = {json.dumps(value, ensure_ascii=False)}" for key, value in entry.items()]
+                          for entry in entries]
+                if storage == "inline":
+                    tables = ["{ " + ", ".join(entry) + " }" for entry in fields]
+                    selections = "config = [" + ", ".join(tables) + "]\n"
+                else:
+                    selections = "".join("[[skills.config]]\n" + "\n".join(entry) + "\n" for entry in fields)
+                config_path = write_file(codex / "config.toml",
+                                         CURRENT_CONFIG + '\n[skills]\nfuture_option = "keep"\n' + selections)
+                local = write_file(
+                    self.root / storage / "legacy override.toml",
+                    '[[config.skills.config]]\nname = "agent-desktop"\nenabled = true\n',
+                )
+                plan = self.build(local_config=local)
+                self.assertEqual(plan.missing, [])
+                self.assertNotIn(old_skill, [change.path for change in plan.changes])
+                harness.apply_plan(plan)
+                rendered = config_path.read_text(encoding="utf-8")
+                ConfigPreservationTests.assert_preserved(self, rendered)
+                config = tomllib.loads(rendered)
+                self.assertEqual(config["skills"], {"future_option": "keep", "config": preserved})
+                self.assertTrue(config["plugins"]["computer-use@openai-bundled"]["enabled"])
+                self.assertEqual(old_skill.read_bytes(), b"user-edited legacy skill")
+                self.assertEqual(self.build(local_config=local).changes, [])
 
     def test_supported_hosts_share_windows_default_and_respect_local_override(self):
         self.assertFalse((self.fixture.repo / "hosts").exists())
@@ -1308,7 +1340,6 @@ class BuildPlanTests(TemporaryHarnessTestCase):
                    '[config]\nmodel = "wrong-default"\n[config.desktop]\ndefault_only = true\n')
         local = write_file(self.root / "chosen override.toml", '''[paths]
 codegraph = "${REPO_ROOT}/fake-bin/codegraph.cmd"
-agent_desktop = "${REPO_ROOT}/fake-bin/agent-desktop.cmd"
 [config]
 model = "local-model"
 notify = ["${USERPROFILE}/notify.exe", "${CODEX_HOME}/catalog"]
@@ -1345,9 +1376,8 @@ LOCAL_HOME = "${USERPROFILE}"
         self.assertTrue(instructions.startswith(f"# 공통 지침\nSkills live in {codex}/skills.\n"))
         self.assertEqual(instructions.count("## Local tool executables"), 1)
         tool_instructions = instructions.split("## Local tool executables", 1)[1]
-        for tool in ("agent-desktop", "codegraph"):
-            executable = self.fixture.commands[tool]
-            self.assertIn(f"`{tool}`: `{executable.as_posix()}`", tool_instructions)
+        executable = self.fixture.commands["codegraph"]
+        self.assertIn(f"`codegraph`: `{executable.as_posix()}`", tool_instructions)
         self.assertNotIn("${", instructions)
         self.which.assert_not_called()  # configured prerequisite files suffice
 
@@ -1498,6 +1528,7 @@ command = "node"
 
     def test_apply_backs_up_original_bytes_and_second_plan_has_no_changes(self):
         fixture = self.fixture
+        write_file(fixture.skill_target("create-readme", "SKILL.md"), b"old skill\r\n\x00")
         plan = self.build()
         changes = {change.path: change for change in plan.changes}
         unmanaged = {path: path.read_bytes() for path in (
@@ -1546,9 +1577,9 @@ command = "node"
                     manifest = json.loads(manifest_path.read_text())
                     manifest.pop("status")
                     manifest_path.write_text(json.dumps(manifest))
-                relative = "skills/agent-desktop/scripts/payload.bin"
-                source = self.fixture.repo / relative
-                target = self.fixture.codex / relative
+                relative = "references/payload.bin"
+                source = self.fixture.skill_sources["create-readme"] / relative
+                target = self.fixture.skill_target("create-readme", relative)
                 installed = target.read_bytes()
                 source.unlink()
                 plan = self.build()
@@ -1566,9 +1597,9 @@ command = "node"
 
     def test_removed_upstream_file_with_user_edits_is_preserved_and_blocks_apply(self):
         harness.apply_plan(self.build())
-        relative = "skills/agent-desktop/scripts/payload.bin"
-        (self.fixture.repo / relative).unlink()
-        target = self.fixture.codex / relative
+        relative = "references/payload.bin"
+        (self.fixture.skill_sources["create-readme"] / relative).unlink()
+        target = self.fixture.skill_target("create-readme", relative)
         target.write_bytes(b"user modified this previously deployed file")
         plan = self.build()
         self.assertTrue(any("Unmanaged files" in item for item in plan.missing))
@@ -1580,7 +1611,7 @@ command = "node"
 
     def test_unrecorded_extra_file_is_preserved_even_when_a_pending_or_failed_receipt_matches(self):
         harness.apply_plan(self.build())
-        target = write_file(self.fixture.codex / "skills/agent-desktop/custom.txt", b"user addition")
+        target = write_file(self.fixture.skill_target("create-readme", "custom.txt"), b"user addition")
         manifest_path = self.fixture.codex / "harness-backups/zz-unfinished/manifest.json"
         for status in ("pending", "failed"):
             with self.subTest(status=status):
@@ -1675,7 +1706,7 @@ class LinkSafetyTests(TemporaryHarnessTestCase):
     def test_build_refuses_a_skill_destination_below_a_directory_link(self):
         outside = self.root / "outside managed roots"
         write_file(outside / "SKILL.md", b"external skill must survive")
-        destination = self.fixture.codex / "skills/agent-desktop-windows"
+        destination = self.fixture.skill_target("korean-typography", "SKILL.md").parent
         self.make_directory_link(destination, outside)
         before = tree_snapshot(self.root)
         with self.assertRaises(harness.HarnessError):

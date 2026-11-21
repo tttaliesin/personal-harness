@@ -14,7 +14,7 @@
 기본 미리보기는 네트워크를 읽지만 파일과 사용자 홈을 쓰지 않는다.
 `task install`과 `task update`는 선택한 상태 루트에 도구를 설치한다.
 설치기는 대상 Codex 홈에 플러그인을 등록한다.
-의존성과 공식 Agent Desktop 스킬의 설치를 검증한 뒤 실제 버전과 커밋, 해시를 `<state-root>/sources/dependencies.lock.json`에 기록한다.
+설치한 의존성을 검증한 뒤 버전, 커밋, 해시를 `<state-root>/sources/dependencies.lock.json`에 기록한다.
 이어서 하네스를 적용하고 상태를 확인한다.
 
 체크아웃의 기본 상태 루트는 Git에서 제외되는 `.local`이다.
@@ -26,6 +26,9 @@
 Codex CLI는 PATH와 기존 `node_repl` 설정의 `CODEX_CLI_PATH`에서 찾는다.
 자동으로 찾지 못하면 `task install -- -Codex 'D:/tools/codex.exe'`로 지정한다.
 `task install -- -CodexHome 'D:/Test Codex'`로 별도 프로필에 먼저 설치할 수도 있다.
+
+Codex Desktop은 내장 Computer Use를 앱과 함께 설치한다.
+Windows 앱 화면을 확인하거나 앱에 직접 입력해야 할 때 Codex는 내장 Computer Use를 선택한다.
 
 Ego와 번들 스킬은 브라우저가 관리한다.
 이 저장소의 설치·사전 검사·적용 대상에 포함하지 않는다.
@@ -55,8 +58,7 @@ Ego와 번들 스킬은 브라우저가 관리한다.
 설치기는 `registry.toml`의 `[[skills]]`에서 로컬 스킬의 `path`와 외부 원본의 `source`를 읽는다.
 적용할 때 로컬 파일과 캐시의 외부 파일을 `~/.agents/skills/<name>/`에 배치한다.
 `requires`를 지정한 스킬은 잠금 파일에 해당 의존성이 있을 때 배포한다. [저장소 구조](../README.md#저장소-구조)
-검증한 공식 Agent Desktop 스킬은 Codex 홈의 `skills/`에 복사한다.
-스킬 원본에서 삭제된 파일은 현재 SHA256이 이전 적용 기록과 일치할 때만 정리한다.
+설치기는 등록한 스킬의 원본에서 삭제된 파일을 현재 SHA256이 이전 적용 기록과 일치할 때만 정리한다.
 사용자가 수정하거나 추가한 파일이 있으면 해당 파일을 보존하고 적용을 중단한다.
 원본과 설치 경로에서 파일과 디렉터리의 형태가 충돌하면 쓰기 전에 적용을 중단한다.
 
@@ -71,6 +73,7 @@ Ego와 번들 스킬은 브라우저가 관리한다.
 
 설정 파일의 주석과 명시하지 않은 항목은 TOML 편집기로 유지한다.
 `skills.config`는 이름 또는 경로가 같은 항목만 갱신한다.
+적용 계획은 이전 하네스가 남긴 데스크톱 스킬 선택과 `computer-use` 비활성 항목을 제거한다.
 기존 사용자 스킬 선택 목록 전체를 교체하지 않는다.
 현재 존재하는 파일과 충돌한 경우에는 적용 전에 백업이 만들어진다.
 

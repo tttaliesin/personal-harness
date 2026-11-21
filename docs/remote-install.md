@@ -40,6 +40,9 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 `--prefer-online`은 캐시에 있는 Git 참조의 최신성을 다시 확인하게 한다.
 업데이트는 명령을 실행할 때만 수행한다.
 
+Codex Desktop은 내장 Computer Use를 앱과 함께 설치한다.
+Windows 앱 화면을 확인하거나 앱에 직접 입력해야 할 때 Codex는 내장 Computer Use를 선택한다.
+
 설치기는 현재 PC 이름이 [package.json](../package.json)의 `supportedHosts`에 등록됐는지 확인한다.
 다른 호스트를 사용하려면 `--host`로 지정한다.
 
@@ -87,12 +90,9 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 |---|---|
 | `<설치 루트>/active.json` | 적용과 검증을 모두 마친 마지막 실행의 기록 |
 | `<상태 루트>/<hostname>.toml` | 해당 PC의 경로와 선택적 설정 덮어쓰기 |
-| `<상태 루트>/tools` | Agent Desktop, CodeGraph, OpenSpec, 등록된 MCP 패키지의 실행 파일 |
+| `<상태 루트>/tools` | CodeGraph, OpenSpec과 등록된 MCP 패키지의 실행 파일 |
 | `<상태 루트>/python` | 설치기용 Python 가상환경 |
 | `<상태 루트>/sources/dependencies.lock.json` | 실제로 설치한 버전과 커밋, 배포 해시 |
-| `<상태 루트>/skills` | 같은 잠금에 대응하는 공식 Agent Desktop 스킬 원본 |
-| `<상태 루트>/sources/agent-desktop-LICENSE` | 같은 잠금에 대응하는 공식 Agent Desktop 라이선스 |
-| `<상태 루트>/source-backups` | 공식 스킬 원본 갱신 전 백업 |
 | `<상태 루트>/external-skills.json` | 외부 스킬의 선택한 커밋과 검증한 파일 내용 |
 | `~/.agents/skills/<name>/` | `registry.toml`에 등록한 로컬 스킬과 캐시에서 배포한 외부 파일 |
 | `<Codex 홈>/harness-backups` | 공통 파일 적용 전 백업 |
@@ -127,7 +127,7 @@ flowchart LR
     L[PC별 상태와 경로] --> I
     R[해당 PC의 기존 Codex 런타임] --> I
     I --> C[해당 PC의 Harness]
-    I --> P[영속 도구·잠금·공식 스킬 원본]
+    I --> P[도구와 버전 기록 보관]
     I --> E["외부 스킬 캐시 · external-skills.json"]
     I --> D[실행 소스 삭제]
 ```

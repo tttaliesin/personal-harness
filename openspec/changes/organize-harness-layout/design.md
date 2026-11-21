@@ -3,7 +3,6 @@
 ## Context
 
 PC별 설정은 기존 로컬 TOML에 둔다.
-공식 Agent Desktop 릴리스는 설치기가 검증하고 Codex 홈에 배포한다.
 
 ## Decisions
 
@@ -57,8 +56,6 @@ PC별 설정은 기존 로컬 TOML에 둔다.
   `role`과 `adapts`가 모두 없는 로컬 항목에는 기존 검사를 적용한다.
   등록한 단독 스킬은 `name`에 따라 `~/.agents/skills/<name>/`에 배치한다.
   OpenSpec 작업 스킬은 잠금 파일에 `openspec`이 있을 때 적용한다.
-- 공식 Agent Desktop 스킬은 `skills/agent-desktop/`과 `skills/agent-desktop-windows/`에 둔다.
-  릴리스 검증에는 `sources/agent-desktop-LICENSE`를 사용한다.
 - `bin/`은 npm 진입점을 제공하고 `installer/`는 설치와 적용을 담당한다.
   `task test`는 루트 `Taskfile.yml`에서 Python `unittest`를 직접 실행한다.
 - `common/config.toml`의 `windows.sandbox`는 두 PC에 공통 기본값 `elevated`를 제공한다.

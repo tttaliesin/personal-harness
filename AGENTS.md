@@ -11,7 +11,6 @@ Treat `common/AGENTS.md` and registered skills as deployable source data while e
 - Declare externally fetched standalone skills with `role = "upstream"`, an HTTPS GitHub repository in `source`, a `channel`, and a `files` mapping from installation targets to upstream relative paths.
 - Keep the `ste-ko` adapter's local `SKILL.md` and declare its external references with the same source fields.
 - Place installation code in `installer`.
-- Keep Agent Desktop's verified skill directories and license at their existing paths.
 - Put private absolute paths and local overrides in ignored `.local/<hostname>.toml`.
 - Preserve app-generated `node_repl`, notify, marketplace paths, OpenCodex configuration, project trust and hook trust in the existing target profile.
 - Keep authentication, account records, sessions, runtime pipes and backup contents out of Git.

@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import argparse
 import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import hashlib
-import io
 import json
 import os
 from pathlib import Path
@@ -14,14 +13,13 @@ import re
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 import urllib.parse
 import urllib.request
 
 import tomlkit
 from harness import (
-    REPO, HarnessError, atomic_write, official_source_files, read_toml, require_supported_host, safe_file, select_layout,
+    REPO, HarnessError, atomic_write, read_toml, require_supported_host, safe_file, select_layout,
     skill_files,
 )
 from external_skills import CACHE_NAME as EXTERNAL_SKILL_CACHE, encode_cache, load_cache
@@ -37,8 +35,6 @@ def digest(data: bytes) -> str:
 @dataclass
 class Resolution:
     lock: dict
-    files: dict[str, bytes] = field(default_factory=dict)
-    archive: bytes | None = None
 
 
 def fetch(url: str) -> bytes:
@@ -89,17 +85,6 @@ def content_digest(files: dict) -> str:
 
 def blob_digest(data: bytes) -> str:
     return hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
-
-
-def extract_agent(data: bytes, expected: str) -> bytes:
-    if digest(data) != expected:
-        raise HarnessError("agent-desktop archive SHA256 mismatch")
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as package:
-        members = [item for item in package.getmembers() if item.name == "agent-desktop.exe"]
-        if len(members) != 1 or not members[0].isfile():
-            raise HarnessError("agent-desktop release must contain one regular executable")
-        with package.extractfile(members[0]) as stream:
-            return stream.read()
 
 
 def plugin_prefix(manifest: str) -> str:
@@ -233,6 +218,7 @@ def resolve(lock: dict, locked: bool = False, registry: Registry | None = None) 
     result = Resolution(copy.deepcopy(lock))
     candidate = result.lock
     candidate.pop("ego_lite", None)
+    candidate.pop("agent_desktop", None)
     if locked:
         if "openspec" in candidate:
             validate_openspec(candidate["openspec"])
@@ -263,35 +249,6 @@ def resolve(lock: dict, locked: bool = False, registry: Registry | None = None) 
                              "version": spec.get("version"), "integrity": spec["dist"].get("integrity"),
                              "tarball": spec["dist"].get("tarball")}
     validate_openspec(candidate["openspec"])
-    repo = "vercel-labs/agent-desktop"
-    metadata, commit = release(repo)
-    version = stable_version(metadata["tag_name"])
-    name = f"agent-desktop-v{version}-x86_64-pc-windows-msvc.tar.gz"
-    assets = [item for item in metadata["assets"] if item["name"] == name]
-    if len(assets) != 1 or not re.fullmatch(r"sha256:[0-9a-f]{64}", assets[0].get("digest") or ""):
-        raise HarnessError("Official agent-desktop asset with SHA256 digest is required")
-    asset = assets[0]
-    result.archive = fetch(asset["browser_download_url"])
-    sha256 = asset["digest"].split(":", 1)[1]
-    executable = extract_agent(result.archive, sha256)
-    for item in source_tree(repo, commit):
-        path = item["path"]
-        if path == "LICENSE" or path.startswith(("skills/agent-desktop/", "skills/agent-desktop-windows/")):
-            if item["type"] == "tree":
-                continue
-            if item["type"] != "blob" or item["mode"] not in ("100644", "100755"):
-                raise HarnessError(f"Unsupported agent-desktop source entry: {path}")
-            data = fetch(f"https://raw.githubusercontent.com/{repo}/{commit}/{path}")
-            if blob_digest(data) != item["sha"]:
-                raise HarnessError(f"Source blob digest mismatch: {path}")
-            target = "sources/agent-desktop-LICENSE" if path == "LICENSE" else path
-            result.files[target] = data
-    required = {"sources/agent-desktop-LICENSE", "skills/agent-desktop/SKILL.md", "skills/agent-desktop-windows/SKILL.md"}
-    if not required.issubset(result.files):
-        raise HarnessError("Official agent-desktop skills or LICENSE are missing")
-    candidate["agent_desktop"].update(version=version, source=f"https://github.com/{repo}", source_commit=commit,
-        url=asset["browser_download_url"], sha256=sha256, executable_sha256=digest(executable),
-        files_sha256={path: digest(data) for path, data in sorted(result.files.items())})
     return result
 
 
@@ -314,23 +271,6 @@ def find_codex(explicit: str | None, codex_home: Path) -> str | None:
         if candidate and Path(candidate).is_file():
             return str(candidate)
     return None
-
-
-def install_agent(lock: dict, local: Path, staged: bytes | None = None) -> Path:
-    destination = local / "tools" / "agent-desktop" / "agent-desktop.exe"
-    safe_file(destination, local)
-    if destination.is_file() and digest(destination.read_bytes()) == lock["executable_sha256"]:
-        return destination
-    archive = local / "downloads" / f"agent-desktop-v{lock['version']}-{lock['sha256']}.tar.gz"
-    safe_file(archive, local)
-    data = staged if staged is not None else archive.read_bytes() if archive.is_file() else fetch(lock["url"])
-    executable = extract_agent(data, lock["sha256"])
-    if digest(executable) != lock["executable_sha256"]:
-        raise HarnessError("agent-desktop executable SHA256 mismatch")
-    if not archive.exists() or archive.read_bytes() != data:
-        atomic_write(archive, data)
-    atomic_write(destination, executable)
-    return destination
 
 
 def install_codegraph(lock: dict, local: Path, npm: str) -> Path:
@@ -506,66 +446,11 @@ def install_plugins(plugins: list, codex: str, codex_home: Path):
                 raise HarnessError(f"Installed plugin source content does not match the resolved commit: {selector}")
 
 
-def sync_sources(result: Resolution, repo: Path, backup_root: Path | None = None):
-    record = result.lock["agent_desktop"]
-    expected = record.get("files_sha256", {})
-    if not expected:
-        return
-    official_source_files(result.lock)
-    files = dict(result.files)
-    for path, sha256 in expected.items():
-        if path not in files:
-            cached = repo / path
-            safe_file(cached, repo)
-            if backup_root is not None and cached.is_file() and digest(cached.read_bytes()) == sha256:
-                files[path] = cached.read_bytes()
-            else:
-                source = "LICENSE" if path == "sources/agent-desktop-LICENSE" else path
-                files[path] = fetch(f"https://raw.githubusercontent.com/vercel-labs/agent-desktop/{record['source_commit']}/{source}")
-        if digest(files[path]) != sha256:
-            raise HarnessError(f"Locked source digest mismatch: {path}")
-    managed = ("skills/agent-desktop", "skills/agent-desktop-windows")
-    for path in files:
-        if ".." in Path(path).parts or Path(path).is_absolute() or "\\" in path:
-            raise HarnessError(f"Unsafe managed source path: {path}")
-        if path != "sources/agent-desktop-LICENSE" and not any(path.startswith(prefix + "/") for prefix in managed):
-            raise HarnessError(f"Unexpected managed source path: {path}")
-        safe_file(repo / path, repo)
-        target = repo / path
-        if target.is_dir() or any(parent.is_file() for parent in target.parents if parent != repo):
-            raise HarnessError(f"Managed source changes file/directory shape; no sources were written: {path}")
-    existing = []
-    for prefix in managed:
-        root = repo / prefix
-        safe_file(root, repo)
-        for path in root.rglob("*"):
-            safe_file(path, repo)
-            if path.is_file():
-                existing.append(path)
-    license_path = repo / "sources/agent-desktop-LICENSE"
-    if license_path.exists():
-        existing.append(license_path)
-    if set(files) == {path.relative_to(repo).as_posix() for path in existing} and all(
-            (repo / path).read_bytes() == data for path, data in files.items()):
-        return
-    backup_root = backup_root or repo / ".local/source-backups"
-    safe_file(backup_root, repo)
-    backup_root.mkdir(parents=True, exist_ok=True)
-    backup = Path(tempfile.mkdtemp(prefix="agent-desktop-", dir=backup_root))
-    for path in existing:
-        atomic_write(backup / path.relative_to(repo), path.read_bytes())
-    for path, data in files.items():
-        atomic_write(repo / path, data)
-    for path in existing:
-        if path.relative_to(repo).as_posix() not in files:
-            path.unlink()
-
-
-def save_paths(path: Path, agent: Path, codegraph: Path, openspec: Path | None = None):
+def save_paths(path: Path, codegraph: Path, openspec: Path | None = None):
     local = read_toml(path) if path.exists() else tomlkit.document()
     if "paths" not in local:
         local["paths"] = tomlkit.table()
-    for key, executable in (("agent_desktop", agent), ("codegraph", codegraph), ("openspec", openspec)):
+    for key, executable in (("codegraph", codegraph), ("openspec", openspec)):
         if executable is None:
             continue
         if key not in local["paths"]:
@@ -605,8 +490,6 @@ def main(argv=None) -> int:
             validate_openspec(lock["openspec"])
         for record in lock.get("mcp", []):
             mcp_packages.preflight(record)
-        if layout.persistent:
-            official_source_files(lock)
         external_specs = tuple(spec for spec in registry.skills if "source" in spec
                                and ("requires" not in spec or spec["requires"] in lock))
         cache_path = local / EXTERNAL_SKILL_CACHE
@@ -626,7 +509,6 @@ def main(argv=None) -> int:
 
         codex_home = args.codex_home.resolve()
         codex = find_codex(args.codex, codex_home)
-        print(f"Agent desktop {lock['agent_desktop']['version']} -> {local / 'tools/agent-desktop'} (SHA256 verified on install)")
         print(f"{lock['codegraph']['package']}@{lock['codegraph']['version']} -> {local / 'tools/codegraph'}")
         if "openspec" in lock:
             print(f"{lock['openspec']['package']}@{lock['openspec']['version']} -> {local / 'tools/openspec'}")
@@ -643,30 +525,25 @@ def main(argv=None) -> int:
             print("Preview only. Pass -Install to install dependencies. No files were written.")
             return 0
         if os.name != "nt" or platform.machine().lower() not in ("amd64", "x86_64"):
-            raise HarnessError("The pinned agent-desktop release targets Windows x64")
+            raise HarnessError("The pinned CodeGraph bundle targets Windows x64")
         npm = shutil.which("npm")
         if not npm or not shutil.which("git") or not codex:
             raise HarnessError("Install Node/npm, Git and Codex first; specify --codex when it is not on PATH")
         if "openspec" in lock:
             check_openspec_node(shutil.which("node"))
         safe_file(config, local)
-        agent = install_agent(lock["agent_desktop"], local, result.archive)
         codegraph = install_codegraph(lock["codegraph"], local, npm)
         openspec = install_openspec(lock["openspec"], local, npm) if "openspec" in lock else None
         install_plugins(lock["plugins"], codex, codex_home)
         for record in lock.get("mcp", []):
             mcp_packages.install(record, local, guard=safe_file)
-        if layout.persistent:
-            sync_sources(result, layout.sources, layout.source_backups)
-        else:
-            sync_sources(result, REPO)
-        save_paths(config, agent, codegraph, openspec)
+        save_paths(config, codegraph, openspec)
         atomic_write(lock_path, (json.dumps(lock, indent=2) + "\n").encode("utf-8"))
         if external_specs and not args.locked:
             atomic_write(cache_path, encode_cache(external_specs, external))
         print(f"Dependencies installed and lock saved. Run harness.ps1 apply/check -HostName {host}.")
         return 0
-    except (HarnessError, OSError, ValueError, KeyError, tarfile.TarError, subprocess.CalledProcessError, tomlkit.exceptions.TOMLKitError) as exc:
+    except (HarnessError, OSError, ValueError, KeyError, subprocess.CalledProcessError, tomlkit.exceptions.TOMLKitError) as exc:
         message = ("Dependency operation failed" if isinstance(exc, (OSError, subprocess.CalledProcessError,
                                                                     tomlkit.exceptions.TOMLKitError)) else str(exc))
         print(f"ERROR {message}", file=sys.stderr)

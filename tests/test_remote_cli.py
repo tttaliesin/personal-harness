@@ -33,6 +33,11 @@ PRE_ROLE_SKILL_PATHS = {
     "skills/adapters/taste-windows-runtime": "skills/design/taste-windows-runtime",
 }
 HISTORICAL_SKILL_FIXTURE = b"# Historical skill fixture\n"
+LEGACY_AGENT_DESKTOP_FILES = {
+    "skills/agent-desktop/SKILL.md": HISTORICAL_SKILL_FIXTURE,
+    "skills/agent-desktop-windows/SKILL.md": HISTORICAL_SKILL_FIXTURE,
+    "sources/agent-desktop-LICENSE": b"Historical Agent Desktop license fixture\n",
+}
 VENDORED_EXTERNAL_PREFIXES = (
     "dependencies/skills/", "skills/feature-sliced-design/", "skills/humanize-korean/",
     "skills/writing/ste-ko/", "skills/adapters/ste-ko/references/",
@@ -318,10 +323,12 @@ class RemoteCliTests(unittest.TestCase):
                 legacy_name = "/".join([legacy_roots.get(parts[0], parts[0]), *parts[1:]])
             legacy_content[legacy_name] = data
         content = legacy_content
+        content.update(LEGACY_AGENT_DESKTOP_FILES)
         if scripts_layout:
             content.pop("scripts/share.py", None)
-            manifest["files"].remove("sources")
             manifest["files"] = [legacy_roots.get(name, name) for name in manifest["files"]]
+        else:
+            manifest["files"].append("sources")
         if pre_registry:
             manifest["files"].remove("registry.toml")
             old_scripts = {"bootstrap.ps1", "harness.ps1", "harness.py", "install_dependencies.py",
@@ -386,8 +393,7 @@ class RemoteCliTests(unittest.TestCase):
         self.assertFalse(run_source.parent.exists())
         self.assertFalse((self.manager / "releases").exists())
         self.assertFalse(any(name.startswith("hosts/") for name in wrapper["hashes"]))
-        for name in ("skills/agent-desktop/references/commands-system.md", "sources/agent-desktop-LICENSE",
-                     "dependencies/dependencies.lock.json", "dependencies/NOTICE.md", "docs/local.example.toml"):
+        for name in ("dependencies/dependencies.lock.json", "dependencies/NOTICE.md", "docs/local.example.toml"):
             with self.subTest(payload_file=name):
                 self.assertIn(name, wrapper["hashes"].keys())
         for name in self.standalone_skill_payload_files():
@@ -750,11 +756,6 @@ class RemoteCliTests(unittest.TestCase):
             self.legacy_source(b"\nolder revision\n", pre_registry=False),
             self.legacy_source(pre_registry=False, scripts_layout=False),
         )
-        official = ("skills/agent-desktop/SKILL.md", "skills/agent-desktop-windows/SKILL.md",
-                    "sources/agent-desktop-LICENSE")
-        expected = {name: (self.payload / name).read_bytes() for name in official}
-        for release in releases:
-            self.assertEqual({name: (release / name).read_bytes() for name in official}, expected)
         previous = self.legacy_receipt(releases[0])
         sentinels = {}
         for target in (self.state / "tools/unrelated.exe", self.state / "sources/lock.json",
@@ -767,7 +768,8 @@ class RemoteCliTests(unittest.TestCase):
         self.assertEqual((self.manager / "active.json").read_bytes(), previous)
         for release, prefix in zip(releases, ("skills", "skills", "dependencies/skills"), strict=True):
             source = Path("\\\\?\\" + str(release))
-            self.assertEqual({name: (source / name).read_bytes() for name in official}, expected)
+            for name, expected in LEGACY_AGENT_DESKTOP_FILES.items():
+                self.assertEqual((source / name).read_bytes(), expected)
             for name in ("feature-sliced-design", "humanize-korean"):
                 self.assertEqual((source / prefix / name / "SKILL.md").read_bytes(), HISTORICAL_SKILL_FIXTURE)
         self.run_cli("update")
@@ -1125,10 +1127,13 @@ class RemoteCliTests(unittest.TestCase):
                 self.assertFalse(self.manager.exists())
         manifest_path = self.payload / "package.json"
         manifest = json.loads(manifest_path.read_text())
-        manifest["files"].append("../outside")
-        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-        self.run_cli(expected=1)
-        self.assertFalse(self.manager.exists())
+        for entry in ("../outside", "sources"):
+            with self.subTest(entry=entry):
+                updated = {**manifest, "files": [*manifest["files"], entry]}
+                manifest_path.write_text(json.dumps(updated), encoding="utf-8")
+                result = self.run_cli(expected=1)
+                self.assertIn(f"Invalid payload allowlist entry: {entry}".encode(), result.stderr)
+                self.assertFalse(self.manager.exists())
 
     def test_output_targets_cannot_overlap_sources_or_advance_a_receipt(self):
         self.run_cli()
@@ -1199,8 +1204,9 @@ class RemoteCliTests(unittest.TestCase):
     @unittest.skipUnless(NPM, "npm is required")
     def test_actual_npm_pack_has_complete_allowlisted_payload_and_runs_offline(self):
         self.assertTrue((ROOT / "docs/history/deployment-2026-11-12-13.md").is_file())
+        skill_files = self.standalone_skill_payload_files()
         for relative in ("AGENTS.md", ".local/private.txt", ".audit/private.txt", "tests/private.py",
-                         "installer/__pycache__/private.pyc", "skills/agent-desktop/.local/private.txt"):
+                         "installer/__pycache__/private.pyc", "skills/adapters/openspec-workflow/.local/private.txt"):
             path = self.payload / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("private sentinel", encoding="utf-8")
@@ -1213,18 +1219,16 @@ class RemoteCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         package = json.loads(result.stdout)[0]
         files = {item["path"] for item in package["files"]}
-        self.assertEqual(self.standalone_skill_payload_files() - files, set())
+        self.assertEqual(skill_files - files, set())
         self.assert_no_vendored_external_skills(files)
-        lock = json.loads((self.payload / "dependencies/dependencies.lock.json").read_bytes())
-        self.assertEqual(set(lock["agent_desktop"]["files_sha256"]) - files, set())
-        for name in ("skills/agent-desktop/references/commands-system.md", "skills/agent-desktop-windows/references/troubleshooting.md",
-                     "sources/agent-desktop-LICENSE", "dependencies/NOTICE.md", "dependencies/dependencies.lock.json",
+        for name in ("dependencies/NOTICE.md", "dependencies/dependencies.lock.json",
                      "docs/deployment.md", "docs/local.example.toml", "installer/bootstrap.ps1", "registry.toml",
                      "installer/registry.py", "installer/mcp_packages.py", "installer/windows_paths.py", "installer/share.py",
                      "installer/external_skills.py", "installer/upstream_skill_sources.py"):
             self.assertIn(name, files)
         self.assertFalse(any(name.startswith(("docs/history/", "hosts/", "scripts/")) for name in files))
-        self.assertEqual({name for name in files if name.startswith("sources/")}, {"sources/agent-desktop-LICENSE"})
+        self.assertFalse(any(name.startswith(("sources/", "skills/agent-desktop/", "skills/agent-desktop-windows/"))
+                             for name in files))
         self.assertNotIn("installer/test.ps1", files)
         self.assertNotIn("Taskfile.yml", files)
         self.assertNotIn("AGENTS.md", files)

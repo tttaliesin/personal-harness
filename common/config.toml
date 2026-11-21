@@ -52,12 +52,3 @@ enabled = true
 enabled = true
 [plugins."template-creator@openai-primary-runtime"]
 enabled = true
-[[skills.config]]
-name = "computer-use"
-enabled = false
-[[skills.config]]
-name = "agent-desktop"
-enabled = true
-[[skills.config]]
-name = "agent-desktop-windows"
-enabled = true
