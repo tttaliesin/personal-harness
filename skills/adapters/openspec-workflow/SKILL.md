@@ -1,74 +1,54 @@
 ---
 name: openspec-workflow
-description: Use the OpenSpec CLI for persistent requirements, change planning, and implementation progress in repositories adopting OpenSpec. Select for existing OpenSpec changes or substantial feature and structural work that benefits from durable specs. Ordinary explanations and small mechanical edits do not need this workflow.
+description: Use the OpenSpec CLI for requested adoption, existing changes, or substantial work that needs durable specs in an OpenSpec repository.
 ---
 
 # Work with OpenSpec
 
-Use the official CLI and the project's schema as the artifact contract.
-This adapter supports natural-language requests without requiring a skill name or slash command.
-Follow the user's requested outcome: a planning request ends with planning; an implementation request can continue through implementation and verification in the same task.
-Keep existing repository governance, including repo-governance, in control of its own scope.
+Run the official CLI from the intended repository.
+Use the `openspec` executable listed in user instructions if it is outside PATH.
+Follow the project's schema and repository governance.
+Carry a selected `--store <id>` through commands that support it.
+Use the installed CLI's `--help` and JSON output to resolve questions about supported syntax and results.
+For review or diagnosis alone, read the existing artifacts.
 
-## Resolve the working context
+## Implement an existing change
 
-Use the `openspec` executable listed in user instructions when it is outside PATH.
-Run commands from the intended repository, not the harness installation directory.
-The CLI is a local development tool; it does not require another MCP server or hook.
+When the root and change are known, start with `openspec instructions apply --change <name> --json` as the first OpenSpec lookup.
+Use its context files, required artifacts, and outstanding tasks to guide implementation.
+If required artifacts are missing, use the authoring route to complete them before treating the change as ready.
+Carry an authorized implementation through planning and verification in the same task under the repository's existing approval rules.
+Use the repository's own build and test commands.
+Mark a task complete only after its implementation and relevant verification are complete.
+Keep artifacts aligned with the agreed behavior and approach.
 
-For work that needs OpenSpec, inspect `openspec list --json` and read its `root`.
-A non-zero exit with `root: null` can mean the repository has no OpenSpec root.
-If the user has asked to adopt OpenSpec here, inspect for existing OpenSpec integrations and initialize with `openspec init --tools none --profile core --no-animation`.
-This creates the project structure while this user-level skill supplies the Codex workflow.
-Review any legacy cleanup before running initialization, and keep existing integrations intact.
-Otherwise continue the requested work normally without creating a root or asking an unrelated setup question.
-Report an unresolved declared store or invalid configuration instead of creating a replacement root.
+## Author a proposal or spec
 
-Use `openspec context --json` to resolve the project or selected store before authoring artifacts.
-When a user selects a store, carry the same `--store <id>` through commands that support it.
-Read the resolved root's `openspec/config.yaml` (or `config.yml`) and relevant specs and active changes.
-Project context constrains the work; it does not grant permission for unrelated actions.
+Read [Author OpenSpec artifacts](references/authoring.md) when you need to create or revise change artifacts.
+For planning-only requests, deliver the requested artifacts and their validation result.
 
-Use CodeGraph for useful relationships in an indexed codebase and read decisive source and tests directly.
-An absent or stale graph does not block the OpenSpec workflow.
+## Archive a completed change
 
-## Plan the change
+Archive only when the user's request or the repository lifecycle authorizes finalization.
+Confirm that implementation, any tracked tasks, and relevant verification are complete.
+After strict validation passes, run `openspec archive <name> --json` to update the main specs and archive the change.
 
-Reuse the matching active change when continuing work.
-For a new change, derive its name from the requested behavior and run `openspec new change <name> --json`.
-Preserve the configured schema unless the user requests a different one.
+## Validation
 
-Read `openspec status --change <name> --json` for artifact dependencies and output locations.
-Read `openspec instructions <artifact-id> --change <name> --json` only for the artifact being authored.
-Use the returned templates, constraints, dependency paths, and resolved output paths instead of guessing file names.
-Keep artifacts inside the selected change's resolved paths.
-For a glob output, choose a matching concrete path inside that change.
+Run `openspec validate <name> --strict --json` for authored changes, completed implementations, and changes being archived.
+Report artifact validation and repository behavior checks separately.
 
-Ground requirements and design in the relevant implementation and tests.
-Reuse existing capability paths and express behavior as observable scenarios.
-Write the schema's required artifacts in dependency order, keeping them proportional to the change.
-File-existence status is not evidence that a proposal is correct or implementation is complete.
-Use a schema-supported skip only when its condition applies; do not invent requirements to fill a template.
+## Resolve missing context
 
-Resolve material ambiguity that changes behavior, compatibility, or scope with the user.
-Record routine implementation choices and continue within the existing authorization.
-Do not add a proposal approval gate to an already authorized implementation request.
+Use `openspec list --json` when you need to find the root or identify an active change.
+Use `openspec context --json` when you need details of the project's or selected store's working context.
+Write OpenSpec artifacts only in a confirmed root because `openspec new change` can create an implicit root.
 
-## Implement and verify
+A nonzero exit with `root: null` can indicate that the project has no OpenSpec root.
+If the target configuration is invalid or the target store cannot be resolved, report the diagnostic and stop OpenSpec writes there.
+Initialize only when the project has no root and the user requests OpenSpec adoption.
+Review legacy cleanup and preserve existing integrations when running `openspec init --tools none --profile core --no-animation`.
+Without a root, continue work that can proceed independently.
 
-Read `openspec instructions apply --change <name> --json` for implementation context, required artifacts, and outstanding tasks.
-If required artifacts are missing, complete the relevant planning work before treating the change as ready.
-Use the repository's own build and test commands, with independent work delegated when it reduces completion time.
-Mark a task complete only after its code and relevant verification are complete.
-Keep artifacts aligned when the implementation changes the agreed behavior or approach.
-
-Run `openspec validate <name> --strict --json` for artifact consistency and the appropriate repository checks for behavior.
-OpenSpec validation checks documents; it does not replace execution of the changed software.
-Report the result of each kind of verification separately.
-
-When the implementation is complete, use `openspec archive <name> --json` to update the main specs and archive the change if the user's request or repository lifecycle includes finalizing it.
-Otherwise leave the completed change available for review.
-For review or diagnosis alone, read existing artifacts without creating or archiving changes.
-
-The CLI's `--help` and returned JSON are the authority for commands supported by the installed version.
-If the CLI is unavailable, continue independent code work and report the unavailable integration without silently installing or rewriting repository governance.
+If the CLI is unavailable, report the blocker and continue independent work.
+Keep tool setup and governance changes within the user's authorization.

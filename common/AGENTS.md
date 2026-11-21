@@ -38,9 +38,7 @@ In repositories already indexed by CodeGraph (a `.codegraph/` directory exists a
 ## OpenSpec
 
 - Select `openspec-workflow` autonomously for work on existing OpenSpec changes, or feature and structural changes where persistent requirements and implementation progress help the task.
-- Keep explanations, small fixes, and mechanical edits proportional to the request; they do not require an OpenSpec change.
-- Use the repository's existing OpenSpec root, schema, and governance when present. Initialize a new root only when adopting OpenSpec in that repository is part of the user's request.
-- An authorized implementation request can proceed through planning, implementation, and verification in one task. Pause for a material unresolved decision or an actual authorization boundary, not merely because a proposal was written.
+- Keep explanations, small fixes, and mechanical edits proportional to the request.
 <!-- openspec-routing:end -->
 
 <!-- context7-routing:start -->
@@ -127,8 +125,6 @@ Steiger는 FSD 저장소별 구조 검사기로, ArchUnitNET은 C# 저장소별 
 - 원본 플러그인 파일과 캐시는 수정하지 않는다.
   스킬 사용을 위한 별도 작업 흐름이나 새로운 필수 승인·검증 단계를 추가하지 않는다.
 - Windows에서 Taste의 브라우저 검사 명령을 실행할 때 `taste-windows-runtime`을 함께 선택한다.
-  원본 스크립트와 인수를 해당 스킬의 `scripts/run.mjs`에 전달해 실행하며 원본 검사·판정은 유지한다.
-  브라우저 경로와 Edge 실행 보정은 그 검사 프로세스에만 적용한다.
 - Taste Skill 선택만으로 Site 생성이나 게시를 시작하지 않는다.
   호스팅·게시 도구 선택은 기존 Sites 라우팅을 따른다.
 <!-- taste-skill-routing:end -->
@@ -136,47 +132,32 @@ Steiger는 FSD 저장소별 구조 검사기로, ArchUnitNET은 C# 저장소별 
 <!-- korean-typography:start -->
 ## 한글 타이포그래피
 
-- 한국어 웹·앱 화면을 만들거나 시각적으로 수정·검토할 때 `korean-typography`를 자율적으로 선택한다.
-  대화 언어만으로 결과물의 언어를 결정하지 않는다.
-- 기존 브랜드 서체와 디자인 토큰을 우선하고, 실제 한글 글리프·혼합 조판·줄바꿈·웹폰트 로딩을 확인한다.
-  영문 중심 스킬의 폰트 추첨이나 자간·단어 수 기준을 한글에 그대로 적용하지 않는다.
-- 한글 보정은 해당 프로젝트의 스타일·토큰에서 수행한다.
-  Taste Skill 원본과 repo-governance는 수정하지 않는다.
+- 한국어 웹·앱 화면의 서체·조판을 설계하거나 수정·검토할 때 `korean-typography`를 자율적으로 선택한다.
+  서체나 줄바꿈만 다루는 작업에도 독립적으로 선택할 수 있다.
 <!-- korean-typography:end -->
 
 <!-- korean-development-writing:start -->
 ## 한국어 개발 문서
 
-- 한국어 README·기술 명세·운영 절차·개발 규약을 작성하거나 본문을 고칠 때 STE-KO의 문서 규칙을 적용한다. `ste-ko`를 자율적으로 선택하며 대화 언어만으로 문서의 언어를 바꾸지 않는다.
-- 문서 초안에 번역투나 기계적인 반복이 남아 윤문이 필요할 때 `im-not-ai`의 `humanize-korean`을 자율적으로 선택한다. 스킬 이름을 입력할 필요는 없다. 일반 대화·코드 작업·맞춤법 수정과 이미 자연스러운 문서는 이 윤문 단계를 거치지 않는다.
-- 수정 전후를 대조한다. 주체·행동·조건·예외와 의무·허용·금지의 범위를 유지한다. 수치·단위·명령·식별자는 원문대로 둔다. 의미가 달라졌거나 확인할 수 없는 구간은 윤문 전 표현을 사용한다.
-- 윤문 스크립트에는 BOM 없는 UTF-8 작업본을 준다. 실행 산출물은 Git에서 제외가 확인된 로컬 경로나 저장소 밖 임시 경로에 둔다.
-- Windows에서 `humanize-korean`을 실행할 때 `humanize-windows-runtime`을 함께 선택한다. 같은 작업 폴더의 절대 경로를 준비·윤문·검증에 재사용한다. Desktop 도구 호출마다 달라질 수 있는 프로세스 `TEMP`와 `GetTempPath()`는 여러 단계에 걸친 작업 폴더에 사용하지 않는다.
-- 기존 문서 규약과 채택된 repo-governance를 우선한다. 한국어 문서에 STE80을 적용하지 않는다.
+- 한국어 README·기술 명세·운영 절차·개발 규약을 작성하거나 본문을 고칠 때 `ste-ko`를 자율적으로 선택한다.
+- 문서 초안에 번역투나 기계적인 반복이 남아 윤문이 필요할 때 `humanize-korean`을 선택한다.
+  결과를 적용하기 전에 `ste-ko`의 의미 보존 기준으로 대조한다.
+- Windows에서 `humanize-korean`의 스크립트를 실행할 때 `humanize-windows-runtime`을 함께 선택한다.
+- 한국어 문서에 STE80을 적용하지 않는다.
 <!-- korean-development-writing:end -->
 
 <!-- development-environment-routing:start -->
 ## 개발환경 구성
 
 - 실행·통합 테스트 환경을 구성하거나 보완할 때 `development-environment`를 자율적으로 선택한다.
-  명시적 호출은 필요하지 않으며 기존 환경으로 충분한 수정에는 환경 구성을 선행하지 않는다.
-- 기존 스택·런타임 버전·아키텍처·명령 실행기·배포 경로와 저장소 개발 규칙을 유지한다.
-  Compose·infra·시뮬레이터는 필요한 경계에 맞춰 선택하며 모든 저장소의 필수 레이어나 검사로 만들지 않는다.
-- 저장소의 채택된 repo-governance 계약이 정한 경로와 제약을 우선한다.
-  이 지침은 플러그인 변경이나 기존 프로젝트 마이그레이션을 허용하지 않는다.
+  기존 환경으로 충분한 수정은 바로 진행한다.
+- 외부 서비스 시뮬레이터만 요청하면 해당 스킬의 시뮬레이터 참조를 사용한다.
 <!-- development-environment-routing:end -->
 
 <!-- repository-artifacts-routing:start -->
 ## 공유 문서와 로컬 산출물
 
-- 저장소 문서·검토 파일·테스트 산출물을 만들거나 커밋을 준비할 때 `repository-artifacts`를 자율적으로 선택한다.
-  단순 조회·설명에 별도 문서나 감사를 요구하지 않는다.
-- 지속적으로 공유할 문서·명세·테스트 소스·fixture·승인된 기준 데이터는 기존 저장소 규약에 따라 추적한다.
-  공유가 요청되지 않은 검토 초안·원시 로그·실행 부산물은 실제 Git 제외가 확인된 로컬 경로에 둔다.
-- 기존 repo-governance의 문서 경로·추적 제약을 우선하고 기존 추적 문서를 일괄 이동하지 않는다.
-  Git 원격 포함 여부는 실제 추적·staged 내용으로 확인하며 패키지 제외 설정으로 대신하지 않는다.
-- 이 스킬 설치를 개별 저장소의 repo-governance 채택으로 간주하지 않는다.
-  채택된 계약의 차단 조건은 공통 기본값으로 우회하지 않는다.
+- 공유 문서·로컬 검토 자료·테스트 산출물의 보관 위치나 Git 포함 여부를 결정할 때 `repository-artifacts`를 자율적으로 선택한다.
 <!-- repository-artifacts-routing:end -->
 
 <!-- task-tool-routing:start -->
