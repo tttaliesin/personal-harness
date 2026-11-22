@@ -1,7 +1,7 @@
 schema: spec-driven
 
 context: |
-  Preserve existing repo-governance, authentication, runtime configuration, and hook trust.
-  Keep portable instructions in packages/harness/resources/common/ and private machine paths in ignored local state.
-  An authorized implementation request can continue from planning through verification.
-  Report temporary-profile tests and actual application to each PC separately.
+  Distribute maintained standalone skills through skills/ and owned plugins through the root Codex marketplace.
+  Keep upstream resource locations in external-resources.toml and machine configuration in each local environment.
+  Preserve the published plugin paths, versions, and verified release bytes during repository-only changes.
+  Earlier completed changes describe the profile installer before its retirement.

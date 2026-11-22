@@ -1,289 +1,58 @@
 # Personal Harness
 
-Roylabs Desktop의 Codex User Harness를 기준으로 공통 지침과 설정을 각 PC의 기존 Codex 프로필에 병합한다.
-설치기는 등록한 스킬과 필요한 개발 도구도 각 PC에 배포한다.
-자체 플러그인 세 개는 같은 저장소의 Codex Git 마켓플레이스에서 설치한다.
+여러 에이전트에서 쓰는 단독 스킬과 Codex용 자체 플러그인을 배포한다.
 
-[한 명령으로 설치](docs/remote-install.md) · [적용과 복구](docs/deployment.md) · [관리 범위와 기준 구성](docs/baseline.md) · [개발 도구 사용](docs/development-tools.md) · [원본과 버전](packages/harness/resources/dependencies/NOTICE.md)
+[스킬 설치](#단독-스킬-설치) · [플러그인 설치](#자체-플러그인-설치) · [플러그인 배포와 해시](docs/deployment.md)
 
-| 관리 항목 | 저장소 원본 | 선택 기준과 적용 위치 |
+## 단독 스킬 설치
+
+대상 프로젝트의 루트에서 다음 명령을 실행한다.
+
+```bash
+npx skills@latest add https://github.com/tttaliesin/personal-harness/tree/main/skills -a codex
+```
+
+기본 설치 위치는 프로젝트의 `.agents/skills/`다.
+Claude Code용으로 설치하려면 `-a claude-code`를 지정한다.
+사용자 범위인 `~/.agents/skills/`에 설치하려면 `-g`를 붙인다.
+특정 스킬만 설치하려면 `--skill create-readme`처럼 이름을 지정한다.
+설치할 수 있는 스킬 목록은 `--list`로 확인한다. [skills CLI 명령](https://github.com/vercel-labs/skills/blob/main/docs/commands.md)
+
+| 원본 경로 | 역할 | 스킬 |
 |---|---|---|
-| 공통 지침과 설정 | [common/](packages/harness/resources/common/) | 선택한 Codex 홈의 `AGENTS.md`와 `config.toml`에 적용 |
-| 단독 스킬 | [자체 스킬](packages/harness/resources/skills/custom/) · [어댑터](packages/harness/resources/skills/adapters/) · [registry.toml](packages/harness/resources/registry.toml) | `[[skills]]`에 등록한 파일을 `~/.agents/skills/<name>/`에 설치 |
-| 자체 플러그인 | [플러그인 소스와 배포본](docs/deployment.md#자체-플러그인-소스와-배포본) · [Codex 카탈로그](.agents/plugins/marketplace.json) | Codex Git 마켓플레이스에서 설치 |
-| 외부 플러그인과 MCP | [registry.toml](packages/harness/resources/registry.toml)의 `[[plugins]]`, `[[mcp]]` | 등록된 외부 소스에서 설치하거나 원격 MCP에 연결 |
+| [skills/custom/](skills/custom/) | 이 저장소에서 유지하는 자체 스킬 | `create-readme`, `development-environment`, `korean-typography`, `repository-artifacts` |
+| [skills/adapters/](skills/adapters/) | 외부 도구와 규격을 연결하는 어댑터 | `humanize-windows-runtime`, `openspec-workflow`, `ste-ko`, `taste-windows-runtime` |
 
-## 시작하기
-
-Windows x64에서 Node.js 22.12.0 이상과 npm, Git, Python 3.11 이상, Codex가 필요하다.
-공개 저장소에서 소스를 받는 데 GitHub 인증은 필요하지 않다.
-처음 사용하는 PC에서는 Codex를 한 번 실행해 로컬 런타임 설정을 생성한다.
-어느 폴더에서든 다음 명령으로 공통 Harness를 설치한다.
-
-```powershell
-npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git install
-```
-
-갱신할 때는 마지막 인자를 `update`로 바꾼다.
-
-```powershell
-npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git update
-```
-
-저장소는 공개로 운영한다.
-소스는 명령 실행 중에만 사용하고 종료할 때 삭제한다.
-PC별 경로와 의존성 기록은 `%LOCALAPPDATA%/PersonalHarness/state`에 보관한다.
-Codex가 생성한 런타임과 인증은 기존 Codex 홈에서 유지한다.
-기존 저장소의 `.local`을 재사용하거나 설치 경로를 지정하는 방법은 [설치 문서](docs/remote-install.md)를 참고한다.
-
-Codex Desktop은 내장 Computer Use를 앱과 함께 설치한다.
-Windows 앱 화면을 확인하거나 앱에 직접 입력해야 할 때 Codex는 내장 Computer Use를 선택한다.
+어댑터에 필요한 도구와 규격은 [어댑터 사용](docs/development-tools.md#어댑터-사용)에서 확인한다.
 
 ## 자체 플러그인 설치
 
+Codex는 공개 기본 브랜치 `main`의 [마켓플레이스 카탈로그](.agents/plugins/marketplace.json)를 읽는다.
 Windows Agent Devkit과 Worker Orchestrator를 실행하려면 Node.js 24 이상이 필요하다.
-터미널에서 다음 명령으로 마켓플레이스와 플러그인을 설치한다.
 
-```powershell
+```bash
 codex plugin marketplace add tttaliesin/personal-harness
 codex plugin add repo-governance@personal-harness
 codex plugin add windows-agent-devkit@personal-harness
 codex plugin add worker-orchestrator@personal-harness
 ```
 
-Codex는 공개 저장소의 Git 기본 브랜치인 `main`에서 `personal-harness` 카탈로그를 읽는다.
-PC마다 번들 폴더를 준비하거나 경로를 설정할 필요가 없다.
 설치 후 Codex Desktop을 다시 열거나 터미널에서 `codex`로 새 세션을 시작한다.
-플러그인 목록에서 `personal-harness`의 세 항목이 활성 상태인지 확인한다.
+플러그인 목록에서 `personal-harness` 출처를 확인한다.
 [기존 설치 전환과 갱신](docs/deployment.md#codex-git-마켓플레이스)
 
-## 설치한 플러그인과 MCP 공유하기
+## 외부 리소스
 
-공유할 항목이 있는 PC에서 다음 명령을 실행한다.
-저장소를 직접 clone할 필요는 없다.
+[external-resources.toml](external-resources.toml)은 외부 스킬, 참조 문서, 플러그인, MCP 서버와 CLI의 출처를 기록한다.
+각 리소스는 원본의 설치와 갱신 절차를 따른다. [외부 리소스 안내](docs/development-tools.md)
 
-```powershell
-npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git share
+## 저장소 검증
+
+저장소 루트에서 테스트를 실행한다.
+
+```bash
+npm test
 ```
 
-목록에서 항목을 선택하고, 공개될 등록 내용을 확인한 뒤 업로드한다.
-업로드에는 그 PC의 GitHub CLI에 저장된 `tttaliesin` 계정 인증을 사용한다.
-처음 사용하는 PC는 `gh auth login --hostname github.com`으로 해당 계정에 로그인한다.
-기존 로그인이 있으면 다시 로그인할 필요가 없다.
-`share`는 기본 활성 계정을 바꾸지 않고, 실행하는 GitHub 요청에만 해당 인증을 적용한다.
-명령 실행 환경에 `GH_TOKEN` 또는 `GITHUB_TOKEN`을 직접 제공했다면 그 인증을 우선 사용한다.
-토큰은 파일이나 저장소에 기록하지 않는다.
-
-목록만 보거나 업로드 없이 내용을 확인할 수도 있다.
-`<항목 ID>`는 `share --list`에 표시된 공유 대상의 ID로 바꾼다.
-
-```powershell
-npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git share --list
-npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git share --select '<항목 ID>' --dry-run
-```
-
-공유하는 내용은 설치 출처와 공통 등록 정보다.
-실행 경로, 실행 인자, 환경변수 값, 인증 헤더와 앱 런타임은 해당 PC에 남는다.
-대상 PC에 필요한 경로와 인증도 그 PC에서 설정한다.
-앱이 제공하는 런타임과 설치 출처를 확인할 수 없는 항목은 자동 업로드하지 않는다.
-
-등록이 `main`에 반영되면 필요한 PC에서 기존 `update` 명령으로 가져온다.
-새 항목을 가져올 때는 `--locked`를 붙이지 않는다.
-
-```mermaid
-sequenceDiagram
-    participant A as 공유할 항목이 있는 PC
-    participant G as GitHub main
-    participant B as 적용할 PC
-    A->>A: share로 항목 선택과 공개 내용 확인
-    A->>G: 해당 PC의 GitHub 인증으로 등록
-    B->>G: update 실행
-    G-->>B: 최신 등록 내용
-    B->>B: 로컬 설정을 유지하며 설치와 적용
-```
-
-## 저장소에서 개발하기
-
-Windows, Python 3.11 이상, Codex 데스크톱 앱과 [Task](https://taskfile.dev/docs/installation)가 필요하다.
-Task가 없다면 `winget install --id Task.Task --exact`로 설치한다.
-처음 사용하는 PC에서는 Codex를 한 번 실행해 로컬 런타임 설정을 생성한다.
-이후 명령은 모두 저장소 루트에서 실행한다.
-
-```powershell
-task
-task setup
-task plan
-```
-
-`task`는 사용 가능한 명령을 표시한다.
-`task setup`은 Python 가상환경과 저장소 실행에 필요한 패키지를 준비한다.
-`task plan`은 변경할 파일과 공통 설정, 누락된 의존성을 표시한다.
-
-```powershell
-# 공식 최신 안정판을 조회하고 설치 계획을 확인한다.
-task update:plan
-
-# 최신 안정판 설치, Harness 적용과 검증을 수행한다.
-task install
-```
-
-설치 도우미는 실행할 때 `registry.toml`에 등록된 외부 플러그인과 MCP를 각 항목의 갱신 기준으로 조회한다.
-CodeGraph와 OpenSpec의 npm `latest` 배포도 조회한다.
-Microsoft Learn MCP는 `registry.toml`의 공식 원격 HTTP 연결을 적용하며 별도 의존성 패키지를 설치하지 않는다.
-NuGet MCP는 공식 `NuGet.Mcp.Server`와 하네스 전용 .NET 실행 환경을 버전·해시로 고정해 설치한다.
-기존 프로젝트의 .NET 버전과 전역 PATH를 유지하며 C# 패키지 작업에서 필요할 때 자율적으로 선택한다.
-공식 .NET·Windows 자료가 필요하면 명시적인 호출 없이 선택하며 자세한 기준은 [개발 도구 사용](docs/development-tools.md#microsoft-learn-선택과-연결-구성)에 있다.
-실제 설치에 사용할 commit과 배포 해시를 확정한 뒤 도구를 설치한다.
-설치기는 검증한 의존성의 버전과 배포 해시를 `<state-root>/sources/dependencies.lock.json`에 기록한다.
-체크아웃의 기본 경로는 Git에서 제외되는 `.local/sources/dependencies.lock.json`이다.
-생성한 PC 경로는 Git에서 제외되는 `.local/<hostname>.toml`에 저장한다.
-Codex 실행 파일을 찾지 못하면 `task install -- -Codex 'D:/tools/codex.exe'`로 지정한다.
-Ego lite와 함께 제공되는 `ego-browser` 스킬은 각 PC의 브라우저가 관리한다.
-이 저장소는 Ego의 설치 여부나 버전을 검사하지 않고, 브라우저의 스킬 파일과 링크를 만들거나 수정하지 않는다.
-
-새 의존성을 설치하지 않고 공통 파일을 다시 적용할 때는 다음 명령을 사용한다.
-
-```powershell
-task apply
-task check
-```
-
-`task apply`는 사전 검사를 통과하면 기존 파일을 Codex 홈의 `harness-backups`에 백업한 뒤 변경을 적용한다.
-`task check`는 적용할 변경과 미해결 항목이 없을 때 성공한다.
-적용 후 Codex를 재시작하거나 새 채팅에서 지침과 도구 구성을 확인한다.
-설치 과정에서 요구하는 hook 신뢰 승인은 해당 PC에서 처리한다.
-
-설치 대상은 현재 PC 이름을 기준으로 [package.json](package.json)의 `supportedHosts`에서 확인한다.
-다른 호스트나 Python 실행 파일은 Task 변수로 지정한다.
-
-```powershell
-task plan HOST=roylabs-desktop
-task check PYTHON='D:/Python/python.exe'
-task plan -- -HomeDirectory 'D:/Test Profile'
-```
-
-계획·검사·적용·설치·갱신 명령은 `--` 뒤의 인자를 내부 PowerShell 스크립트로 전달한다.
-`task test`는 같은 위치의 인자를 Python `unittest`에 전달한다.
-
-## 최신 버전으로 갱신하기
-
-`task install`과 `task update`는 같은 설치·적용 절차를 사용한다.
-일반 설치와 갱신은 각 외부 스킬의 `channel`에 따라 현재 커밋을 확인한다.
-설치기는 선택한 커밋과 검증한 파일 내용을 담은 캐시 파일을 한 번에 교체한다.
-외부 원본을 조회하거나 파일을 받는 데 실패하면 기존 캐시를 보존하고 오류를 반환한다.
-파일 검증에 실패해도 같은 방식으로 처리한다.
-
-체크아웃의 기본 캐시 경로는 `.local/external-skills.json`이다.
-상태 루트를 지정하면 `<state-root>/external-skills.json`을 사용한다.
-
-`task plan`, `task check`, `task apply`는 외부 스킬을 로컬 캐시에서 오프라인으로 읽는다.
-`task plan`과 `task apply`는 캐시에서 누락됐거나 검증을 통과하지 못한 외부 스킬을 건너뛴다.
-두 명령은 `DEFERRED` 줄에 사유를 표시한다.
-다른 사전 검사를 통과하면 `task apply`는 적용 가능한 변경을 반영한다.
-`task check`는 보류 항목이 남아 있으면 0이 아닌 종료 코드를 반환한다.
-
-기록된 버전을 재현할 때는 `-Locked`를 사용한다.
-`-Locked`는 현재 등록과 호환되는 기존 캐시가 필요하다.
-설치기는 이 모드에서 외부 스킬을 캐시에서만 읽는다.
-
-```powershell
-task install -- -Locked
-```
-
-갱신은 명령을 실행할 때만 수행한다.
-별도의 예약 작업이나 백그라운드 자동 업데이트는 등록하지 않는다.
-공식 최신 버전을 조회하지 못하면 오류로 종료하고 기존 버전으로 성공한 것처럼 처리하지 않는다.
-
-## 저장소 구조
-
-하네스 설치기는 `packages/harness/installer/`에 둔다.
-설치기가 읽는 배포 원본은 `packages/harness/resources/`에 둔다.
-자체 플러그인은 각각 `packages/<name>/`에서 관리한다.
-
-| 위치 | 역할 |
-|---|---|
-| [common/AGENTS.md](packages/harness/resources/common/AGENTS.md) | 전역 사용자 지침. `${CODEX_HOME}`은 적용 대상 PC에서 치환 |
-| [common/config.toml](packages/harness/resources/common/config.toml) | 사용자 정책, Desktop 공통 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
-| `.local/<hostname>.toml` | 해당 PC에서만 사용하는 경로와 선택적 설정 덮어쓰기. Git 제외 |
-| [registry.toml](packages/harness/resources/registry.toml) | 단독 스킬과 외부 참조의 출처, 외부 플러그인과 MCP의 등록 정보 |
-| [.agents/plugins/marketplace.json](.agents/plugins/marketplace.json) | Codex가 읽는 `personal-harness` 카탈로그 |
-| [skills/custom/](packages/harness/resources/skills/custom/) | 자체 스킬 (`custom`)인 `create-readme`, `development-environment`, `korean-typography`, `repository-artifacts` |
-| [skills/adapters/](packages/harness/resources/skills/adapters/) | 연동·호환 어댑터 (`adapter`)인 `openspec-workflow`, `ste-ko`, `taste-windows-runtime`, `humanize-windows-runtime` |
-| `.local/external-skills.json` | 외부 스킬과 참조 자료의 로컬 캐시. Git 제외 |
-| `.local/sources/dependencies.lock.json` | 기본 상태 루트에 설치한 의존성의 버전, 커밋, 배포 해시. Git 제외 |
-| [dependencies/dependencies.lock.json](packages/harness/resources/dependencies/dependencies.lock.json) | 설치 상태가 없을 때 읽는 초기 잠금 파일 |
-| [dependencies/NOTICE.md](packages/harness/resources/dependencies/NOTICE.md) | 외부 원본의 출처와 라이선스 안내 |
-| [dependencies/roylabs-2026-11-12.json](packages/harness/resources/dependencies/roylabs-2026-11-12.json) | 초기 Roylabs 기준 구성의 출처와 파일 해시 |
-| [packages/repo-governance/](packages/repo-governance/) | 소스와 테스트. 공개 배포 경로는 `plugin/` |
-| [packages/windows-agent-devkit/](packages/windows-agent-devkit/) | 소스와 테스트. 검증한 공개 배포본은 `release/` |
-| [packages/worker-orchestrator/](packages/worker-orchestrator/) | 소스와 테스트. 검증한 공개 배포본은 `release/` |
-| [packages/harness/installer/](packages/harness/installer/) | 설치·갱신·적용 구현. `npx` 진입점은 `personal-harness.mjs`. Python 의존성은 `requirements.txt` |
-| [packages/harness/tests/](packages/harness/tests/) | 하네스 테스트와 픽스처 |
-| [tests/test_codex_marketplace.py](tests/test_codex_marketplace.py) | 여러 플러그인 패키지와 루트 카탈로그를 함께 검사하는 테스트 |
-| [Taskfile.yml](Taskfile.yml) | 저장소 루트에서 사용하는 준비, 설치, 갱신, 적용과 검증 명령 |
-| [package.json](package.json) | Git 패키지의 실행 명령, 배포 파일, 설치 대상 PC 이름 |
-| [docs/repository-workflows.md](docs/repository-workflows.md) | 개발환경·문서·테스트 산출물의 자율 판단과 저장소 governance 역할 경계 |
-| [openspec/](openspec/) | 저장소의 OpenSpec 명세와 변경 기록 |
-
-단독 스킬을 배포하려면 `registry.toml`의 `[[skills]]`에 설치 폴더 이름 `name`과 원본 역할 `role`을 적는다.
-자체 스킬과 어댑터의 `path`는 `registry.toml`이 있는 `packages/harness/resources/`를 기준으로 적는다.
-어댑터에는 `adapts`로 연동 대상을 지정한다.
-각 어댑터의 연동 대상은 [스킬과 외부 도구](docs/baseline.md#스킬과-외부-도구)에서 확인할 수 있다.
-
-`feature-sliced-design`과 `humanize-korean`은 `role = "upstream"`으로 등록한다.
-외부 원본은 `source`에 HTTPS GitHub 저장소를 지정한다.
-`channel`은 기본 브랜치의 `default-branch` 또는 최신 안정 릴리스의 `latest-release`를 사용한다.
-`files`의 키는 설치 대상 스킬 폴더 기준 경로이고 값은 외부 저장소 안의 상대 경로다.
-키가 `"."`이면 지정한 원본 폴더의 내용 전체를 스킬 폴더에 넣는다.
-`ste-ko`는 로컬 `SKILL.md`를 유지하고 설치할 외부 참조 자료를 같은 필드로 선언한다.
-
-Git에는 자체 스킬과 로컬 어댑터의 원본만 보관한다.
-외부 스킬의 선택한 커밋과 파일 내용은 해당 PC의 캐시에 둔다.
-`role`과 `adapts`가 모두 없는 기존 항목에는 기존 경로와 필드 규칙을 적용한다.
-
-설치기는 로컬 원본과 캐시에 있는 외부 파일을 등록한 경로에 맞춰 `~/.agents/skills/<name>/`에 배치한다.
-`requires`를 지정한 스킬은 잠금 파일에 해당 의존성이 있을 때 설치한다.
-`openspec-workflow`의 `requires`는 `openspec`이다.
-작업 중 스킬을 사용하는 기준은 [공통 사용자 지침](packages/harness/resources/common/AGENTS.md)에서 관리한다.
-
-자체 플러그인의 소스는 각 `packages/<name>/`에서 수정한다.
-카탈로그가 가리키는 배포 경로와 새 버전을 게시하는 방법은 [자체 플러그인 소스와 배포본](docs/deployment.md#자체-플러그인-소스와-배포본)을 참고한다.
-
-```mermaid
-flowchart LR
-    U[공식 최신 안정판 조회] --> I[버전과 해시 확정 후 설치]
-    I --> L[PC별 상태에 의존성 잠금 기록]
-    L --> M[기존 사용자 설정에 병합]
-    C[공통 지침과 설정] --> M
-    H[PC 로컬 설정] --> M
-    R[해당 PC의 Codex 런타임 설정] --> M
-    M --> P[사전 검사와 적용 계획]
-    SC[자체 스킬 원본] --> S
-    SA[어댑터 원본] --> S
-    SU["외부 스킬 선언 · registry.toml"] --> F["일반 설치와 갱신에서 외부 파일 확인"]
-    F --> E["로컬 캐시 · external-skills.json"]
-    E --> S
-    S[등록한 단독 스킬의 설치 파일] --> P
-    P --> A[백업 후 적용]
-    A --> O[Codex 홈의 공통 지침과 설정]
-    A --> D["사용자 홈의 .agents/skills/"]
-```
-
-저장소에서 PC 경로를 바꾸려면 [로컬 설정 예시](docs/local.example.toml)를 `.local/<hostname>.toml`로 복사한다.
-한 명령 설치에서는 같은 형식의 설정을 설치 상태 경로의 `<hostname>.toml`에 둔다.
-설정 병합 순서는 **현재 설정 → 공통 설정 → 등록한 플러그인·MCP 설정 → PC 로컬 덮어쓰기**다.
-공통 파일에서 지정한 키만 덮어쓰며, 사용자 스킬의 선택 목록은 이름 또는 경로를 기준으로 병합한다.
-
-설치기는 `model`, `model_reasoning_effort`, `desktop.composer-predictions-enabled`의 기존 프로필 값을 유지한다.
-PC별 TOML에 같은 키를 지정하면 그 값이 우선한다.
-
-## 검증
-
-```powershell
-task test
-```
-
-`task test`는 하네스 테스트와 루트 카탈로그 검사를 실행한다.
-하네스 테스트는 임시 사용자 홈에서 설정 보존, 반복 적용, 백업과 실패 시 복구, 경로 보호를 확인한다.
-과거 적용·검증 이력은 저장소의 `docs/history/`에 보관한다.
-이력 문서는 설치 패키지에 포함하지 않는다.
+플러그인별 배포본을 만들고 확인하는 명령은 [새 버전 게시](docs/deployment.md#새-버전-게시)에 있다.
+문서, 테스트 자산과 로컬 산출물의 보관 위치는 [개발환경과 저장소 산출물](docs/repository-workflows.md)을 따른다.

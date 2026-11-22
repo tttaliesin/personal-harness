@@ -5,10 +5,10 @@ description: STE-KO의 문서 규칙으로 한국어 README, 기술 명세, 개�
 
 # STE-KO 문서 작성
 
-[STE-KO 규격](references/SPEC.md)에서 `문서` 표면을 사용한다.
+[STE-KO 규격](https://github.com/beamonic/ste-ko/blob/HEAD/SPEC.md)에서 `문서` 표면을 사용한다.
 문서 목적에 맞는 절만 읽는다. 실행 순서는 5장, 상태와 근거 설명은 6장, 위험한 동작의 경고는 7장을 참고한다.
-어휘를 고칠 때는 [어휘 대응표](references/dictionary.md)를 참고한다.
-작업 항목을 문서화할 때는 [업무 항목 예시](references/tasks.md)를 참고한다.
+어휘를 고칠 때는 [어휘 대응표](https://github.com/beamonic/ste-ko/blob/HEAD/dictionary.md)를 참고한다.
+작업 항목을 문서화할 때는 [업무 항목 예시](https://github.com/beamonic/ste-ko/blob/HEAD/tasks.md)를 참고한다.
 
 - 행위자와 행동을 분명히 쓴다. 절차에서는 조건을 행동 앞에 두고 한 단계에 한 동작을 쓴다.
 - 요구사항은 의무·허용·금지를 구분한다. 예외와 부정의 적용 범위를 밝힌다.

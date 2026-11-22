@@ -2,35 +2,8 @@
   "name": "@tttaliesin/personal-harness",
   "version": "0.1.0",
   "private": true,
-  "description": "Windows Codex user harness installer",
-  "type": "module",
-  "bin": {
-    "personal-harness": "packages/harness/installer/personal-harness.mjs"
-  },
-  "engines": {
-    "node": ">=22.12.0"
-  },
-  "supportedHosts": [
-    "homelab-desktop",
-    "roylabs-desktop"
-  ],
-  "files": [
-    "packages/harness/installer",
-    "packages/harness/resources/common",
-    "packages/harness/resources/skills",
-    "packages/harness/resources/dependencies",
-    "packages/harness/resources/registry.toml",
-    "docs",
-    "!docs/history/**",
-    "!**/.git/**",
-    "!**/.local/**",
-    "!**/.audit/**",
-    "!**/.venv/**",
-    "!**/node_modules/**",
-    "!**/__pycache__/**",
-    "!**/.pytest_cache/**",
-    "!**/.cache/**",
-    "!**/*.pyc",
-    "!**/*.pyo"
-  ]
+  "description": "Repository distribution validation",
+  "scripts": {
+    "test": "node --test tests/distribution.test.mjs"
+  }
 }

@@ -1,0 +1,67 @@
+# Reference metadata for upstream resources. Paths are relative to their sources.
+
+[skills.feature-sliced-design]
+source = "https://github.com/feature-sliced/skills.git"
+channel = "default-branch"
+path = "feature-sliced-design"
+
+[skills.humanize-korean]
+source = "https://github.com/epoko77-ai/im-not-ai.git"
+channel = "latest-release"
+paths = [
+  "LICENSE",
+  "codex/skills/humanize-korean/SKILL.md",
+  "codex/skills/humanize-korean/agents",
+  "skills/humanize-korean/references",
+  "scripts/checks.py",
+  "scripts/console.py",
+  "scripts/lexical_layer.py",
+  "scripts/prepare_monolith_input.py",
+  "scripts/reassemble_chunks.py",
+  "scripts/restore_modality.py",
+  "scripts/sanitize_text.py",
+  "scripts/strip_injected_commas.py",
+  "scripts/verify_change_rate.py",
+  "scripts/verify_gates.py",
+]
+
+[references.ste-ko]
+source = "https://github.com/beamonic/ste-ko.git"
+channel = "default-branch"
+paths = ["LICENSE", "README.md", "SPEC.md", "benchmarks", "dictionary.md", "tasks.md"]
+
+[plugins.context7]
+source = "https://github.com/upstash/context7.git"
+channel = "git-ref"
+ref = "master"
+marketplace = "context7-marketplace"
+manifest = "plugins/codex/context7/.codex-plugin/plugin.json"
+
+[plugins.taste-skill]
+source = "https://github.com/Leonxlnx/taste-skill.git"
+channel = "latest-release"
+marketplace = "taste-skill"
+manifest = ".codex-plugin/plugin.json"
+
+[mcp.microsoft-learn]
+kind = "http"
+url = "https://learn.microsoft.com/api/mcp"
+
+[mcp.nuget]
+kind = "nuget"
+source = "https://www.nuget.org/packages/NuGet.Mcp.Server"
+channel = "latest"
+package = "NuGet.Mcp.Server"
+entrypoint = "nuget-mcp-server"
+
+[tools.codegraph]
+kind = "npm"
+source = "https://github.com/colbymchenry/codegraph"
+channel = "latest"
+package = "@colbymchenry/codegraph"
+
+[tools.openspec]
+kind = "npm"
+source = "https://github.com/Fission-AI/OpenSpec"
+channel = "latest"
+package = "@fission-ai/openspec"
