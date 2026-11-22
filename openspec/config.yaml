@@ -2,6 +2,6 @@ schema: spec-driven
 
 context: |
   Preserve existing repo-governance, authentication, runtime configuration, and hook trust.
-  Keep portable instructions in common and private machine paths in ignored local state.
+  Keep portable instructions in packages/harness/resources/common/ and private machine paths in ignored local state.
   An authorized implementation request can continue from planning through verification.
   Report temporary-profile tests and actual application to each PC separately.

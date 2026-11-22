@@ -58,7 +58,7 @@ WindowsApps의 Python 실행 별칭은 인터프리터로 사용하지 않는다
 필요한 캐시 항목이 없거나 유효하지 않으면 잠금 설치는 실패한다.
 일반 설치나 갱신으로 캐시를 다시 준비한다.
 다른 의존성의 배포물이 로컬에 없으면 잠금 모드에서도 다운로드한다.
-등록 대상은 루트의 [registry.toml](../registry.toml)에서 관리한다.
+등록 대상은 `packages/harness/resources/`의 [registry.toml](../packages/harness/resources/registry.toml)에서 관리한다.
 새 항목을 등록하거나 설치 출처를 바꾼 뒤에는 일반 `update`로 해당 PC의 정확한 버전 기록을 갱신한다.
 `--locked`는 현재 등록 목록과 기록이 일치할 때 사용한다.
 
@@ -90,6 +90,7 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 ## 소스와 PC별 상태
 
 기본 설치 루트는 `%LOCALAPPDATA%/PersonalHarness`다.
+루트 `package.json`은 `packages/harness/installer/personal-harness.mjs`를 `npx` 진입점으로 지정한다.
 실행 소스는 명령마다 임시 폴더에 준비하고, 성공하거나 실패한 뒤 삭제한다.
 `npx`가 펼친 이 패키지의 소스 폴더도 실행 후 삭제한다.
 다음 명령은 필요한 소스를 다시 받는다.
@@ -113,7 +114,7 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 npm이 내려받은 압축 배포물 캐시는 npm의 일반 캐시 정책을 따른다.
 
 설치기는 상태 루트의 활성 잠금을 우선 읽는다.
-활성 잠금이 없으면 배포 소스의 [dependencies/dependencies.lock.json](../dependencies/dependencies.lock.json)을 읽기 전용 초기값으로 사용한다.
+활성 잠금이 없으면 배포 소스의 [의존성 잠금 파일](../packages/harness/resources/dependencies/dependencies.lock.json)을 읽기 전용 초기값으로 사용한다.
 설치 결과는 상태 루트의 `sources/dependencies.lock.json`에 기록한다.
 일반 업데이트는 현재 등록 목록에서 새 항목을 가져온다.
 
@@ -160,9 +161,9 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 
 기존 `<hostname>.toml`의 경로와 설정은 유지한다.
 새 로컬 설정을 작성할 때는 [로컬 설정 예시](local.example.toml)를 참고한다.
-상태 잠금이 아직 없으면 설치기는 인접한 체크아웃의 `dependencies/dependencies.lock.json`을 읽는다.
-이전 체크아웃의 `sources/dependencies.lock.json`도 초기값으로 사용할 수 있다.
 기본 체크아웃에서 설치한 이력이 있으면 `.local/sources/dependencies.lock.json`을 사용한다.
+상태 잠금이 아직 없으면 설치기는 인접한 체크아웃의 `packages/harness/resources/dependencies/dependencies.lock.json`을 초기값으로 읽는다.
+이전 체크아웃의 `dependencies/dependencies.lock.json`과 `sources/dependencies.lock.json`도 초기값으로 사용할 수 있다.
 새로 생성하는 도구 경로는 선택한 상태 루트 안에 기록한다.
 로컬 설정의 절대경로는 계속 해당 PC에서만 관리한다.
 `${STATE_ROOT}`로 선택한 상태 루트를 참조할 수도 있다.

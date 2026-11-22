@@ -8,7 +8,7 @@
       "name": "repo-governance",
       "source": {
         "source": "local",
-        "path": "./plugins/repo-governance/plugin"
+        "path": "./packages/repo-governance/plugin"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -20,7 +20,7 @@
       "name": "windows-agent-devkit",
       "source": {
         "source": "local",
-        "path": "./marketplace/windows-agent-devkit"
+        "path": "./packages/windows-agent-devkit/release"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -32,7 +32,7 @@
       "name": "worker-orchestrator",
       "source": {
         "source": "local",
-        "path": "./marketplace/worker-orchestrator"
+        "path": "./packages/worker-orchestrator/release"
       },
       "policy": {
         "installation": "AVAILABLE",

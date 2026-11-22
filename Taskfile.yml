@@ -20,7 +20,7 @@ tasks:
     desc: Python 가상환경과 저장소 패키지 준비
     cmds:
       - '{{.PYTHON | default "python" | shellQuote}} -m venv .venv'
-      - './.venv/Scripts/python.exe -m pip install --requirement requirements.txt'
+      - './.venv/Scripts/python.exe -m pip install --requirement packages/harness/installer/requirements.txt'
 
   plan:
     dir: '{{.ROOT_DIR}}'
@@ -28,7 +28,7 @@ tasks:
     cmds:
       - >-
         powershell.exe -NoLogo -NoProfile -NonInteractive
-        -File ./installer/harness.ps1 plan
+        -File ./packages/harness/installer/harness.ps1 plan
         -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
         {{.CLI_ARGS}}
 
@@ -38,7 +38,7 @@ tasks:
     cmds:
       - >-
         powershell.exe -NoLogo -NoProfile -NonInteractive
-        -File ./installer/harness.ps1 check
+        -File ./packages/harness/installer/harness.ps1 check
         -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
         {{.CLI_ARGS}}
 
@@ -48,7 +48,7 @@ tasks:
     cmds:
       - >-
         powershell.exe -NoLogo -NoProfile -NonInteractive
-        -File ./installer/harness.ps1 apply
+        -File ./packages/harness/installer/harness.ps1 apply
         -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
         {{.CLI_ARGS}}
 
@@ -59,7 +59,7 @@ tasks:
     cmds:
       - >-
         powershell.exe -NoLogo -NoProfile -NonInteractive
-        -File ./installer/update-dependencies.ps1 -Install
+        -File ./packages/harness/installer/update-dependencies.ps1 -Install
         -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
         {{.CLI_ARGS}}
 
@@ -68,7 +68,7 @@ tasks:
     desc: 설치된 플러그인과 MCP의 공개 선언 공유
     cmds:
       - >-
-        node ./bin/personal-harness.mjs share
+        node ./packages/harness/installer/personal-harness.mjs share
         --host {{.HOST | shellQuote}}{{if .PYTHON}} --python {{.PYTHON | shellQuote}}{{end}}
         {{.CLI_ARGS}}
 
@@ -79,7 +79,7 @@ tasks:
     cmds:
       - >-
         powershell.exe -NoLogo -NoProfile -NonInteractive
-        -File ./installer/update-dependencies.ps1
+        -File ./packages/harness/installer/update-dependencies.ps1
         -HostName {{.HOST | shellQuote}} -Python {{.RUNTIME_PYTHON | shellQuote}}
         {{.CLI_ARGS}}
 
@@ -94,5 +94,5 @@ tasks:
         msg: 테스트를 실행하려면 Python 3.11 이상이 필요합니다.
     cmds:
       - >-
-        {{.RUNTIME_PYTHON | shellQuote}} -B -m unittest discover -s tests -v
+        {{.RUNTIME_PYTHON | shellQuote}} -B -m unittest discover -s tests -t . -v
         {{.CLI_ARGS}}

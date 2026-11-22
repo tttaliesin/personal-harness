@@ -4,7 +4,7 @@ Roylabs Desktop의 Codex User Harness를 기준으로 공통 지침과 설정을
 설치기는 등록한 스킬과 필요한 개발 도구도 각 PC에 배포한다.
 자체 플러그인 세 개는 같은 저장소의 Codex Git 마켓플레이스에서 설치한다.
 
-[한 명령으로 설치](docs/remote-install.md) · [관리 범위와 기준 구성](docs/baseline.md) · [개발 도구 사용](docs/development-tools.md) · [적용과 복구](docs/deployment.md) · [원본과 버전](dependencies/NOTICE.md)
+[한 명령으로 설치](docs/remote-install.md) · [관리 범위와 기준 구성](docs/baseline.md) · [개발 도구 사용](docs/development-tools.md) · [적용과 복구](docs/deployment.md) · [원본과 버전](packages/harness/resources/dependencies/NOTICE.md)
 
 ## 시작하기
 
@@ -186,31 +186,37 @@ task install -- -Locked
 
 ## 저장소 구조
 
+하네스 설치기는 `packages/harness/installer/`에 둔다.
+설치기가 읽는 배포 원본은 `packages/harness/resources/`에 둔다.
+자체 플러그인은 각각 `packages/<name>/`에서 관리한다.
+
 | 위치 | 역할 |
 |---|---|
-| [common/AGENTS.md](common/AGENTS.md) | 전역 사용자 지침. `${CODEX_HOME}`은 적용 대상 PC에서 치환 |
-| [common/config.toml](common/config.toml) | 사용자 정책, Windows sandbox와 Desktop 공통 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
+| [common/AGENTS.md](packages/harness/resources/common/AGENTS.md) | 전역 사용자 지침. `${CODEX_HOME}`은 적용 대상 PC에서 치환 |
+| [common/config.toml](packages/harness/resources/common/config.toml) | 사용자 정책, Windows sandbox와 Desktop 공통 설정, 앱 제공 플러그인 선택, CodeGraph MCP |
 | `.local/<hostname>.toml` | 해당 PC에서만 사용하는 경로와 선택적 설정 덮어쓰기. Git 제외 |
-| [registry.toml](registry.toml) | 단독 스킬과 외부 참조의 출처, 외부 플러그인과 MCP의 등록 정보 |
+| [registry.toml](packages/harness/resources/registry.toml) | 단독 스킬과 외부 참조의 출처, 외부 플러그인과 MCP의 등록 정보 |
 | [.agents/plugins/marketplace.json](.agents/plugins/marketplace.json) | Codex가 읽는 `personal-harness` 카탈로그 |
-| [skills/custom/](skills/custom) | 자체 스킬인 `create-readme`, `development-environment`, `korean-typography`, `repository-artifacts` |
-| [skills/adapters/](skills/adapters) | 연동·호환 어댑터인 `openspec-workflow`, `ste-ko`, `taste-windows-runtime`, `humanize-windows-runtime` |
+| [skills/custom/](packages/harness/resources/skills/custom/) | 자체 스킬인 `create-readme`, `development-environment`, `korean-typography`, `repository-artifacts` |
+| [skills/adapters/](packages/harness/resources/skills/adapters/) | 연동·호환 어댑터인 `openspec-workflow`, `ste-ko`, `taste-windows-runtime`, `humanize-windows-runtime` |
 | `.local/external-skills.json` | 외부 스킬과 참조 자료의 로컬 캐시. Git 제외 |
 | `.local/sources/dependencies.lock.json` | 기본 상태 루트에 설치한 의존성의 버전, 커밋, 배포 해시. Git 제외 |
-| [dependencies/dependencies.lock.json](dependencies/dependencies.lock.json) | 설치 상태가 없을 때 읽는 초기 잠금 파일 |
-| [dependencies/NOTICE.md](dependencies/NOTICE.md) | 외부 원본의 출처와 라이선스 안내 |
-| [dependencies/roylabs-2026-11-12.json](dependencies/roylabs-2026-11-12.json) | 초기 Roylabs 기준 구성의 출처와 파일 해시 |
-| [plugins/](plugins) | 자체 플러그인의 소스와 테스트 |
-| [marketplace/](marketplace) | Windows Agent Devkit과 Worker Orchestrator의 배포본 |
-| [installer/](installer) | Task와 원격 명령이 사용하는 설치·갱신·적용 구현 |
-| [bin/](bin) | `npx` 명령의 진입점 |
+| [dependencies/dependencies.lock.json](packages/harness/resources/dependencies/dependencies.lock.json) | 설치 상태가 없을 때 읽는 초기 잠금 파일 |
+| [dependencies/NOTICE.md](packages/harness/resources/dependencies/NOTICE.md) | 외부 원본의 출처와 라이선스 안내 |
+| [dependencies/roylabs-2026-11-12.json](packages/harness/resources/dependencies/roylabs-2026-11-12.json) | 초기 Roylabs 기준 구성의 출처와 파일 해시 |
+| [packages/repo-governance/](packages/repo-governance/) | 소스와 테스트. 공개 배포 경로는 `plugin/` |
+| [packages/windows-agent-devkit/](packages/windows-agent-devkit/) | 소스와 테스트. 검증한 공개 배포본은 `release/` |
+| [packages/worker-orchestrator/](packages/worker-orchestrator/) | 소스와 테스트. 검증한 공개 배포본은 `release/` |
+| [packages/harness/installer/](packages/harness/installer/) | 설치·갱신·적용 구현. `npx` 진입점은 `personal-harness.mjs`. Python 의존성은 `requirements.txt` |
+| [packages/harness/tests/](packages/harness/tests/) | 하네스 테스트와 픽스처 |
+| [tests/test_codex_marketplace.py](tests/test_codex_marketplace.py) | 여러 플러그인 패키지와 루트 카탈로그를 함께 검사하는 테스트 |
 | [Taskfile.yml](Taskfile.yml) | 저장소 루트에서 사용하는 준비, 설치, 갱신, 적용과 검증 명령 |
 | [package.json](package.json) | Git 패키지의 실행 명령, 배포 파일, 설치 대상 PC 이름 |
 | [docs/repository-workflows.md](docs/repository-workflows.md) | 개발환경·문서·테스트 산출물의 자율 판단과 저장소 governance 역할 경계 |
 
 단독 스킬을 배포하려면 `registry.toml`의 `[[skills]]`에 설치 폴더 이름 `name`과 원본의 역할을 나타내는 `role`을 적는다.
 자체 스킬은 `role = "custom"`으로, 어댑터는 `role = "adapter"`로 선언한다.
-두 역할 모두 저장소 루트 기준 원본 경로를 `path`에 적는다.
+두 역할 모두 `registry.toml`이 있는 `packages/harness/resources/`를 기준으로 원본 경로를 `path`에 적는다.
 어댑터의 연동 대상은 `adapts`에 적는다. [스킬과 외부 도구](docs/baseline.md#스킬과-외부-도구)
 
 `feature-sliced-design`과 `humanize-korean`은 `role = "upstream"`으로 등록한다.
@@ -227,9 +233,9 @@ task install -- -Locked
 설치기는 등록한 로컬 파일과 캐시의 외부 파일을 `~/.agents/skills/<name>/`에 배치한다.
 `requires`를 지정한 스킬은 잠금 파일에 해당 의존성이 있을 때 설치한다.
 `openspec-workflow`의 `requires`는 `openspec`이다.
-작업 중 스킬을 사용하는 기준은 `common/AGENTS.md`에서 관리한다.
+작업 중 스킬을 사용하는 기준은 `packages/harness/resources/common/AGENTS.md`에서 관리한다.
 
-자체 플러그인의 소스는 `plugins/<name>/`에서 수정한다.
+자체 플러그인의 소스는 `packages/<name>/`에서 수정한다.
 카탈로그가 가리키는 배포 경로와 새 버전을 게시하는 방법은 [자체 플러그인 소스와 배포본](docs/deployment.md#자체-플러그인-소스와-배포본)을 참고한다.
 
 ```mermaid
@@ -241,8 +247,8 @@ flowchart LR
     H[PC 로컬 설정] --> M
     R[해당 PC의 Codex 런타임 설정] --> M
     M --> P[사전 검사와 적용 계획]
-    SC["자체 스킬 · skills/custom/"] --> S
-    SA["어댑터 · skills/adapters/"] --> S
+    SC[자체 스킬 원본] --> S
+    SA[어댑터 원본] --> S
     SU["외부 원본 선언 · registry.toml"] --> F["일반 설치와 갱신에서 원본 확인"]
     F --> E["로컬 캐시 · external-skills.json"]
     E --> S
@@ -268,6 +274,7 @@ task test
 
 `Taskfile.yml`의 `test` 작업은 Python `unittest`를 직접 실행한다.
 `task test`는 `--` 뒤의 인자를 `unittest`에 전달한다.
-테스트는 임시 사용자 홈에서 설정 보존, 반복 적용, 백업과 실패 시 복구, 경로 보호를 확인한다.
+`task test`는 하네스 테스트와 루트 카탈로그 검사를 실행한다.
+하네스 테스트는 임시 사용자 홈에서 설정 보존, 반복 적용, 백업과 실패 시 복구, 경로 보호를 확인한다.
 과거 적용·검증 이력은 저장소의 `docs/history/`에 보관한다.
 이력 문서는 설치 패키지에 포함하지 않는다.

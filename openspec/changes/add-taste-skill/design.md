@@ -19,7 +19,7 @@ Taste Skill은 같은 구조의 공식 Codex 플러그인과 자동 선택 가�
 
 ### 공식 플러그인 등록 재사용
 
-`registry.toml`에 공식 GitHub 저장소와 `.codex-plugin/plugin.json`을 등록한다.
+`packages/harness/resources/registry.toml`에 공식 GitHub 저장소와 `.codex-plugin/plugin.json`을 등록한다.
 최신 안정 릴리스를 정확한 commit으로 해석하고 전체 파일 해시를 기록한다.
 별도의 스킬 복사 경로나 wrapper를 추가하지 않는다.
 

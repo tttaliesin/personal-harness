@@ -4,6 +4,8 @@
 
 Personal Harness는 각 PC에서 제공하는 번들을 등록하고 설치한다.
 자체 플러그인의 소스는 각 원본 작업 트리에서 관리해 왔다.
+Personal Harness는 처음 이관한 소스를 `plugins/`에 두었다.
+현재 패키지 경로는 `organize-harness-layout`에서 정한다.
 
 ## Goals / Non-Goals
 
@@ -20,7 +22,7 @@ Personal Harness는 각 PC에서 제공하는 번들을 등록하고 설치한�
 
 ## Decisions
 
-`plugins/<이름>/`을 각 플러그인의 소스 루트로 사용한다.
+`packages/<이름>/`을 각 플러그인의 소스 루트로 사용한다.
 패키지가 실행에 사용하는 공용 매니페스트, 템플릿과 의존성 선언을 이관한다.
 공용 소스는 공개 GitHub `main`에서 관리한다.
 원본의 작업용 지침과 PC별 경로, 개인·조직별 설정과 제품별 설정은 해당 환경에 둔다.

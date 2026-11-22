@@ -18,7 +18,7 @@ Context7의 모노레포 릴리스 번호와 플러그인 manifest 버전은 서
   설치 시 해석한 commit과 전체 플러그인 digest를 lock으로 고정한다.
 - 공식 플러그인이 제공하는 MCP와 스킬을 사용한다.
   별도의 같은 MCP를 중복 등록하지 않는다.
-- 선택 조건은 common/AGENTS.md에서 관리한다.
+- 선택 조건은 `packages/harness/resources/common/AGENTS.md`에서 관리한다.
   프레임워크 이름의 등장만으로 모든 작업에 조회를 강제하지 않는다.
 - Context7 이외의 기존 도구 버전은 이번 배포에서 유지한다.
   인증은 각 PC의 공식 로그인 경로에 남기며 Git에 저장하지 않는다.

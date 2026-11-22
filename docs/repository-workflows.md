@@ -56,12 +56,14 @@ Deployment Simulator를 포함한 시뮬레이터는 모든 작업의 선행 조
 | OpenSpec 제안·설계·명세·진행 상태 | 기존 `openspec/` 생명주기로 Git 추적 |
 | 공유하기로 남긴 적용·검증 기록 | 기존 `docs/history/` 추적 유지 |
 | 일회성 검토 초안·원시 진단 결과 | 무시되는 `.local/reviews/` 또는 `.local/artifacts/` |
-| 테스트 코드·fixture·승인된 기준 데이터 | 기존 `tests/`와 소스 위치에서 Git 추적 |
+| 하네스 테스트·픽스처·승인된 기준 데이터 | `packages/harness/tests/`에서 Git 추적 |
+| 플러그인 테스트·픽스처·승인된 기준 데이터 | 각 `packages/<name>/`의 테스트 위치에서 Git 추적 |
+| 여러 패키지에 걸친 마켓플레이스 테스트 | 루트 `tests/test_codex_marketplace.py`에서 Git 추적 |
 | 생성된 테스트 보고서·coverage·trace | 무시되는 로컬 경로나 도구의 지정 출력 디렉터리 |
 
 검토 문서라는 이름만으로 추적을 해제하지 않는다.
 실행 스크린샷과 회귀 테스트 기준 이미지는 목적이 다르다.
-이번 변경은 기존 `docs/history/`나 테스트 자산을 이동하지 않는다.
+산출물 판단 기준을 추가하는 변경만으로 기존 `docs/history/`나 테스트 자산을 옮기지 않는다.
 
 이 저장소는 `.local/`, `.audit/`와 지정한 루트 테스트 출력 디렉터리를 제외한다.
 새 도구의 실제 출력 경로는 별도로 확인한다.

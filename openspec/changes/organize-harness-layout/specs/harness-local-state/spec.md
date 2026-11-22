@@ -29,7 +29,7 @@
 ### Requirement: Record installed dependencies in the selected state root
 
 일반 및 잠금 설치는 활성 잠금을 선택한 상태 루트의 `sources/dependencies.lock.json`에 기록해야 한다(MUST).
-저장소의 `dependencies/dependencies.lock.json`은 읽기 전용 초기값으로 사용해야 한다(MUST).
+저장소의 `packages/harness/resources/dependencies/dependencies.lock.json`은 읽기 전용 초기값으로 사용해야 한다(MUST).
 
 #### Scenario: Install from a checkout with the default state root
 

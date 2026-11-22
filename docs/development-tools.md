@@ -94,7 +94,8 @@ Context7과의 고정 호출 순서는 두지 않는다.
 이미 충분한 근거가 있으면 같은 내용을 중복 조회하지 않는다.
 알려진 파일 읽기와 작은 기계적 수정에는 조회를 선행 필수로 두지 않는다.
 
-두 PC의 관리 대상은 `registry.toml`에 등록하는 공식 원격 HTTP 서버 `https://learn.microsoft.com/api/mcp`다.
+두 PC의 관리 대상은 공식 원격 HTTP 서버 `https://learn.microsoft.com/api/mcp`다.
+서버 주소는 [registry.toml](../packages/harness/resources/registry.toml)에서 관리한다.
 공개 endpoint를 사용하며 별도 의존성 패키지나 사용자 스킬을 설치하지 않는다.
 연결 방식과 제공 도구는 [Microsoft Learn 공식 안내](https://learn.microsoft.com/en-us/training/support/mcp)를 참고한다.
 등록·적용과 실제 도구 조회의 성공 여부는 구분해서 확인한다.
@@ -122,7 +123,7 @@ Context7·Microsoft Learn과의 고정 호출 순서나 모든 C# 편집의 필�
 패키지 수정 도구는 승인된 작업 범위에서만 사용한다.
 새로운 필수 승인·hook·테스트를 추가하지 않는다.
 
-`registry.toml`은 `nuget` 이름과 공식 패키지의 정확한 버전을 선언한다.
+[registry.toml](../packages/harness/resources/registry.toml)은 `nuget` 이름과 공식 패키지의 정확한 버전을 선언한다.
 lock은 기본 패키지·Windows x64 payload·공식 .NET 10 SDK ZIP의 출처와 해시를 고정한다.
 설치기는 하네스 상태의 `tools/mcp/nuget` 아래에 전용 SDK와 원본 패키지를 배치한다.
 프로세스별 환경에서 해당 SDK의 host로 서버를 실행하며 전역 PATH나 .NET 등록은 바꾸지 않는다.
@@ -186,10 +187,10 @@ Taste를 사용할 때도 기존 브랜드 서체와 프로젝트 토큰을 우�
 한글을 지원하는 서체를 선택하고 실제 렌더링된 글꼴과 혼합 문자열을 확인한다.
 Latin-only 폰트의 선언이나 다운로드 성공만으로 한글이 같은 서체로 표시됐다고 판단하지 않는다.
 
-후보 서체와 출처는 [서체 참조](../skills/custom/korean-typography/references/fonts.md)에 있다.
+후보 서체와 출처는 [서체 참조](../packages/harness/resources/skills/custom/korean-typography/references/fonts.md)에 있다.
 이 후보를 모두 로드하거나 모든 화면을 같은 서체로 통일할 필요는 없다.
 폰트는 필요한 프로젝트에서만 연결하며 OS 전체 서체를 설치하지 않는다.
-수치·줄바꿈·CSS 적용 예시는 [조판 패턴](../skills/custom/korean-typography/references/patterns.md)에 있다.
+수치·줄바꿈·CSS 적용 예시는 [조판 패턴](../packages/harness/resources/skills/custom/korean-typography/references/patterns.md)에 있다.
 
 이 지침은 일반 한국어 대화나 백엔드 작업의 필수 단계가 아니다.
 기존 스택과 repo-governance, Taste 원본은 보존한다.
@@ -197,7 +198,7 @@ Latin-only 폰트의 선언이나 다운로드 성공만으로 한글이 같은 
 
 ## Windows의 Taste 브라우저 검사
 
-Windows에서는 [taste-windows-runtime](../skills/adapters/taste-windows-runtime/SKILL.md)을 함께 선택한다.
+Windows에서는 [taste-windows-runtime](../packages/harness/resources/skills/adapters/taste-windows-runtime/SKILL.md)을 함께 선택한다.
 기존 명령의 원본 스크립트와 인수를 이 스킬의 `scripts/run.mjs`에 전달한다.
 실행기는 검사 프로세스에만 설치된 브라우저 경로와 선택된 Edge의 headless 실행 플래그를 적용한다.
 원본 캐시와 페이지를 고치지 않으며 검사 결과와 종료 코드를 그대로 반환한다.
@@ -212,7 +213,7 @@ Windows에서는 [taste-windows-runtime](../skills/adapters/taste-windows-runtim
 한 명령 설치에서는 `%LOCALAPPDATA%/PersonalHarness/state`를 사용한다.
 각 PC의 기존 경로 덮어쓰기는 보존한다.
 
-[openspec-workflow](../skills/adapters/openspec-workflow/SKILL.md)의 `requires`는 `registry.toml`의 `[[skills]]`에서 `openspec`으로 지정한다.
+[openspec-workflow](../packages/harness/resources/skills/adapters/openspec-workflow/SKILL.md)의 `requires`는 `[[skills]]`에서 `openspec`으로 지정한다. [registry.toml](../packages/harness/resources/registry.toml)
 설치기는 잠금 파일에 `openspec`이 있으면 해당 스킬을 `~/.agents/skills/openspec-workflow/`에 복사한다.
 실제 CLI가 PATH 밖에 있으면 생성된 사용자 지침의 `Local tool executables`에 실행 경로를 기록한다.
 이 기록은 셸이나 실행 중인 Codex의 PATH를 바꾸지 않는다.

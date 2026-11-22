@@ -7,7 +7,7 @@
 
 ## 공통 사용자 지침
 
-[common/AGENTS.md](../common/AGENTS.md)는 Roylabs의 전역 지침을 보관한다.
+[common/AGENTS.md](../packages/harness/resources/common/AGENTS.md)는 Roylabs의 전역 지침을 보관한다.
 사용자 절대경로 한 곳은 `${CODEX_HOME}`으로 바꿨다.
 2026년 11월 16일 pstack과 EGM을 제거하면서 두 플러그인의 자동 호출 지침도 제거했다.
 같은 날 CodeGraph와 Sites·브라우저의 선택 조건을 작업 목적에 맞게 완화했다.
@@ -55,20 +55,20 @@
 
 ## 스킬과 외부 도구
 
-단독 스킬의 배포 목록은 [registry.toml](../registry.toml)의 `[[skills]]`에서 관리한다.
+단독 스킬의 배포 목록은 [registry.toml](../packages/harness/resources/registry.toml)의 `[[skills]]`에서 관리한다.
 설치기는 등록한 로컬 파일과 캐시의 외부 파일을 `~/.agents/skills/<name>/`에 배치한다.
 역할별 원본 경로와 등록 필드는 저장소 구조에서 확인할 수 있다. [저장소 구조](../README.md#저장소-구조)
 
 | 구성 | 관리 방식 |
 |---|---|
-| [create-readme](../skills/custom/create-readme) | Roylabs 사용자 프로필에서 가져온 프로젝트 README 작성 지침 |
-| [development-environment](../skills/custom/development-environment) | 기존 스택을 보존하는 실행·테스트 환경 지침과 런타임 참조 |
-| [repository-artifacts](../skills/custom/repository-artifacts) | 공유 문서·로컬 검토·테스트 산출물 판단 지침 |
-| [korean-typography](../skills/custom/korean-typography) | 한글 웹·앱 UI 지침과 참조 문서 |
-| [openspec-workflow](../skills/adapters/openspec-workflow) | OpenSpec 연동 어댑터. `adapts = "openspec"`. 잠금 파일에 `openspec`이 있을 때 적용 |
-| [ste-ko](../skills/adapters/ste-ko) | 한국어 개발 문서용 어댑터. `adapts = "beamonic/ste-ko"`. 기본 브랜치의 STE-KO 참조 자료를 로컬 `SKILL.md`와 함께 설치 |
-| [humanize-windows-runtime](../skills/adapters/humanize-windows-runtime) | Windows 윤문용 작업 폴더와 Python 경로를 고정하는 어댑터. `adapts = "humanize-korean"` |
-| [taste-windows-runtime](../skills/adapters/taste-windows-runtime) | 원본 Taste 브라우저 검사에 적용하는 Windows 어댑터. `adapts = "taste-skill"` |
+| [create-readme](../packages/harness/resources/skills/custom/create-readme) | Roylabs 사용자 프로필에서 가져온 프로젝트 README 작성 지침 |
+| [development-environment](../packages/harness/resources/skills/custom/development-environment) | 기존 스택을 보존하는 실행·테스트 환경 지침과 런타임 참조 |
+| [repository-artifacts](../packages/harness/resources/skills/custom/repository-artifacts) | 공유 문서·로컬 검토·테스트 산출물 판단 지침 |
+| [korean-typography](../packages/harness/resources/skills/custom/korean-typography) | 한글 웹·앱 UI 지침과 참조 문서 |
+| [openspec-workflow](../packages/harness/resources/skills/adapters/openspec-workflow) | OpenSpec 연동 어댑터. `adapts = "openspec"`. 잠금 파일에 `openspec`이 있을 때 적용 |
+| [ste-ko](../packages/harness/resources/skills/adapters/ste-ko) | 한국어 개발 문서용 어댑터. `adapts = "beamonic/ste-ko"`. 기본 브랜치의 STE-KO 참조 자료를 로컬 `SKILL.md`와 함께 설치 |
+| [humanize-windows-runtime](../packages/harness/resources/skills/adapters/humanize-windows-runtime) | Windows 윤문용 작업 폴더와 Python 경로를 고정하는 어댑터. `adapts = "humanize-korean"` |
+| [taste-windows-runtime](../packages/harness/resources/skills/adapters/taste-windows-runtime) | 원본 Taste 브라우저 검사에 적용하는 Windows 어댑터. `adapts = "taste-skill"` |
 | `humanize-korean` | im-not-ai의 최신 GitHub 안정 릴리스에서 Codex용 원본 스킬과 참조 문서, 실행 스크립트를 설치 |
 | `feature-sliced-design` | 기본 브랜치에서 공식 FSD 스킬 디렉터리 전체를 설치. FSD를 쓰는 저장소에서만 자율 선택 |
 | Computer Use | Codex Desktop이 내장 플러그인과 스킬을 설치하고 관리 |
@@ -107,15 +107,15 @@ Taste Skill을 사용할 때도 기존 프레임워크, SSR·API·인증·데이
 윤문이 필요한 문서에는 `humanize-korean`을 자율적으로 선택하고, 변경한 부분의 주체·조건·예외와 의무·허용·금지를 원문과 대조한다.
 Windows에서는 준비 단계가 반환한 작업 폴더의 절대 경로를 윤문과 검증 단계에 전달한다.
 이 흐름의 배포 목록에서 STE80을 제외한다.
-한국어 개발 문서용 스킬의 원본 저장소와 참조 경로는 `[[skills]]`에서 확인할 수 있다. [registry.toml](../registry.toml)
+한국어 개발 문서용 스킬의 원본 저장소와 참조 경로는 `[[skills]]`에서 확인할 수 있다. [registry.toml](../packages/harness/resources/registry.toml)
 
-초기 스킬 파일 11개의 SHA256은 [Roylabs 원본 기록](../dependencies/roylabs-2026-11-12.json)에 있다.
+초기 스킬 파일 11개의 SHA256은 [Roylabs 원본 기록](../packages/harness/resources/dependencies/roylabs-2026-11-12.json)에 있다.
 외부 스킬의 설치에 사용할 커밋과 검증한 파일 내용은 PC의 `external-skills.json`에 기록한다.
 Steiger와 ArchUnitNET의 도입은 저장소별로 결정하며 하네스 전역 의존성이나 자동 hook으로 등록하지 않는다.
 
 설치기는 검증한 의존성의 버전을 `<state-root>/sources/dependencies.lock.json`에 기록한다.
 체크아웃의 기본 경로는 `.local/sources/dependencies.lock.json`이다.
-[저장소의 잠금 파일](../dependencies/dependencies.lock.json)은 설치 상태가 없을 때 사용하는 읽기 전용 초기값이다.
+[저장소의 잠금 파일](../packages/harness/resources/dependencies/dependencies.lock.json)은 설치 상태가 없을 때 사용하는 읽기 전용 초기값이다.
 
 Ego와 `ego-browser` 스킬은 각 PC의 브라우저가 소유한다.
 이 저장소는 앱이나 스킬의 설치·업데이트·버전 검사·링크 생성에 관여하지 않는다.
@@ -145,7 +145,8 @@ Ego가 없거나 스킬이 다른 경로에 연결돼 있어도 Harness 적용�
 
 ## 기준을 갱신할 때
 
-사용자 정책은 `common`에서 수정하고 두 호스트의 `plan`으로 영향을 확인한다.
+사용자 정책은 `packages/harness/resources/common/`에서 수정한다.
+두 호스트의 `plan`으로 변경의 영향을 확인한다.
 설치 경로 변경은 `.local/<hostname>.toml`에 기록한다.
 일반 설치와 갱신은 외부 스킬에 등록한 채널에서 커밋을 선택하고 배포할 파일을 검증한다.
 외부 파일 검증을 마치면 설치기는 로컬 캐시를 원자적으로 교체한다.

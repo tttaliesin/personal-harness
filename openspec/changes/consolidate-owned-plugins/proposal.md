@@ -8,7 +8,7 @@
 ## What Changes
 
 - 원본 스레드에서 검증된 소스와 실행에 필요한 공용 파일을 받는다.
-- Windows Agent Devkit, Worker Orchestrator, repo-governance의 공용 소스를 공개 GitHub `main`의 `plugins/`에 둔다.
+- Windows Agent Devkit, Worker Orchestrator, repo-governance의 공용 소스를 공개 GitHub `main`의 각 `packages/<이름>/`에 둔다.
 - 각 플러그인의 버전과 패키징·테스트 진입점을 유지한다.
 - PC별 경로, 개인·조직별 설정, 제품별 설정과 실행 상태는 해당 환경에 둔다.
 - 외부 리소스는 출처와 갱신 정책으로 관리한다.

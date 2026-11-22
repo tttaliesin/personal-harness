@@ -21,9 +21,9 @@
 #### Scenario: 공개 카탈로그의 배포 경로 조회
 
 - **WHEN** Codex가 공개 카탈로그의 세 항목을 읽는다.
-- **THEN** `repo-governance`는 `./plugins/repo-governance/plugin`에서 설치할 수 있다.
-- **AND** `windows-agent-devkit`은 `./marketplace/windows-agent-devkit`에서 설치할 수 있다.
-- **AND** `worker-orchestrator`는 `./marketplace/worker-orchestrator`에서 설치할 수 있다.
+- **THEN** `repo-governance`는 `./packages/repo-governance/plugin`에서 설치할 수 있다.
+- **AND** `windows-agent-devkit`은 `./packages/windows-agent-devkit/release`에서 설치할 수 있다.
+- **AND** `worker-orchestrator`는 `./packages/worker-orchestrator/release`에서 설치할 수 있다.
 
 ### Requirement: Initial deployment provenance
 

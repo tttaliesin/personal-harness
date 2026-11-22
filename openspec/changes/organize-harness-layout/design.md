@@ -2,18 +2,45 @@
 
 ## Context
 
+`consolidate-owned-plugins`에서 자체 플러그인 소스를 한 저장소로 이관했다.
+`serve-codex-marketplace-from-main`에서 각 PC가 Codex로 공개 배포본을 설치하는 경로를 정했다.
+패키지별 소스와 테스트를 해당 배포본과 함께 관리하도록 저장소의 경로를 정리한다.
 PC별 설정은 기존 로컬 TOML에 둔다.
 
 ## Decisions
 
+### 패키지와 루트 진입점
+
+| 경로 | 관리 대상 |
+|---|---|
+| `packages/harness/installer/` | 설치 구현, `personal-harness.mjs`, `requirements.txt` |
+| `packages/harness/resources/` | `common/`, `skills/`, `dependencies/`, `registry.toml` |
+| `packages/harness/tests/` | 하네스 테스트와 픽스처 |
+| `packages/repo-governance/` | 소스와 테스트. 공개 배포 경로는 `plugin/` |
+| `packages/windows-agent-devkit/`, `packages/worker-orchestrator/` | 각 플러그인의 소스와 테스트. 기존 공개 배포본은 각각 `release/` |
+| `tests/test_codex_marketplace.py` | 카탈로그와 여러 패키지의 배포본을 함께 검사하는 테스트 |
+| 루트 `package.json`, `Taskfile.yml`, `.agents/plugins/marketplace.json` | 각각 `npx`, Task, Codex가 사용하는 진입점과 목록 |
+| 루트 `docs/`, `openspec/` | 저장소 공통 문서와 명세 |
+
+루트 npm 배포에는 하네스 설치기와 리소스, 설치 안내를 포함한다.
+자체 플러그인 패키지, 테스트, 과거 검증 이력과 PC별 상태는 npm 배포에서 제외한다.
+`task test`는 하네스 테스트와 루트의 마켓플레이스 테스트를 실행한다.
+
+카탈로그의 `source.path`는 저장소 루트 기준이다.
+두 `release/`의 파일은 기존 공개 배포본에서 바이트 그대로 옮긴다.
+Git 속성에서 두 경로의 줄 끝 변환을 끈다.
+공개 배포 버전은 `repo-governance` `0.2.0`, Windows Agent Devkit `0.3.5`, Worker Orchestrator `0.1.6`을 유지한다.
+
 ### 스킬 원본 선언
+
+다음 경로는 `packages/harness/resources/`를 기준으로 한다.
 
 - 자체 스킬은 `skills/custom/<name>/`에 둔다.
 - 연동·호환 어댑터는 `skills/adapters/<name>/`에 둔다.
   `ste-ko`의 `SKILL.md`는 로컬에 둔다.
   설치기는 등록한 외부 참조 파일을 어댑터의 설치 폴더에 추가한다.
 - 설치기는 `registry.toml`의 `[[skills]]`에서 배포 대상을 읽는다.
-  `path`는 자체 스킬과 어댑터의 저장소 기준 상대 경로다.
+  `path`는 자체 스킬과 어댑터의 리소스 폴더 기준 상대 경로다.
   어댑터의 `adapts`는 연동 대상을 가리킨다.
   `source`는 외부 스킬 또는 참조 파일을 제공하는 HTTPS GitHub 저장소다.
   `channel`에는 기본 브랜치의 `default-branch` 또는 최신 안정 릴리스의 `latest-release`를 쓴다.
@@ -56,22 +83,22 @@ PC별 설정은 기존 로컬 TOML에 둔다.
   `role`과 `adapts`가 모두 없는 로컬 항목에는 기존 검사를 적용한다.
   등록한 단독 스킬은 `name`에 따라 `~/.agents/skills/<name>/`에 배치한다.
   OpenSpec 작업 스킬은 잠금 파일에 `openspec`이 있을 때 적용한다.
-- `bin/`은 npm 진입점을 제공하고 `installer/`는 설치와 적용을 담당한다.
-  `task test`는 루트 `Taskfile.yml`에서 Python `unittest`를 직접 실행한다.
-- `common/config.toml`의 `windows.sandbox`는 두 PC에 공통 기본값 `elevated`를 제공한다.
+- 현재 공개 배포 버전은 카탈로그가 가리키는 각 매니페스트에서 확인한다.
+  빌드 후보는 각 플러그인의 빌드 절차로 만든다.
+- `packages/harness/resources/common/config.toml`의 `windows.sandbox`는 두 PC에 공통 기본값 `elevated`를 제공한다.
   설치기는 `package.json`의 `supportedHosts`에서 설치 대상 이름을 확인한다.
   PC마다 필요한 설정은 `docs/local.example.toml`을 참고해 로컬 TOML에서 덮어쓴다.
 
 ### PC별 설정과 잠금
 
 설정 병합은 기존 Codex 프로필에서 시작한다.
-`common/config.toml`에서 `model`, `model_reasoning_effort`, `desktop.composer-predictions-enabled`를 제외한다.
+`packages/harness/resources/common/config.toml`에서 `model`, `model_reasoning_effort`, `desktop.composer-predictions-enabled`를 제외한다.
 PC별 TOML의 `[config]`나 `[config.desktop]`에 해당 키를 명시하면 마지막 병합 단계에서 적용한다.
 
 의존성 설치 결과는 `<state-root>/sources/dependencies.lock.json`에 기록한다.
 체크아웃에서는 Git에서 제외된 `.local`이 기본 상태 루트다.
-설치는 활성 잠금이 없을 때만 저장소의 `dependencies/dependencies.lock.json`을 초기값으로 읽는다.
-기존 원격 설치가 인접 체크아웃에서 초기값을 찾는 경로도 유지한다.
+설치에 사용할 활성 잠금이 없으면 저장소의 `packages/harness/resources/dependencies/dependencies.lock.json`을 초기값으로 읽는다.
+원격 설치는 기존 인접 체크아웃의 `dependencies/dependencies.lock.json`과 `sources/dependencies.lock.json`도 초기값으로 읽을 수 있다.
 
 계획·검사·적용은 활성 잠금을 우선 읽는다.
 상태 루트를 명시하지 않은 체크아웃에 활성 잠금이 없으면 저장소의 초기값으로 의존성을 확인한다.

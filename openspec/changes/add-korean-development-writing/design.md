@@ -7,7 +7,7 @@ Both Windows hosts already have Codex profiles that retain their own settings an
 
 ## Decisions
 
-- Keep the document-scoped `ste-ko` entrypoint under `skills/adapters/ste-ko/`.
+- Keep the document-scoped `ste-ko` entrypoint under `packages/harness/resources/skills/adapters/ste-ko/`.
   Make the scope clear in discovery metadata and use the `문서` profile.
 - Fetch the declared STE-KO reference documents from the upstream default branch during ordinary installation and update.
 - Fetch the `humanize-korean` Codex copy-install payload from the latest stable upstream GitHub release.

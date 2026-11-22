@@ -14,7 +14,7 @@ The shared user instructions are always present, so conditional detail belongs i
 ## Decisions
 
 - Use two focused skills because environment construction and repository file disposition apply to different tasks.
-- Keep short autonomous routing and local-output defaults in `common/AGENTS.md`.
+- Keep short autonomous routing and local-output defaults in `packages/harness/resources/common/AGENTS.md`.
 - Keep runtime patterns in an optional reference loaded only for dependency and simulator work.
 - Register the skills as repository-owned sources, retaining recursive deployment and existing backups.
 - Prefer adopted repository governance for paths and checks; the harness supplies execution guidance where the repository has not specified it.

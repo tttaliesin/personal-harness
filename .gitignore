@@ -10,8 +10,8 @@
 /playwright-report/
 /coverage/
 /artifacts/test/
-/plugins/*/dist/
-/plugins/*/node_modules/
+/packages/*/dist/
+/packages/*/node_modules/
 
 # Python caches.
 __pycache__/

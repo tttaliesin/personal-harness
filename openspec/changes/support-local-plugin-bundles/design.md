@@ -13,8 +13,9 @@ Codex의 로컬 마켓플레이스는 배포 폴더의 경로를 프로필에 �
 
 ## Decisions
 
-`registry.toml`의 `[[local_plugins]]`에 이름, 마켓플레이스 이름, 버전, `bundle_sha256`과 활성 상태를 기록한다.
-`source_path`에 이관한 플러그인의 소스 경로를 기록한다.
+`packages/harness/resources/registry.toml`의 `[[local_plugins]]`에 이름, 마켓플레이스 이름, 버전, `bundle_sha256`과 활성 상태를 기록한다.
+이전 로컬 번들의 `source_path`는 이관 당시의 소스 경로인 `plugins/<이름>`을 기록한다.
+공개 Git 마켓플레이스 배포 경로는 루트 카탈로그의 `source.path`에서 관리한다.
 설치기는 이미 게시한 배포본의 버전과 SHA-256 고정값을 사용한다.
 기존 의존성 lock의 Git 및 MCP 등록은 기존 방식으로 관리한다.
 상대 배포 경로는 로컬 설정 파일이 있는 폴더에서 해석한다.

@@ -1,19 +1,23 @@
 # Personal Harness repository
 
 This repository manages the user's Codex harness, using roylabs-desktop as the baseline.
-Treat `common/AGENTS.md` and registered skills as deployable source data while editing the installer.
+Treat `packages/harness/resources/common/AGENTS.md` and registered skills as deployable source data while editing the installer.
 
-- Keep shared policies and Windows defaults in `common` and supported host names in `package.json`.
-- Register each standalone skill with its `role` in `registry.toml`.
-- Place independent skills in `skills/custom/<name>/` with `role = "custom"`.
-- Place integration and compatibility skills in `skills/adapters/<name>/` with `role = "adapter"` and an `adapts` target.
+- Keep shared policies and Windows defaults in `packages/harness/resources/common/` and supported host names in the root `package.json`.
+- Register each standalone skill with its `role` in `packages/harness/resources/registry.toml`.
+- Place independent skills in `packages/harness/resources/skills/custom/<name>/` with `role = "custom"`.
+- Place integration and compatibility skills in `packages/harness/resources/skills/adapters/<name>/` with `role = "adapter"` and an `adapts` target.
 - Keep maintained local references beside each skill's `SKILL.md`.
 - Declare externally fetched standalone skills with `role = "upstream"`, an HTTPS GitHub repository in `source`, a `channel`, and a `files` mapping from installation targets to upstream relative paths.
 - Keep the `ste-ko` adapter's local `SKILL.md` and declare its external references with the same source fields.
-- Place owned plugin projects in `plugins` and installation code in `installer`.
+- Keep installation code, `personal-harness.mjs`, and `requirements.txt` in `packages/harness/installer/`.
+- Keep the dependency seed data in `packages/harness/resources/dependencies/`.
+- Keep harness tests and fixtures in `packages/harness/tests/` and the cross-package marketplace test at `tests/test_codex_marketplace.py`.
+- Keep each owned plugin's source and tests in its own `packages/<name>/` directory.
 - Keep the `personal-harness` Codex Git marketplace at `.agents/plugins/marketplace.json` on the public default branch `main`.
-- Publish the public repo-governance core from `plugins/repo-governance/plugin` and the verified Windows Agent Devkit and Worker Orchestrator packages from `marketplace`.
-- Keep Git line-ending conversion disabled for the verified release payloads in `marketplace`.
+- Publish the public repo-governance core from `packages/repo-governance/plugin/`.
+- Publish the verified Windows Agent Devkit and Worker Orchestrator bundles from `packages/windows-agent-devkit/release/` and `packages/worker-orchestrator/release/`.
+- Preserve the verified release payloads byte for byte during relocations and keep Git line-ending conversion disabled in both `release/` directories.
 - Keep PC paths, personal and organization settings, and product bindings in their respective local environments.
 - Put private absolute paths and local overrides in ignored `.local/<hostname>.toml`.
 - Preserve app-generated `node_repl`, notify, marketplace paths, OpenCodex configuration, project trust and hook trust in the existing target profile.

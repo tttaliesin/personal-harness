@@ -27,6 +27,7 @@ class CodexMarketplaceTests(unittest.TestCase):
                 self.assertTrue(source["path"].startswith("./"))
                 plugin = (ROOT / source["path"]).resolve()
                 self.assertTrue(plugin.is_relative_to(ROOT))
+                self.assertEqual(plugin.parent, ROOT / "packages" / entry["name"])
                 manifest = json.loads((plugin / ".codex-plugin/plugin.json").read_bytes())
                 self.assertEqual(manifest["name"], entry["name"])
                 self.assertTrue(manifest["version"])

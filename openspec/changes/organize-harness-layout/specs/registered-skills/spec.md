@@ -14,7 +14,8 @@
 #### Scenario: Register a skill in a grouped source directory
 
 - **WHEN** 배포 목록에 유효한 스킬 디렉터리를 등록한다.
-- **THEN** 계획은 그 디렉터리의 파일을 `~/.agents/skills/<name>/`에 배치할 대상으로 표시한다.
+- **THEN** 설치기는 `registry.toml`이 있는 `packages/harness/resources/`를 기준으로 로컬 `path`를 읽는다.
+- **AND** 계획은 그 디렉터리의 파일을 `~/.agents/skills/<name>/`에 배치할 대상으로 표시한다.
 - **AND** 적용은 파일을 계획한 위치에 복사한다.
 - **AND** 스킬 내부의 상대 경로를 보존한다.
 
