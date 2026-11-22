@@ -104,7 +104,12 @@ function revisionFor(root) {
   const git = gitAt(root, ['rev-parse', '--show-prefix', '--verify', 'HEAD']);
   if (git.status !== 0) return null;
   const [prefix, revision] = git.stdout.split(/\r?\n/);
-  return prefix === '' && /^[a-f0-9]{40,64}$/.test(revision) ? revision : null;
+  if (!/^[a-f0-9]{40,64}$/.test(revision)) return null;
+  if (prefix === '') return revision;
+
+  // A nested package must have a manifest in the commit the build reports.
+  const manifest = gitAt(root, ['cat-file', '-t', `${revision}:${prefix}package.json`]);
+  return manifest.status === 0 && manifest.stdout.trim() === 'blob' ? revision : null;
 }
 
 const json = value => `${JSON.stringify(value, null, 2)}\n`;

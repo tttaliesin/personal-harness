@@ -36,6 +36,12 @@ async function gitFixture(t) {
   return root;
 }
 
+async function assertPackagedRevision(built, revision) {
+  assert.equal(built.revision, revision);
+  const manifest = await readJSON(path.join(built.packageRoot, 'package-manifest.json'));
+  assert.equal(manifest.revision, revision);
+}
+
 async function assertPackagedVersion(built, version) {
   const { packageRoot, marketplaceRoot } = built;
   const [portable, compatibility, manifest] = await Promise.all(
@@ -59,22 +65,37 @@ test('tagged HEAD builds the package.json version and records the Git revision',
   const metadata = await readJSON(path.join(repoRoot, 'package.json'));
   assert.notEqual(metadata.version, '8.2.3');
   const built = JSON.parse(run(repoRoot, process.execPath, 'scripts/build-package.mjs'));
-  const revision = git(repoRoot, 'rev-parse', 'HEAD');
-  assert.equal(built.revision, revision);
-  const manifest = await readJSON(path.join(built.packageRoot, 'package-manifest.json'));
-  assert.equal(manifest.revision, revision);
+  await assertPackagedRevision(built, git(repoRoot, 'rev-parse', 'HEAD'));
   await assertPackagedVersion(built, metadata.version);
 });
 
-test('an exported source directory does not inherit its parent Git revision', async t => {
+test('a tracked package in a monorepo records the worktree Git revision', async t => {
+  const worktree = await gitFixture(t);
+  const repoRoot = path.join(worktree, 'packages', 'worker orchestrator');
+  await mkdir(repoRoot, { recursive: true });
+  await copySources(repoRoot);
+  git(repoRoot, '-c', 'core.autocrlf=false', 'add', '--', ...sources);
+  commit(worktree, 'Track nested package');
+
+  const built = JSON.parse(run(repoRoot, process.execPath, 'scripts/build-package.mjs'));
+  await assertPackagedRevision(built, git(worktree, 'rev-parse', 'HEAD'));
+});
+
+test('an exported package does not inherit its parent Git revision even with a staged manifest', async t => {
   const parent = await gitFixture(t);
   const repoRoot = path.join(parent, 'exported source');
   await mkdir(repoRoot);
+  await writeFile(path.join(repoRoot, 'fixture-notes.txt'), 'Tracked by the parent repository.\n');
+  git(repoRoot, '-c', 'core.autocrlf=false', 'add', '--', 'fixture-notes.txt');
+  commit(parent, 'Track an unrelated file');
   await copySources(repoRoot);
-  const built = await buildPackage({ repoRoot });
-  assert.equal(built.revision, null);
+  await assertPackagedRevision(await buildPackage({ repoRoot }), null);
+
+  git(repoRoot, '-c', 'core.autocrlf=false', 'add', '--', 'package.json');
+  const stagedBuild = await buildPackage({ repoRoot });
+  await assertPackagedRevision(stagedBuild, null);
   const metadata = await readJSON(path.join(repoRoot, 'package.json'));
-  await assertPackagedVersion(built, metadata.version);
+  await assertPackagedVersion(stagedBuild, metadata.version);
 });
 
 test('the checker smoke test rejects a CLI version that disagrees with the manifests', async t => {

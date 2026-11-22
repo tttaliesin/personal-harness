@@ -31,9 +31,12 @@ node $cli doctor --project $projectRoot --format json
 
 ## 로컬 플러그인 설치
 
-저장소 루트에서 [개발과 확인](#개발과-확인)의 패키지 생성과 검사를 마칩니다.
-같은 저장소 루트에서 생성한 로컬 마켓플레이스를 등록합니다.
-아래 명령의 마지막 결과에서 플러그인 설치를 확인합니다.
+공개 배포본을 설치하려면 `codex plugin marketplace add tttaliesin/personal-harness`로 공유 마켓플레이스를 등록하십시오.
+`codex plugin add windows-agent-devkit@personal-harness`를 실행하십시오.
+
+소스에서 만든 패키지를 시험하려면 먼저 패키지 생성과 검사를 마치십시오. [개발과 확인](#개발과-확인)
+`packages/windows-agent-devkit`에서 다음 명령을 실행하십시오.
+마지막 명령의 결과에서 플러그인 설치를 확인하십시오.
 
 ```powershell
 codex plugin marketplace add ./.local/plugin-marketplace --json
@@ -60,9 +63,10 @@ Rust 링크·WSL 배포판 내부·Docker 엔진/서비스·Process Compose의 �
 
 ## 개발과 확인
 
-다음 명령은 저장소 루트에서 순서대로 실행합니다.
+소스 저장소를 체크아웃한 경우 저장소 루트에서 다음 명령을 순서대로 실행하십시오.
 
 ```powershell
+Set-Location ./packages/windows-agent-devkit
 npm ci --ignore-scripts
 node scripts/build.mjs
 node --test
@@ -72,7 +76,7 @@ node scripts/check-package.mjs --packaged
 ```
 
 위 명령으로 동작 테스트와 설치 패키지 검사를 재현할 수 있습니다.
-소스 검사는 저장소의 `dist/cli.mjs`가 현재 빌드와 일치하는지 확인합니다.
+소스 검사는 Devkit의 `dist/cli.mjs`가 현재 빌드와 일치하는지 확인합니다.
 `--packaged`는 생성한 패키지의 번들을 현재 소스에서 다시 빌드한 바이트와 대조한 뒤 독립 실행을 검사합니다.
 공식 지원 판정은 확인일과 유효기간이 있는 오프라인 정책을 사용합니다.
 
