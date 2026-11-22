@@ -25,7 +25,7 @@ It SHALL select the document guidance for Korean development documents and honor
 
 The harness SHALL make the upstream Codex `humanize-korean` skill available for autonomous selection when a Korean development document needs polishing.
 The deployment SHALL include the entrypoint, references, and runtime scripts.
-It SHALL exclude STE80 from this workflow and keep editor artefacts local.
+The harness SHALL exclude STE80 from this workflow and keep editor artefacts local.
 
 #### Scenario: Polish a draft that needs editing
 

@@ -43,20 +43,21 @@ See the [official NuGet MCP documentation](https://learn.microsoft.com/en-us/nug
 ## External standalone skills and references
 
 The registry declares the upstream repositories, update channels, and file mappings. [registry.toml](../registry.toml)
-Ordinary installation and update select a commit for each source and validate the mapped files.
-The installer atomically stores the selected commits and verified files in the local `external-skills.json` cache.
-The upstream repositories carry their MIT license notices.
+Ordinary installation and update resolve each selected commit and validate the mapped files.
+The local `external-skills.json` cache holds those commits and file contents.
+See the upstream repositories for their MIT license notices.
 
 `feature-sliced-design` installs the original skill directory, including its references and evals, from the default branch. [feature-sliced/skills](https://github.com/feature-sliced/skills)
 The official FSD documentation identifies it as a community-driven skill and links its installation source. [FSD documentation](https://fsd.how/docs/llms/)
 The skill follows FSD methodology version 2.1.
+The installer records the resolved default-branch commit as the installed skill's source revision.
 Autonomous selection is limited to repositories already adopting FSD by `common/AGENTS.md`.
 Steiger and ArchUnitNET remain per-repository tools rather than global harness dependencies.
 
 `skills/adapters/ste-ko` contains the harness's document-scoped `SKILL.md`.
-The installer adds the declared STE-KO references and license from the default branch. [beamonic/ste-ko](https://github.com/beamonic/ste-ko)
+The installer adds the declared STE-KO references and `LICENSE` from the default branch. [beamonic/ste-ko](https://github.com/beamonic/ste-ko)
 
-`humanize-korean` installs the original Codex entrypoint, references, runtime scripts, and license from the latest stable GitHub release. [epoko77-ai/im-not-ai](https://github.com/epoko77-ai/im-not-ai)
+`humanize-korean` installs the original Codex entrypoint, references, runtime scripts, and `LICENSE` from the latest stable GitHub release. [epoko77-ai/im-not-ai](https://github.com/epoko77-ai/im-not-ai)
 The common routing selects the Korean editor when a draft needs polishing and compares changed clauses with the original.
 `skills/adapters/humanize-windows-runtime` supplies repository-authored Windows preparation for the upstream package.
 It allocates a shared run path and passes it to the original script.

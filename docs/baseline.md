@@ -3,7 +3,7 @@
 기준은 2026년 11월 12일 `roylabs-desktop`에서 읽은 사용자 프로필이다.
 기본 Codex 홈은 `~/.codex`이며, `CODEX_HOME`이나 실행 옵션으로 다른 홈을 지정할 수 있다.
 사용자 정책의 기준은 유지한다.
-설치기는 일반 설치와 갱신에서 관리 대상 외부 도구의 등록 기준에 따라 버전을 선택한다.
+관리 대상 외부 도구는 일반 설치·갱신 때 각 항목의 갱신 기준을 따른다.
 
 ## 공통 사용자 지침
 
@@ -48,7 +48,7 @@
 | 로캘 | `ko-KR` |
 | MCP | 공통 CodeGraph 실행 인자와 각 PC의 실행 파일 위치, registry의 Microsoft Learn 원격 HTTP 연결 |
 | 플러그인 | 공통 OpenAI 11개 |
-| Computer Use | 내장 플러그인 `computer-use@openai-bundled` 활성 |
+| 스킬 선택 | 내장 `computer-use` 스킬 활성 |
 
 이 sandbox 값은 Roylabs 사용자가 설정한 기준이다.
 현재 채팅에 적용되는 관리형 권한이나 조직 정책을 해제하지 않는다.
@@ -56,22 +56,23 @@
 ## 스킬과 외부 도구
 
 단독 스킬의 배포 목록은 [registry.toml](../packages/harness/resources/registry.toml)의 `[[skills]]`에서 관리한다.
-설치기는 등록한 로컬 파일과 캐시의 외부 파일을 `~/.agents/skills/<name>/`에 배치한다.
-역할별 원본 경로와 등록 필드는 저장소 구조에서 확인할 수 있다. [저장소 구조](../README.md#저장소-구조)
+원본의 역할과 등록 필드는 [저장소 구조](../README.md#저장소-구조)에 설명한다.
+설치기는 자체 스킬과 어댑터의 로컬 파일을 `~/.agents/skills/<name>/`에 복사한다.
+설치기는 외부 스킬과 어댑터의 외부 참조 자료도 스킬별 설치 폴더에 배치한다.
 
 | 구성 | 관리 방식 |
 |---|---|
-| [create-readme](../packages/harness/resources/skills/custom/create-readme) | Roylabs 사용자 프로필에서 가져온 프로젝트 README 작성 지침 |
+| [create-readme](../packages/harness/resources/skills/custom/create-readme) | 프로젝트 README 작성 지침 |
 | [development-environment](../packages/harness/resources/skills/custom/development-environment) | 기존 스택을 보존하는 실행·테스트 환경 지침과 런타임 참조 |
 | [repository-artifacts](../packages/harness/resources/skills/custom/repository-artifacts) | 공유 문서·로컬 검토·테스트 산출물 판단 지침 |
 | [korean-typography](../packages/harness/resources/skills/custom/korean-typography) | 한글 웹·앱 UI 지침과 참조 문서 |
-| [openspec-workflow](../packages/harness/resources/skills/adapters/openspec-workflow) | OpenSpec 연동 어댑터. `adapts = "openspec"`. 잠금 파일에 `openspec`이 있을 때 적용 |
-| [ste-ko](../packages/harness/resources/skills/adapters/ste-ko) | 한국어 개발 문서용 어댑터. `adapts = "beamonic/ste-ko"`. 기본 브랜치의 STE-KO 참조 자료를 로컬 `SKILL.md`와 함께 설치 |
-| [humanize-windows-runtime](../packages/harness/resources/skills/adapters/humanize-windows-runtime) | Windows 윤문용 작업 폴더와 Python 경로를 고정하는 어댑터. `adapts = "humanize-korean"` |
-| [taste-windows-runtime](../packages/harness/resources/skills/adapters/taste-windows-runtime) | 원본 Taste 브라우저 검사에 적용하는 Windows 어댑터. `adapts = "taste-skill"` |
-| `humanize-korean` | im-not-ai의 최신 GitHub 안정 릴리스에서 Codex용 원본 스킬과 참조 문서, 실행 스크립트를 설치 |
+| [openspec-workflow](../packages/harness/resources/skills/adapters/openspec-workflow) | OpenSpec 연동 스킬. `adapts = "openspec"`. 잠금 파일에 `openspec`이 있을 때 적용 |
+| [ste-ko](../packages/harness/resources/skills/adapters/ste-ko) | 한국어 개발 문서용 어댑터. `adapts = "beamonic/ste-ko"`. 설치할 때 기본 브랜치의 STE-KO 참조 자료를 로컬 `SKILL.md`와 묶음 |
+| [humanize-windows-runtime](../packages/harness/resources/skills/adapters/humanize-windows-runtime) | Windows 윤문에 필요한 작업 폴더와 Python 경로를 고정하는 실행 보조. `adapts = "humanize-korean"` |
+| [taste-windows-runtime](../packages/harness/resources/skills/adapters/taste-windows-runtime) | 원본 Taste 브라우저 검사에만 적용하는 Windows 실행기. `adapts = "taste-skill"` |
+| `humanize-korean` | im-not-ai의 최신 GitHub 안정 릴리스에서 Codex용 원본 스킬, 참조 문서와 실행 스크립트를 설치 |
 | `feature-sliced-design` | 기본 브랜치에서 공식 FSD 스킬 디렉터리 전체를 설치. FSD를 쓰는 저장소에서만 자율 선택 |
-| Computer Use | Codex Desktop이 내장 플러그인과 스킬을 설치하고 관리 |
+| Computer Use | Codex Desktop이 내장 플러그인 `computer-use@openai-bundled`와 스킬을 설치하고 관리 |
 | CodeGraph CLI | npm `@colbymchenry/codegraph`의 `latest` 배포와 integrity 확인 |
 | OpenSpec CLI | npm `@fission-ai/openspec`의 `latest` 배포와 integrity 확인 |
 | Context7 | 공식 `context7@context7-marketplace` 플러그인을 기존 설치기 지원으로 관리하며 `git-ref: master`를 정확한 commit과 콘텐츠 digest로 lock에 고정 |
@@ -110,7 +111,7 @@ Windows에서는 준비 단계가 반환한 작업 폴더의 절대 경로를 �
 한국어 개발 문서용 스킬의 원본 저장소와 참조 경로는 `[[skills]]`에서 확인할 수 있다. [registry.toml](../packages/harness/resources/registry.toml)
 
 초기 스킬 파일 11개의 SHA256은 [Roylabs 원본 기록](../packages/harness/resources/dependencies/roylabs-2026-11-12.json)에 있다.
-외부 스킬의 설치에 사용할 커밋과 검증한 파일 내용은 PC의 `external-skills.json`에 기록한다.
+설치기는 외부 스킬의 커밋과 검증한 파일 내용을 PC의 `external-skills.json`에 기록한다.
 Steiger와 ArchUnitNET의 도입은 저장소별로 결정하며 하네스 전역 의존성이나 자동 hook으로 등록하지 않는다.
 
 설치기는 검증한 의존성의 버전을 `<state-root>/sources/dependencies.lock.json`에 기록한다.
@@ -148,13 +149,12 @@ Ego가 없거나 스킬이 다른 경로에 연결돼 있어도 Harness 적용�
 사용자 정책은 `packages/harness/resources/common/`에서 수정한다.
 두 호스트의 `plan`으로 변경의 영향을 확인한다.
 설치 경로 변경은 `.local/<hostname>.toml`에 기록한다.
-일반 설치와 갱신은 외부 스킬에 등록한 채널에서 커밋을 선택하고 배포할 파일을 검증한다.
-외부 파일 검증을 마치면 설치기는 로컬 캐시를 원자적으로 교체한다.
-설치·업데이트 명령은 공식 최신 버전 조회와 버전·배포 해시 검증을 수행한다.
+일반 설치·갱신은 외부 스킬의 등록 기준에 맞는 커밋을 조회하고 배포할 파일을 검증한다.
+선택한 커밋과 검증한 파일은 PC의 로컬 캐시에 기록한다.
 최신 조회가 실패하면 기존 lock을 최신 결과로 가장하지 않고 실패를 알린다.
 `-Locked`는 기록한 설치 결과를 재현할 때 사용한다.
-잠금 모드에서 외부 스킬을 설치하려면 현재 등록과 호환되는 기존 캐시가 필요하다.
-OpenSpec가 없는 이전 lock을 `-Locked`로 재현하면 lock에 기록한 의존성만 설치한다.
+`-Locked`에서 외부 스킬을 재현하려면 현재 등록과 호환되는 기존 캐시가 필요하다.
+OpenSpec가 없는 이전 lock을 `-Locked`로 재현하면 lock에 기록한 도구만 설치한다.
 OpenSpec를 추가하려면 일반 `update`로 새 lock을 만든다.
 
 내장 스킬, OpenAI 앱 런타임, 계정별 연결 앱 목록, 채팅 이력은 이 저장소의 배포 대상에 포함하지 않는다.

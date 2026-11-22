@@ -202,10 +202,10 @@ class FakeRepository:
             {"name": "ste-ko", "path": "skills/adapters/ste-ko", "role": "adapter", "adapts": "beamonic/ste-ko"},
             {"name": "humanize-korean", "path": "dependencies/skills/humanize-korean",
              "upstream": "https://github.com/epoko77-ai/im-not-ai"},
-            {"name": "humanize-windows-runtime", "path": "skills/adapters/humanize-windows-runtime", "role": "adapter",
-             "adapts": "humanize-korean"},
-            {"name": "taste-windows-runtime", "path": "skills/adapters/taste-windows-runtime", "role": "adapter",
-             "adapts": "taste-skill"},
+            {"name": "humanize-windows-runtime", "path": "skills/adapters/humanize-windows-runtime",
+             "role": "adapter", "adapts": "humanize-korean"},
+            {"name": "taste-windows-runtime", "path": "skills/adapters/taste-windows-runtime",
+             "role": "adapter", "adapts": "taste-skill"},
         ]
         self.skill_sources = {item["name"]: self.resources / item["path"] for item in self.skills}
         self.skill_files = {
@@ -393,7 +393,6 @@ class PersistentStateTests(unittest.TestCase):
     def test_missing_openspec_in_new_lock_prevents_all_profile_writes(self):
         with TemporaryDirectory() as directory:
             fixture, state = self.prepare(directory)
-            write_file(fixture.skill_sources["openspec-workflow"] / "SKILL.md", b"workflow")
             lock_path = state / "sources/dependencies.lock.json"
             lock = json.loads(lock_path.read_bytes())
             lock["openspec"] = {"package": "@fission-ai/openspec", "version": "2.0.0"}
@@ -432,15 +431,19 @@ class ConfigPreservationTests(unittest.TestCase):
         self.assertTrue(merged["features"]["multi_agent"])
         self.assertEqual(merged["mcp_servers"]["codegraph"]["args"], ["serve", "--mcp"])
 
-    def test_packaged_common_config_keeps_bundled_computer_use_and_shared_sandbox(self):
+    def test_packaged_common_config_keeps_bundled_computer_use_enabled(self):
         with (harness.REPO / harness.RESOURCE_DIRECTORY / "common/config.toml").open("rb") as stream:
             common = tomllib.load(stream)
-        self.assertEqual(common["windows"]["sandbox"], "elevated")
         self.assertTrue(common["plugins"]["computer-use@openai-bundled"]["enabled"])
         for entry in common.get("skills", {}).get("config", []):
             self.assertNotIn(entry.get("name"), {"agent-desktop", "agent-desktop-windows"})
             if entry.get("name") == "computer-use":
                 self.assertTrue(entry.get("enabled"))
+
+    def test_packaged_windows_sandbox_default_is_shared(self):
+        self.assertFalse((harness.REPO / "hosts").exists())
+        with (harness.REPO / harness.RESOURCE_DIRECTORY / "common/config.toml").open("rb") as stream:
+            self.assertEqual(tomllib.load(stream)["windows"]["sandbox"], "elevated")
 
     def test_empty_overlays_preserve_the_entire_document(self):
         self.assertEqual(merge_config_for_test(CURRENT_CONFIG, "", " \n", ""), CURRENT_CONFIG)
@@ -554,33 +557,33 @@ enabled = true
 
     def test_common_aot_merges_into_inline_arrays_and_all_layers_remain_stable(self):
         cases = (
-            ("empty", "[]", [{"name": "computer-use", "enabled": False}]),
+            ("empty", "[]", [{"name": "primary", "enabled": False}]),
             (
                 "populated",
-                '[{name = "computer-use", enabled = true, local_field = "keep"}, '
+                '[{name = "primary", enabled = true, local_field = "keep"}, '
                 '{name = "unrelated", enabled = false, metadata = {tags = ["keep", "미래"]}}]',
                 [
-                    {"name": "computer-use", "enabled": False, "local_field": "keep"},
+                    {"name": "primary", "enabled": False, "local_field": "keep"},
                     {"name": "unrelated", "enabled": False, "metadata": {"tags": ["keep", "미래"]}},
                 ],
             ),
         )
         common = '''model = "common-model"
 [[skills.config]]
-name = "computer-use"
+name = "primary"
 enabled = false
 [[skills.config]]
-name = "agent-desktop"
+name = "secondary"
 enabled = true
 '''
-        host = '''model = "host-model"
+        registered = '''model = "registered-model"
 [[skills.config]]
-name = "host-added"
+name = "registered-added"
 enabled = true
 '''
         local = '''model = "local-model"
 [[skills.config]]
-name = "agent-desktop"
+name = "secondary"
 enabled = false
 [[skills.config]]
 name = "local-added"
@@ -598,32 +601,32 @@ enabled = true
                     "skills": {
                         "future_option": "keep",
                         "config": expected_entries + [
-                            {"name": "agent-desktop", "enabled": False},
-                            {"name": "host-added", "enabled": True},
+                            {"name": "secondary", "enabled": False},
+                            {"name": "registered-added", "enabled": True},
                             {"name": "local-added", "enabled": True},
                         ],
                     },
                     "unrelated": {"items": ["local", "설정"]},
                 }
-                once = merge_config_for_test(current, common, host, local)
+                once = merge_config_for_test(current, common, registered, local)
                 self.assertEqual(tomllib.loads(once), expected)
                 self.assertIn("# keep inline selection comment", once)
-                self.assertEqual(merge_config_for_test(once, common, host, local), once)
+                self.assertEqual(merge_config_for_test(once, common, registered, local), once)
 
     def test_common_aot_creates_missing_skill_array_without_invalid_toml(self):
         common = '''[[skills.config]]
-name = "computer-use"
+name = "primary"
 enabled = false
 [[skills.config]]
-name = "agent-desktop"
+name = "secondary"
 enabled = true
 '''
         for current in ('model = "local-model"\n', 'model = "local-model"\n[skills]\nfuture_option = "keep"\n'):
             with self.subTest(current=current):
                 expected = tomllib.loads(current)
                 expected.setdefault("skills", {})["config"] = [
-                    {"name": "computer-use", "enabled": False},
-                    {"name": "agent-desktop", "enabled": True},
+                    {"name": "primary", "enabled": False},
+                    {"name": "secondary", "enabled": True},
                 ]
                 once = merge_config_for_test(current, common)
                 self.assertEqual(tomllib.loads(once), expected)
@@ -633,15 +636,15 @@ enabled = true
         current = '''[skills]
 future_option = "keep"
 [[skills.config]]
-name = "computer-use"
-path = "C:/local/computer-use"
+name = "scoped"
+path = "C:/local/scoped"
 enabled = true # keep local skill comment
 local_metadata = { keep = true }
 [[skills.config]]
 name = "unrelated"
 enabled = true
 '''
-        common = '[[skills.config]]\nname = "computer-use"\nenabled = false\n'
+        common = '[[skills.config]]\nname = "scoped"\nenabled = false\n'
         expected = tomllib.loads(current)
         expected["skills"]["config"][0]["enabled"] = False
         once = merge_config_for_test(current, common)
@@ -650,20 +653,20 @@ enabled = true
         self.assertEqual(merge_config_for_test(once, common), once)
 
     def test_path_only_selection_updates_named_entry_among_same_name_candidates(self):
-        host = '[[skills.config]]\npath = "C:/second/skill"\nenabled = true\n'
+        registered = '[[skills.config]]\npath = "C:/second/skill"\nenabled = true\n'
         expected = tomllib.loads(self.CURRENT)
         expected["skills"]["config"][3]["enabled"] = True
-        once = merge_config_for_test(self.CURRENT, "", host)
+        once = merge_config_for_test(self.CURRENT, "", registered)
         self.assertEqual(tomllib.loads(once), expected)
-        self.assertEqual(merge_config_for_test(once, "", host), once)
+        self.assertEqual(merge_config_for_test(once, "", registered), once)
 
     def test_name_and_path_pair_does_not_match_partial_candidates(self):
-        host = '[[skills.config]]\nname = "scoped"\npath = "C:/local/skill"\nenabled = true\n'
+        registered = '[[skills.config]]\nname = "scoped"\npath = "C:/local/skill"\nenabled = true\n'
         expected = tomllib.loads(self.CURRENT)
         expected["skills"]["config"].append({"name": "scoped", "path": "C:/local/skill", "enabled": True})
-        once = merge_config_for_test(self.CURRENT, "", host)
+        once = merge_config_for_test(self.CURRENT, "", registered)
         self.assertEqual(tomllib.loads(once), expected)
-        self.assertEqual(merge_config_for_test(once, "", host), once)
+        self.assertEqual(merge_config_for_test(once, "", registered), once)
 
     def test_name_only_selection_rejects_multiple_existing_paths_in_every_layer(self):
         inline = '''[skills]

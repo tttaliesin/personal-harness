@@ -282,7 +282,7 @@ class RemoteCliTests(unittest.TestCase):
     def receipt(self, manager=None):
         return json.loads(((manager or self.manager) / "active.json").read_text(encoding="utf-8"))
 
-    def standalone_skill_payload_files(self):
+    def skill_payload_files(self):
         files = set()
         registry = tomlkit.parse((self.payload / REGISTRY).read_text(encoding="utf-8"))
         for skill in registry["skills"]:
@@ -410,17 +410,16 @@ class RemoteCliTests(unittest.TestCase):
         self.assertEqual(run_source.parent.parent, self.manager / "runs")
         self.assertFalse(run_source.parent.exists())
         self.assertFalse((self.manager / "releases").exists())
+        self.assertIn(f"{RESOURCES}/dependencies/NOTICE.md", wrapper["hashes"])
+        self.assertIn(f"{RESOURCES}/dependencies/dependencies.lock.json", wrapper["hashes"])
+        self.assertIn("docs/local.example.toml", wrapper["hashes"])
         self.assertFalse(any(name.startswith("hosts/") for name in wrapper["hashes"]))
-        for name in (f"{RESOURCES}/dependencies/dependencies.lock.json", f"{RESOURCES}/dependencies/NOTICE.md",
-                     "docs/local.example.toml"):
-            with self.subTest(payload_file=name):
-                self.assertIn(name, wrapper["hashes"].keys())
-        for name in self.standalone_skill_payload_files():
+        for name in self.skill_payload_files():
             with self.subTest(skill_file=name):
                 self.assertEqual(wrapper["hashes"][name],
                                  hashlib.sha256((self.payload / name).read_bytes()).hexdigest())
         self.assert_no_vendored_external_skills(wrapper["hashes"])
-        for name in ("scripts/test.ps1", f"{INSTALLER}/test.ps1", "AGENTS.md", "Taskfile.yml", "__pycache__"):
+        for name in (f"{INSTALLER}/test.ps1", "AGENTS.md", "Taskfile.yml", "__pycache__"):
             self.assertNotIn(name, wrapper["hashes"])
 
     def test_default_targets_and_explicit_manager_state_and_codex_home(self):
@@ -582,7 +581,8 @@ class RemoteCliTests(unittest.TestCase):
         self.run_cli()
         first = self.receipt()
         preserved = {}
-        for relative in ("sources/dependencies.lock.json", "skills/agent-desktop/SKILL.md", "tools/agent.exe", "roylabs-desktop.toml"):
+        for relative in ("sources/dependencies.lock.json", "skills/local-example/SKILL.md",
+                         "tools/local-tool.exe", "roylabs-desktop.toml"):
             target = self.state / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(b"# persistent local choices\n" if target.suffix == ".toml" else b"core-owned content\x00\xff")
@@ -599,7 +599,7 @@ class RemoteCliTests(unittest.TestCase):
         self.assertEqual({path: path.read_bytes() for path in preserved}, preserved)
         pip = [call for call in self.python_calls() if call[1:4] == ["-m", "pip", "install"]]
         self.assertEqual(len(pip), 1)
-        self.assertFalse((self.state / "sources/agent-desktop-LICENSE").exists())
+        self.assertFalse((self.state / "sources/NOTICE.md").exists())
 
     def test_requirements_identity_selects_a_new_persistent_venv(self):
         self.run_cli()
@@ -1232,7 +1232,7 @@ class RemoteCliTests(unittest.TestCase):
     @unittest.skipUnless(NPM, "npm is required")
     def test_actual_npm_pack_has_complete_allowlisted_payload_and_runs_offline(self):
         self.assertTrue((ROOT / "docs/history/deployment-2026-11-12-13.md").is_file())
-        skill_files = self.standalone_skill_payload_files()
+        skill_files = self.skill_payload_files()
         for relative in ("AGENTS.md", ".local/private.txt", ".audit/private.txt", "plugins/example/README.md", "tests/private.py",
                          f"{HARNESS}/tests/private.py", f"{INSTALLER}/__pycache__/private.pyc",
                          f"{RESOURCES}/skills/adapters/openspec-workflow/.local/private.txt"):
@@ -1260,6 +1260,7 @@ class RemoteCliTests(unittest.TestCase):
         self.assertFalse(any(name.startswith(("sources/", f"{RESOURCES}/skills/agent-desktop/",
                                               f"{RESOURCES}/skills/agent-desktop-windows/"))
                              for name in files))
+        self.assertNotIn(f"{RESOURCES}/dependencies/agent-desktop-LICENSE", files)
         self.assertNotIn(f"{INSTALLER}/test.ps1", files)
         self.assertNotIn("Taskfile.yml", files)
         self.assertNotIn("AGENTS.md", files)

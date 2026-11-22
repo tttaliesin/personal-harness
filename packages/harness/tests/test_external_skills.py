@@ -31,8 +31,7 @@ class ExternalSkillDeploymentTests(unittest.TestCase):
         self.write(self.resources / "common/config.toml", b"[mcp_servers.codegraph]\ncommand = 'codegraph'\n")
         self.write(self.repo / "package.json", b'{"supportedHosts":["homelab-desktop"]}')
         self.write(self.repo / harness.SEED_LOCK, json.dumps({
-            "schema_version": 1, "plugins": [],
-            "codegraph": {"package": "@colbymchenry/codegraph", "version": "1.2.3"},
+            "schema_version": 1, "plugins": [], "codegraph": {"package": "@colbymchenry/codegraph"},
         }).encode())
         self.write(self.codex / "config.toml", b"[mcp_servers.node_repl]\ncommand = 'fixture'\n")
         self.write(self.resources / "skills/adapters/words/SKILL.md", b"# Our document adapter\n")
@@ -52,16 +51,6 @@ class ExternalSkillDeploymentTests(unittest.TestCase):
     def write(path, data):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
-
-    @staticmethod
-    def pack_files(files):
-        stream = io.BytesIO()
-        with tarfile.open(fileobj=stream, mode="w:gz") as archive:
-            for name, data in files.items():
-                entry = tarfile.TarInfo(name)
-                entry.size = len(data)
-                archive.addfile(entry, io.BytesIO(data))
-        return stream.getvalue()
 
     def fetch(self, url):
         self.requests.append(url)
@@ -84,7 +73,13 @@ class ExternalSkillDeploymentTests(unittest.TestCase):
         else:
             filename = "moved.md" if self.broken_words else "SPEC.md"
             files = {filename: f"official rules at {self.revision}".encode()}
-        return self.pack_files({f"{project}-{self.revision}/{name}": data for name, data in files.items()})
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode="w:gz") as archive:
+            for name, data in files.items():
+                entry = tarfile.TarInfo(f"{project}-{self.revision}/{name}")
+                entry.size = len(data)
+                archive.addfile(entry, io.BytesIO(data))
+        return stream.getvalue()
 
     def run_installer(self, *args):
         self.output = io.StringIO()
@@ -99,13 +94,13 @@ class ExternalSkillDeploymentTests(unittest.TestCase):
               patch.object(installer, "install_openspec", return_value=self.openspec),
               patch.object(installer, "install_plugins"),
               redirect_stdout(self.output), redirect_stderr(self.output)):
-            rc = installer.main(["--host", self.host, "--codex-home", str(self.codex), "--state-root",
+            rc = installer.main(["--host", self.host, "--home", str(self.home), "--state-root",
                                  str(self.state), *args])
             self.install_calls = graph.call_count
         return rc
 
     def plan(self):
-        return harness.build_plan(self.repo, self.host, self.home, codex_home=self.codex, state_root=self.state)
+        return harness.build_plan(self.repo, self.host, self.home, state_root=self.state)
 
     def installed(self, path):
         return self.home / ".agents/skills" / path

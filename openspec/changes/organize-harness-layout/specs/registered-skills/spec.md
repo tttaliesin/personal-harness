@@ -39,7 +39,7 @@
 ### Requirement: Validate declared standalone skill source roles
 
 이 저장소의 모든 `[[skills]]` 항목은 `role`을 선언해야 한다(MUST).
-설치기는 이 저장소의 역할별 등록 항목을 다음 기준으로 검사해야 한다(MUST).
+설치기는 `role`을 선언한 항목의 필드를 다음 기준으로 검사해야 한다(MUST).
 
 | `role` | 로컬 `path` 접두사 | 추가 필드 |
 |---|---|---|

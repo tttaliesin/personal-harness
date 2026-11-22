@@ -264,8 +264,7 @@ class UpdateTests(unittest.TestCase):
                     stack.enter_context(patch.object(installer, "git_output", side_effect=git))
                     stack.enter_context(patch.object(installer, "fetch", side_effect=AssertionError("network")))
                     operations = [stack.enter_context(patch.object(installer, name)) for name in (
-                        "install_codegraph", "install_openspec", "install_plugins", "install_local_plugins",
-                        "save_paths")]
+                        "install_codegraph", "install_openspec", "install_plugins", "install_local_plugins", "save_paths")]
                     operations.append(stack.enter_context(patch.object(installer.mcp_packages, "install")))
                     with self.assertRaisesRegex(installer.HarnessError, "Unsupported plugin source entry"):
                         installer.resolve_plugins(desired.plugins)
@@ -429,8 +428,9 @@ class UpdateTests(unittest.TestCase):
         (repo / SEED_LOCK).parent.mkdir(parents=True)
         (repo / SEED_LOCK).write_text(json.dumps(self.lock))
         (repo / REGISTRY_PATH).write_bytes((FIXTURES / "registry.toml").read_bytes())
-        (repo / "package.json").write_text(
-            json.dumps({"supportedHosts": ["homelab-desktop", "roylabs-desktop"]}), encoding="utf-8")
+        (repo / "package.json").write_text(json.dumps({
+            "supportedHosts": ["homelab-desktop", "roylabs-desktop"],
+        }), encoding="utf-8")
         return repo
 
     def run_main(self, repo, *args):
@@ -438,6 +438,15 @@ class UpdateTests(unittest.TestCase):
                 patch.object(installer, "check_openspec_node"), \
                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             return installer.main(["--host", "homelab-desktop", "--codex-home", str(repo / "fake home"), *args])
+
+    def test_install_rejects_a_host_removed_from_the_manifest_before_resolution(self):
+        with TemporaryDirectory() as directory:
+            repo = self.make_repo(directory)
+            (repo / "package.json").write_text('{"supportedHosts": ["roylabs-desktop"]}', encoding="utf-8")
+            with patch.object(installer, "resolve") as resolve:
+                self.assertEqual(self.run_main(repo, "--install"), 2)
+            resolve.assert_not_called()
+            self.assertFalse((repo / ".local").exists())
 
     def test_default_preview_performs_http_but_has_no_disk_home_or_subprocess_writes(self):
         with TemporaryDirectory() as directory:
@@ -600,7 +609,7 @@ class UpdateTests(unittest.TestCase):
                 with self.assertRaisesRegex(installer.HarnessError, "source content"):
                     installer.install_plugins([plugin], "codex", home)
 
-    def test_persistent_lock_precedence_and_old_local_adoption_preview_are_read_only(self):
+    def test_persistent_lock_precedence_and_checkout_adoption_preview_are_read_only(self):
         for mode in ("seed", "persistent", "adopt", "flat-adopt", "legacy-adopt"):
             with self.subTest(mode=mode), TemporaryDirectory() as directory:
                 payload = self.make_repo(Path(directory) / "payload")
@@ -759,8 +768,8 @@ class UpdateTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             repo = self.make_repo(directory)
             before = {p.relative_to(repo): p.read_bytes() for p in repo.rglob("*") if p.is_file()}
-            for state in (repo, repo / RESOURCE_DIRECTORY / "skills", repo / "sources",
-                          repo / RESOURCE_DIRECTORY / "dependencies", repo / RESOURCE_DIRECTORY / "common", repo.parent):
+            for state in (repo, repo / RESOURCE_DIRECTORY / "skills", repo / RESOURCE_DIRECTORY / "dependencies",
+                          repo / RESOURCE_DIRECTORY / "common", repo.parent):
                 with self.subTest(state=state), patch.object(installer, "resolve") as resolve:
                     self.assertEqual(self.run_main(repo, "--install", "--state-root", str(state)), 2)
                     resolve.assert_not_called()
@@ -1008,8 +1017,7 @@ class UpdateTests(unittest.TestCase):
                                                            side_effect=preflight))
                 stack.enter_context(patch.object(installer, "fetch", side_effect=AssertionError("network")))
                 operations = [stack.enter_context(patch.object(installer, name)) for name in (
-                    "install_codegraph", "install_openspec", "install_plugins", "install_local_plugins",
-                    "save_paths", "atomic_write")]
+                    "install_codegraph", "install_openspec", "install_plugins", "install_local_plugins", "save_paths", "atomic_write")]
                 operations.append(stack.enter_context(patch.object(installer.mcp_packages, "install")))
                 self.assertEqual(self.run_main(repo, "--install", "--locked"), 2)
             validate.assert_called_once_with(record)

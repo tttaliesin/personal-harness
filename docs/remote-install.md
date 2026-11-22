@@ -44,19 +44,19 @@ Codex Desktop은 내장 Computer Use를 앱과 함께 설치한다.
 Windows 앱 화면을 확인하거나 앱에 직접 입력해야 할 때 Codex는 내장 Computer Use를 선택한다.
 
 설치기는 현재 PC 이름이 [package.json](../package.json)의 `supportedHosts`에 등록됐는지 확인한다.
-다른 호스트를 사용하려면 `--host`로 지정한다.
+다른 프로필을 사용하려면 `--host`로 지정한다.
 
 ```powershell
 npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git install --host homelab-desktop
 ```
 
-지원하는 호스트는 `homelab-desktop`과 `roylabs-desktop`이다.
+지원하는 프로필은 `homelab-desktop`과 `roylabs-desktop`이다.
 Python이나 Codex를 자동으로 찾지 못하면 `--python 'D:/Python/python.exe'` 또는 `--codex 'D:/tools/codex.exe'`를 추가한다.
 WindowsApps의 Python 실행 별칭은 인터프리터로 사용하지 않는다.
 기록한 의존성 버전을 재현할 때는 `--locked`를 추가한다.
 잠금 모드는 현재 등록과 호환되는 기존 캐시에서 외부 스킬을 읽는다.
 필요한 캐시 항목이 없거나 유효하지 않으면 잠금 설치는 실패한다.
-일반 설치나 갱신으로 캐시를 다시 준비한다.
+이 경우 일반 설치나 갱신으로 캐시를 다시 준비한다.
 다른 의존성의 배포물이 로컬에 없으면 잠금 모드에서도 다운로드한다.
 등록 대상은 `packages/harness/resources/`의 [registry.toml](../packages/harness/resources/registry.toml)에서 관리한다.
 새 항목을 등록하거나 설치 출처를 바꾼 뒤에는 일반 `update`로 해당 PC의 정확한 버전 기록을 갱신한다.
@@ -103,7 +103,7 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 | `<상태 루트>/python` | 설치기용 Python 가상환경 |
 | `<상태 루트>/sources/dependencies.lock.json` | 실제로 설치한 버전과 커밋, 배포 해시 |
 | `<상태 루트>/external-skills.json` | 외부 스킬의 선택한 커밋과 검증한 파일 내용 |
-| `~/.agents/skills/<name>/` | `registry.toml`에 등록한 로컬 스킬과 캐시에서 배포한 외부 파일 |
+| `~/.agents/skills/<name>/` | `registry.toml`에 등록한 로컬 스킬과 캐시에서 배포한 외부 원본 |
 | `<Codex 홈>/harness-backups` | 공통 파일 적용 전 백업 |
 
 기본 상태 루트는 `<설치 루트>/state`다.
@@ -118,10 +118,7 @@ npm이 내려받은 압축 배포물 캐시는 npm의 일반 캐시 정책을 �
 설치 결과는 상태 루트의 `sources/dependencies.lock.json`에 기록한다.
 일반 업데이트는 현재 등록 목록에서 새 항목을 가져온다.
 
-일반 설치와 갱신에서 설치기는 등록한 채널의 외부 스킬 원본을 조회한다.
-매핑한 파일을 모두 검증하면 새 커밋과 파일로 캐시를 원자적으로 교체한다.
-외부 원본 조회, 다운로드 또는 검증에 실패하면 이전 캐시를 보존한다.
-이 경우 설치 명령은 오류로 종료한다.
+일반 설치와 갱신은 외부 스킬의 원본 조회와 파일 검증에 성공해야 진행한다.
 
 인증, 계정, 세션, 프로젝트 신뢰와 앱이 생성한 런타임은 기존 Codex 프로필에 남는다.
 등록된 MCP의 인증 변수는 해당 PC에서 제공한다.
@@ -137,7 +134,6 @@ flowchart LR
     R[해당 PC의 기존 Codex 런타임] --> I
     I --> C[해당 PC의 Harness]
     I --> P[도구와 버전 기록 보관]
-    I --> E["외부 스킬 캐시 · external-skills.json"]
     I --> D[실행 소스 삭제]
 ```
 
@@ -160,9 +156,8 @@ npx --yes --prefer-online git+https://github.com/tttaliesin/personal-harness.git
 ```
 
 기존 `<hostname>.toml`의 경로와 설정은 유지한다.
-새 로컬 설정을 작성할 때는 [로컬 설정 예시](local.example.toml)를 참고한다.
-기본 체크아웃에서 설치한 이력이 있으면 `.local/sources/dependencies.lock.json`을 사용한다.
-상태 잠금이 아직 없으면 설치기는 인접한 체크아웃의 `packages/harness/resources/dependencies/dependencies.lock.json`을 초기값으로 읽는다.
+지정한 `.local`에 `sources/dependencies.lock.json`이 있으면 그 활성 잠금을 먼저 사용한다.
+활성 잠금이 없으면 설치기는 인접한 체크아웃의 `packages/harness/resources/dependencies/dependencies.lock.json`을 초기값으로 읽는다.
 이전 체크아웃의 `dependencies/dependencies.lock.json`과 `sources/dependencies.lock.json`도 초기값으로 사용할 수 있다.
 새로 생성하는 도구 경로는 선택한 상태 루트 안에 기록한다.
 로컬 설정의 절대경로는 계속 해당 PC에서만 관리한다.
