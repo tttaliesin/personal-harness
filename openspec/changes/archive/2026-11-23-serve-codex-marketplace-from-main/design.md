@@ -3,7 +3,7 @@
 ## Context
 
 세 플러그인의 공용 소스와 테스트는 각 `packages/<이름>/`에 있다.
-이전 배포 경로의 성격은 [로컬 플러그인 번들 명세](../support-local-plugin-bundles/specs/local-plugin-bundles/spec.md)에 기록되어 있다.
+이전 배포 경로의 성격은 [로컬 플러그인 번들 명세](../2026-11-23-support-local-plugin-bundles/specs/local-plugin-bundles/spec.md)에 기록되어 있다.
 이 변경은 동일한 공개 기본 브랜치에서 제공하는 Codex 설치 경로를 정의한다.
 
 ## Goals / Non-Goals
@@ -32,7 +32,7 @@
 같은 저장소의 Worker Orchestrator 소스 `0.1.7-local.1`은 별도 개발 버전이다.
 
 Git은 두 배포 경로의 줄 끝 변환을 끈다.
-이전 로컬 번들과 공개 배포 디렉터리의 해시는 [배포본의 출처](../../../docs/deployment.md#자체-플러그인-소스와-배포본)에 기록한다.
+이전 로컬 번들과 공개 배포 디렉터리의 해시는 [배포본의 출처](../../../../docs/deployment.md#자체-플러그인-소스와-배포본)에 기록한다.
 
 ## Risks / Trade-offs
 
@@ -43,8 +43,8 @@ Git은 두 배포 경로의 줄 끝 변환을 끈다.
 
 1. 루트 카탈로그와 배포 경로를 같은 공개 `main`에 게시한다.
 2. 이전 번들 항목이 남은 PC에서는 공통 설치기가 그 항목을 건너뛴다.
-3. 기존 로컬 설치를 사용한 PC에서 [활성 출처를 전환한다](../../../docs/deployment.md#기존-로컬-설치-전환).
-4. 이후 릴리스는 [새 버전 게시 절차](../../../docs/deployment.md#새-버전-게시)를 거친다.
+3. 기존 로컬 설치를 사용한 PC에서 [활성 출처를 전환한다](../../../../docs/deployment.md#기존-로컬-설치-전환).
+4. 이후 릴리스는 [새 버전 게시 절차](../../../../docs/deployment.md#새-버전-게시)를 거친다.
 
 ```mermaid
 flowchart LR

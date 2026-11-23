@@ -4,4 +4,5 @@ context: |
   Distribute maintained standalone skills through skills/ and owned plugins through the root Codex marketplace.
   Keep upstream resource locations in external-resources.toml and machine configuration in each local environment.
   Preserve the published plugin paths, versions, and verified release bytes during repository-only changes.
-  Earlier completed changes describe the profile installer before its retirement.
+  Use openspec/specs for published behavior and openspec/changes for changes pending publication or verification.
+  Historical changes, including the retired profile installer, are under openspec/changes/archive.
