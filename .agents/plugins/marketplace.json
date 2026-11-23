@@ -39,6 +39,30 @@
         "authentication": "ON_USE"
       },
       "category": "Developer Tools"
+    },
+    {
+      "name": "personal-harness-skills",
+      "source": {
+        "source": "local",
+        "path": "./skills/custom"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "personal-harness-adapters",
+      "source": {
+        "source": "local",
+        "path": "./skills/adapters"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools"
     }
   ]
 }

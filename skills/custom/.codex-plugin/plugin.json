@@ -1,0 +1,17 @@
+{
+  "name": "personal-harness-skills",
+  "version": "0.1.0",
+  "description": "Personal Harness에서 유지하는 자체 스킬.",
+  "skills": [
+    "./create-readme/",
+    "./development-environment/",
+    "./korean-typography/",
+    "./repository-artifacts/"
+  ],
+  "interface": {
+    "displayName": "Personal Harness Skills",
+    "shortDescription": "Personal Harness 자체 스킬",
+    "developerName": "tttaliesin",
+    "category": "Developer Tools"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "personal-harness-adapters",
+  "version": "0.1.0",
+  "description": "외부 스킬, 도구와 규격을 Personal Harness에 연결하는 어댑터.",
+  "skills": [
+    "./humanize-windows-runtime/",
+    "./openspec-workflow/",
+    "./ste-ko/",
+    "./taste-windows-runtime/"
+  ],
+  "interface": {
+    "displayName": "Personal Harness Adapters",
+    "shortDescription": "외부 스킬과 도구 연결 및 Windows 호환 지원",
+    "developerName": "tttaliesin",
+    "category": "Developer Tools"
+  }
+}

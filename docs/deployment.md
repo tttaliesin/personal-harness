@@ -33,9 +33,31 @@ codex plugin marketplace upgrade personal-harness
 
 Codex를 다시 열고 플러그인 목록에서 설치한 버전을 확인한다. [Codex 마켓플레이스 명령](https://developers.openai.com/plugins/build/plugins#add-a-marketplace-from-the-cli)
 
+## 단독 스킬 번들
+
+Codex 마켓플레이스에서 두 번들을 각각 설치할 수 있다.
+카탈로그의 `source.path`는 저장소 루트를 기준으로 해석한다.
+
+| 마켓플레이스 항목 | 카탈로그의 `source.path` | 매니페스트 | 첫 배포 버전 |
+|---|---|---|---|
+| `personal-harness-skills@personal-harness` | `./skills/custom` | `skills/custom/.codex-plugin/plugin.json` | `0.1.0` |
+| `personal-harness-adapters@personal-harness` | `./skills/adapters` | `skills/adapters/.codex-plugin/plugin.json` | `0.1.0` |
+
+각 매니페스트의 `skills`는 소속 스킬 디렉터리를 상대 경로로 하나씩 가리킨다.
+`skills/`를 대상으로 하는 `skills` CLI 명령은 두 번들의 스킬을 모두 찾는다. [스킬 목록과 설치 명령](../README.md#단독-스킬-설치)
+
+스킬을 추가할 때는 해당 번들 매니페스트의 `skills`에 새 스킬 디렉터리의 상대 경로를 추가한다.
+각 번들의 배포 버전은 해당 매니페스트의 `version`에서 따로 관리한다.
+
+번들의 새 버전을 게시할 때 다음 순서를 따른다.
+
+1. 게시할 번들의 매니페스트에서 `version`을 갱신한다.
+2. 저장소 루트에서 `npm test`를 실행한다.
+3. 스킬 변경과 매니페스트를 공개 `main`에 함께 게시한다.
+
 ## 자체 플러그인 소스와 배포본
 
-플러그인의 소스와 테스트는 각 `packages/<name>/`에 둔다.
+아래 세 플러그인의 소스와 테스트는 각 `packages/<name>/`에 둔다.
 카탈로그의 `source.path`는 저장소 루트를 기준으로 해석한다.
 
 | 플러그인 소스 | 이관한 소스 버전 | 이관 기준 커밋 | 카탈로그의 배포 경로 | 첫 공개 버전 |

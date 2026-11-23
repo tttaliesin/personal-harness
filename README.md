@@ -6,12 +6,13 @@
 
 ## 단독 스킬 설치
 
-대상 프로젝트의 루트에서 다음 명령을 실행한다.
+`skills` CLI로 설치하려면 대상 프로젝트의 루트에서 다음 명령을 실행한다.
 
 ```bash
 npx skills@latest add https://github.com/tttaliesin/personal-harness/tree/main/skills -a codex
 ```
 
+`skills` CLI는 `skills/` 아래에서 자체 스킬과 어댑터를 모두 찾는다.
 기본 설치 위치는 프로젝트의 `.agents/skills/`다.
 Claude Code용으로 설치하려면 `-a claude-code`를 지정한다.
 사용자 범위인 `~/.agents/skills/`에 설치하려면 `-g`를 붙인다.
@@ -25,13 +26,33 @@ Claude Code용으로 설치하려면 `-a claude-code`를 지정한다.
 
 어댑터에 필요한 도구와 규격은 [어댑터 사용](docs/development-tools.md#어댑터-사용)에서 확인한다.
 
+Codex 마켓플레이스에서는 자체 스킬 번들과 어댑터 번들을 각각 설치할 수 있다. [Codex 설치 명령](#자체-플러그인-설치)
+
 ## 자체 플러그인 설치
 
 Codex는 공개 기본 브랜치 `main`의 [마켓플레이스 카탈로그](.agents/plugins/marketplace.json)를 읽는다.
-Windows Agent Devkit과 Worker Orchestrator를 실행하려면 Node.js 24 이상이 필요하다.
+처음 설치할 때는 마켓플레이스를 등록한다.
 
 ```bash
 codex plugin marketplace add tttaliesin/personal-harness
+```
+
+자체 스킬 번들을 설치하려면 다음 명령을 실행한다.
+
+```bash
+codex plugin add personal-harness-skills@personal-harness
+```
+
+어댑터 번들을 설치하려면 다음 명령을 실행한다.
+
+```bash
+codex plugin add personal-harness-adapters@personal-harness
+```
+
+다음 세 플러그인은 필요한 항목을 설치한다.
+Windows Agent Devkit과 Worker Orchestrator를 실행하려면 Node.js 24 이상이 필요하다.
+
+```bash
 codex plugin add repo-governance@personal-harness
 codex plugin add windows-agent-devkit@personal-harness
 codex plugin add worker-orchestrator@personal-harness

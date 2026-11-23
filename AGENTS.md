@@ -1,6 +1,7 @@
 # Personal Harness repository
 
-This repository distributes standalone skills and three owned Codex plugins.
+This repository distributes standalone skills through the skills CLI and the Codex marketplace.
+It also distributes three separately packaged Codex plugins.
 
 ## Standalone skills
 
@@ -9,13 +10,20 @@ This repository distributes standalone skills and three owned Codex plugins.
 - Keep each skill's maintained references and scripts next to its `SKILL.md`.
 - Distribute standalone skills with `npx skills@latest add https://github.com/tttaliesin/personal-harness/tree/main/skills -a codex`.
   Use `-g` for user-wide installation.
+  The CLI discovers skills under both roots.
+- Set the marketplace `source.path` for `personal-harness-skills@personal-harness` to `./skills/custom`.
+- Set the marketplace `source.path` for `personal-harness-adapters@personal-harness` to `./skills/adapters`.
+- Keep a `.codex-plugin/plugin.json` at each bundle root so users can install each bundle separately.
+- List each child skill directory by relative path in its bundle manifest's `skills` field.
+  Update the list when adding or removing a skill.
+- Manage each bundle's release version in its own manifest's `version` field.
 - Keep external resource source URLs, upstream paths and update channels in the root `external-resources.toml` reference manifest.
   Follow each upstream project's installation instructions.
 - Keep the `ste-ko` adapter's local `SKILL.md` in `skills/adapters/ste-ko/` and record its upstream specification and reference paths in the manifest.
 
 ## Owned plugins
 
-- Keep each owned plugin's source and tests in its own `packages/<name>/` directory.
+- Keep each plugin with its own implementation and tests in `packages/<name>/`.
 - Keep the `personal-harness` Codex Git marketplace at `.agents/plugins/marketplace.json` on the public default branch `main`.
 - Publish the public repo-governance core from `packages/repo-governance/plugin/`.
 - Publish the verified Windows Agent Devkit and Worker Orchestrator bundles from `packages/windows-agent-devkit/release/` and `packages/worker-orchestrator/release/`.

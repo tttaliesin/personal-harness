@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { resourcePaths, sha256, verifyBundle } from '../packages/repo-governance/plugin/scripts/bundle.mjs';
 
 const root = await realpath(fileURLToPath(new URL('../', import.meta.url)));
+const standalonePlugins = {
+  'personal-harness-skills': { path: './skills/custom' },
+  'personal-harness-adapters': { path: './skills/adapters' },
+};
 
 // Update the pinned versions and hashes when publishing verified release directories.
 const plugins = {
@@ -45,19 +49,27 @@ const plugins = {
       'workflows/worker-result.schema.json',
     ],
   },
+  ...standalonePlugins,
 };
 
 async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'));
 }
 
+async function standaloneSkillFolders(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory() && entry.name !== '.codex-plugin')
+    .map((entry) => entry.name)
+    .sort();
+}
+
 test('standalone skill directories contain regular SKILL.md files', async () => {
-  for (const group of ['skills/custom', 'skills/adapters']) {
-    const entries = await readdir(join(root, group), { withFileTypes: true });
-    const directories = entries.filter((entry) => entry.isDirectory());
-    assert.ok(directories.length > 0, `Expected standalone skills under ${group}`);
-    for (const { name } of directories) {
-      const manifest = `${group}/${name}/SKILL.md`;
+  for (const { path } of Object.values(standalonePlugins)) {
+    const folders = await standaloneSkillFolders(join(root, path));
+    assert.ok(folders.length > 0, `Expected standalone skills under ${path}`);
+    for (const folder of folders) {
+      const manifest = `${path}/${folder}/SKILL.md`;
       assert.ok((await lstat(join(root, manifest))).isFile(), `Expected a regular file at ${manifest}`);
     }
   }
@@ -70,14 +82,14 @@ test('the public Codex marketplace points to complete plugin distributions', asy
 
   for (const { name, source } of catalog.plugins) {
     await t.test(name, async () => {
-      const { path, requiredFiles, release } = plugins[name];
+      const { path, requiredFiles = [], release } = plugins[name];
       assert.equal(source.source, 'local');
       assert.equal(source.path, path);
       const directory = join(root, path);
       assert.equal(await realpath(directory), directory, `Redirected plugin directory ${path}`);
 
       const paths = await resourcePaths(directory);
-      const { name: manifestName, version } = await readJson(join(directory, '.codex-plugin/plugin.json'));
+      const { name: manifestName, version, skills } = await readJson(join(directory, '.codex-plugin/plugin.json'));
       assert.equal(manifestName, name);
       assert.ok(typeof version === 'string' && version.length > 0, 'Expected a plugin version');
       if (paths.includes('plugin.json')) {
@@ -89,7 +101,12 @@ test('the public Codex marketplace points to complete plugin distributions', asy
         assert.ok(paths.includes(relativePath), `Missing runtime file ${relativePath}`);
       }
 
-      if (release) {
+      if (Object.hasOwn(standalonePlugins, name)) {
+        const folders = await standaloneSkillFolders(directory);
+        const expectedSkills = folders.map((folder) => `./${folder}/`);
+        assert.ok(Array.isArray(skills), `Expected ${name} to list its skill directories`);
+        assert.deepEqual([...skills].sort(), expectedSkills);
+      } else if (release) {
         assert.equal(version, release.version);
         const sortedPaths = [...paths].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
         const properties = await Promise.all(sortedPaths.map(async (relativePath) => {
