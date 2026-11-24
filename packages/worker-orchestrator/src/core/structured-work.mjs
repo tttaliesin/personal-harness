@@ -66,7 +66,7 @@ function parseCheck(value, name) {
     note: value.note };
 }
 
-export function parseEvaluation(input, spec) {
+export function parseEvaluation(input, spec, defaultKeepWorker = false) {
   const resultEventId = text(input.resultEventId, 'resultEventId');
   check(Array.isArray(input.checks), 'INVALID_INPUT', 'checks must be an array.');
   const byId = new Map();
@@ -93,7 +93,7 @@ export function parseEvaluation(input, spec) {
     'INVALID_INPUT', 'keepWorker must be a boolean when specified.');
   return { resultEventId, checks: spec.completionCriteria.map(({ id }) => ({ id, ...byId.get(id) })),
     ...(constraintReview && { constraintReview }), ...(userDecision && { userDecision }),
-    keepWorker: input.keepWorker ?? true };
+    keepWorker: input.keepWorker ?? defaultKeepWorker };
 }
 
 function workerVerification(observation) {

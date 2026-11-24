@@ -232,6 +232,75 @@ test('registration fixes root and host identity, validates explicit authorizatio
   assert.equal(f.core.execute('status', { projectId: 'p1' }).project.controllerRef.threadId, 'new-controller');
 });
 
+test('same-project conversations keep their own delegation and runs', t => {
+  const f = fixture(t);
+  const { projectRoot } = f.core.execute('status', { projectId: f.projectInput.projectId }).project;
+  const first = { ...f.projectInput.controller, projectRoots: [projectRoot] };
+  const second = { threadId: 'second-controller', hostId: first.hostId, projectRoots: first.projectRoots };
+  const grant = { ...f.projectInput.authorization, scope: 'project', pushEvents: true };
+  f.core.execute('project', { ...f.projectInput, authorization: grant }, first);
+  const discovery = f.core.execute('candidate', {
+    projectRoot: f.projectRoot, roots: first.projectRoots, caller: second, includeStatus: true,
+    assessment: { reason: 'CANDIDATE', hostId: second.hostId, hostProjectId: f.projectInput.hostProjectId },
+  });
+  assert.equal(discovery.decision, 'controller');
+  assert.equal(discovery.project.projectId, f.projectInput.projectId);
+  assert.equal(discovery.project.controllerRef.threadId, second.threadId);
+  assert.equal(discovery.project.authorization.createWorkers, false);
+  assert.deepEqual(discovery.tasks, []);
+  const hookRemoval = { projectId: f.projectInput.projectId, remove: true };
+  throwsCode(() => f.core.execute('push-config', hookRemoval, second), 'AUTHORIZATION_REQUIRED');
+
+  const request = f.input({ requestId: 'request-1', prompt: 'Implement the task.', profile: requestedProfile });
+  const firstRun = f.core.execute('dispatch', request, first);
+  assert.deepEqual(firstRun.task.controllerRef, f.projectInput.controller);
+  throwsCode(() => f.core.execute('dispatch', { ...request, taskId: 't2' }, second), 'AUTHORIZATION_REQUIRED');
+  throwsCode(() => f.core.execute('project', { ...f.projectInput, authorization: grant }, second), 'CONTROLLER_REQUIRED');
+  f.core.execute('project', { ...f.projectInput, controller: second, authorization: grant }, second);
+  throwsCode(() => f.core.execute('push-config', hookRemoval, second), 'HOOK_CONFIG_CONFLICT');
+
+  const secondRun = f.core.execute('dispatch', { ...request, taskId: 't2' }, second);
+  assert.notEqual(firstRun.task.runId, secondRun.task.runId);
+  assert.equal(secondRun.action.push.controllerRef.threadId, second.threadId);
+  throwsCode(() => f.core.execute('dispatch', request, second), 'CONTROLLER_REQUIRED');
+
+  const record = f.input({ taskId: 't2', actionId: secondRun.action.id, outcome: 'succeeded',
+    receipt: { workerRef: worker }, evidenceRef: 'host:receipt' });
+  throwsCode(() => f.core.execute('record', record, first), 'CONTROLLER_REQUIRED');
+  throwsCode(() => f.core.execute('status', f.input({ taskId: 't2' }), first), 'CONTROLLER_REQUIRED');
+  throwsCode(() => f.core.execute('status', f.input({ taskId: 't2' }), worker), 'CONTROLLER_REQUIRED');
+  f.core.execute('record', record, second);
+  for (const [caller, owned] of [[first, 't1'], [second, 't2']]) {
+    const snapshot = f.core.execute('push-inbox', { projectId: f.projectInput.projectId }, caller);
+    assert.deepEqual(snapshot.tasks.map(task => task.taskId), [owned]);
+  }
+
+  // Runs written before controllerRef was persisted keep the former project controller.
+  f.db(db => db.prepare("UPDATE tasks SET json = json_remove(json, '$.controllerRef') WHERE task_id = ?").run('t1'));
+  assert.deepEqual(f.core.execute('status', { projectId: f.projectInput.projectId }, first).tasks.map(task => task.taskId), ['t1']);
+  throwsCode(() => f.core.execute('dispatch', request, second), 'CONTROLLER_REQUIRED');
+  const firstWorker = { threadId: 'original-worker', hostId: first.hostId };
+  f.core.execute('record', f.input({ actionId: firstRun.action.id, outcome: 'succeeded',
+    receipt: { workerRef: firstWorker }, evidenceRef: 'host:receipt' }), first);
+  const originalRun = f.input({ runId: firstRun.task.runId });
+  assert.equal(f.core.resultDestination({ ...originalRun, projectRoot, hostId: first.hostId }, firstWorker).threadId,
+    first.threadId);
+  f.core.execute('observe', { ...originalRun, eventId: 'legacy-result', status: 'completed',
+    result: { success: true, summary: 'Completed.' }, evidenceRef: 'host:legacy-worker' }, first);
+  f.core.execute('verify', { ...originalRun, status: 'passed', evidenceRefs: ['test:passed'] }, first);
+  f.core.execute('accept', { ...originalRun, keepWorker: true }, first);
+  const followup = f.core.execute('dispatch', { ...request, requestId: 'request-2', prompt: 'Follow up.' }, first);
+  assert.notEqual(followup.task.runId, originalRun.runId);
+  assert.equal(followup.task.controllerRef.threadId, first.threadId);
+  assert.equal(followup.action.workerRef.threadId, firstWorker.threadId);
+
+  const revoked = { ...grant, pushEvents: false };
+  f.core.execute('project', { ...f.projectInput, controller: second, authorization: revoked }, second);
+  throwsCode(() => f.core.execute('push-config', hookRemoval, second), 'HOOK_CONFIG_CONFLICT');
+  f.core.execute('project', { ...f.projectInput, authorization: revoked }, first);
+  assert.equal(f.core.execute('push-config', hookRemoval, second).project.controllerRef.threadId, second.threadId);
+});
+
 test('dispatch returns an immutable create plan and request replay never creates another run', t => {
   const f = fixture(t);
   const first = f.dispatch();

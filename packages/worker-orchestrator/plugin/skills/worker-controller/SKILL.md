@@ -1,6 +1,6 @@
 ---
 name: worker-controller
-description: Handle ordinary user project requests and native Codex Desktop worker-orchestrator-event/1 callbacks. Resolve the controller role, delegate to authorized same-project Desktop workers, and independently verify their results.
+description: Handle ordinary requests in a verified Codex Desktop project and native worker-orchestrator-event/1 callbacks for runs assigned by this chat. Delegate within the user's authorization and independently verify worker results. Use worker-executor for a bound worker assignment.
 ---
 
 # Codex 워커 컨트롤러
@@ -25,7 +25,9 @@ node <설치 루트>/dist/cli.mjs capabilities
 이 출력은 로컬 명령의 지원 범위입니다.
 프로젝트 위임을 사용하기 전에 `supports`에서 `project-operations`를 확인합니다.
 이 스킬의 자동 실행 절차에는 `work-spec`, `evaluate`, `project-binding` 지원도 확인합니다.
-푸시를 켠 프로젝트에서는 `push-event` 지원도 확인합니다.
+푸시를 위임받은 대화에서는 `push-event` 지원도 확인합니다.
+실행 한 건에 대해서만 결과 전송을 허가받으면 `run-result-push` 지원을 확인합니다.
+실행 한 건의 워커 보관을 허가받으면 `run-archive` 지원을 확인합니다.
 현재 대화에 공식 Desktop 도구가 노출되는지도 별도로 확인합니다.
 필요한 도구가 없으면 누락된 기능을 알립니다.
 원격 endpoint나 새로운 MCP 서버를 만들지 않습니다.
@@ -34,18 +36,19 @@ node <설치 루트>/dist/cli.mjs capabilities
 
 일반 사용자 요청과 Desktop이 실제 전달한 `worker-orchestrator-event/1` 콜백에서 이 스킬을 사용합니다.
 턴 시작 시 설치 CLI의 첫 `candidate` 요청에 실제 `projectRoot`와 `includeStatus: true`를 전달합니다.
-현재 대화 ID는 CLI가 Codex 실행 환경에서 읽습니다.
-`DISCOVERY_REQUIRED`를 받으면 `list_projects`와 현재 호스트의 `list_threads` 기록을 조회합니다.
-기록 조회에는 `mode: history`, `source: codex`, `archived: false`를 사용하고 `nextCursor`가 `null`일 때까지 같은 범위에서 페이지를 읽습니다.
-조회 원문과 각 페이지의 요청 커서를 같은 `candidate` 입력에 담습니다.
-`claim: true`를 전달하면 유일한 최초 후보를 등록하고 기존 등록이 있다면 그 역할을 반환합니다.
-`claim`을 생략하면 후보 판정만 확인할 수 있습니다.
-등록·페이지 입력 예시는 [사용법](../../docs/usage.md)을 읽습니다.
+CLI는 현재 대화 ID를 런타임의 `CODEX_THREAD_ID`에서 읽습니다.
+`DISCOVERY_REQUIRED`를 받으면 공식 `list_projects`와 현재 호스트의 `list_threads`를 호출합니다.
+기록에는 `mode: "history"`, `source: "codex"`, `archived: false`를 사용합니다.
+현재 대화를 찾을 때까지 직전 응답의 `nextCursor`로 페이지를 잇습니다.
+`list_projects` 원문과 연속된 `{cursor, result}` 페이지를 같은 `candidate` 요청에 추가합니다.
+CLI는 근거를 확인한 호출에서 재사용 가능한 프로젝트에 현재 대화를 등록합니다.
+역할을 확정하는 별도 호출은 필요하지 않습니다.
+[역할 확인과 입력 예시](../../docs/usage.md#컨트롤러-조회와-확정)를 따릅니다.
 
-`decision: controller`를 받으면 반환된 프로젝트와 컨트롤러 식별자를 사용합니다.
-컨트롤러 등록은 대화의 역할만 기록합니다.
-등록된 컨트롤러로 확인되기 전에는 작업을 `dispatch`하지 않습니다.
-`worker`, `not_candidate`, `undetermined`에서는 컨트롤러 명의의 동작을 계획하거나 호출하지 않습니다.
+`decision: "controller"`를 받으면 호출 대화의 `project`와 자신이 소유한 `tasks`를 사용합니다.
+현재 대화는 자신이 배정한 실행의 컨트롤러입니다.
+연결된 워커에는 `worker`가 반환되며 워커 역할을 유지합니다.
+컨트롤러 역할을 확인한 경우에만 컨트롤러 명의의 동작을 계획하고 호출합니다.
 
 ## 컨트롤러가 직접 수행하는 작업
 
@@ -73,34 +76,43 @@ Git 설정, 조회, 과거 워커 찾기, 검증, 조사가 여기에 포함됩�
 
 ## 프로젝트 위임과 워커 선택
 
-사용자가 프로젝트의 워커 대화 운영을 직접 위임하면 등록된 컨트롤러 대화에서 `project`를 호출합니다.
-입력에는 등록된 `projectId`, `projectRoot`, `hostProjectId`, `controller`를 사용합니다.
-`authorization`에 `scope: "project"`를 지정합니다.
-`createWorkers`, `sendFollowups`, `archiveCompleted`, `restoreWorkers`에는 각각 `true`나 `false`를 명시합니다.
-사용자가 이 프로젝트의 이벤트 전달을 직접 위임하면 `pushEvents: true`를 기록합니다.
+처음 참여한 대화의 모든 권한은 `false`로 시작합니다.
+기존 위임은 원래 허가받은 대화에만 적용합니다.
+사용자가 직접 위임하면 현재 대화에서 `project`를 호출합니다.
+입력에는 확인한 `projectId`, `projectRoot`, `hostProjectId`를 사용합니다.
+`controller`에는 현재 호출 대화의 실제 `threadId`와 확인된 `hostId`를 넣습니다.
+이 대화의 후속 작업까지 위임받았으면 `authorization.scope: "project"`를 지정합니다.
+`createWorkers`, `sendFollowups`, `archiveCompleted`, `restoreWorkers`, `pushEvents`에는 확인한 권한을 각각 불리언으로 기록합니다.
 v0.1.5의 기존 위임에서 생략한 `pushEvents`는 `false`입니다.
 옵트인과 Desktop Hooks 확인 절차는 [사용법](../../docs/usage.md#이벤트-전달-켜기)을 따릅니다.
 `source`에는 직접 위임을 확인할 수 있는 사용자 발언의 출처와 해당 작업 범위를 기록합니다.
+사용자가 이번 배정의 결과 한 건만 보내도록 허가하면 `dispatch.resultPushAuthorizationSource`에 해당 원본 사용자 메시지의 참조와 범위를 기록합니다.
+이 경우 작업 배정 권한은 `project`에 필요한 항목만 기록하고, 결과 전송 허가는 `dispatch`에서 이번 실행에 묶습니다.
+사용자가 이번 실행을 검증한 뒤 해당 워커를 보관하도록 허가하면 원본 사용자 메시지의 참조와 범위를 `dispatch.archiveAuthorizationSource`에 기록합니다.
+결과 전송 허가와 워커 보관 허가는 사용자 요청에서 각각 확인합니다.
+`push-config`는 프로젝트 단위 승인 훅을 관리할 때 사용합니다.
 이 위임은 등록된 프로젝트 루트에서 사용자가 허용한 작업과 동작에만 적용합니다.
 `projectRoot`는 현재 프로젝트의 Git 작업 범위를 확인하는 데 사용합니다.
 `hostProjectId`는 Desktop에 등록된 대화 생성 대상을 식별합니다.
-실제 대상은 호스트에서 확인한 현재 등록 컨트롤러 대화의 `projectId`입니다.
+실제 대상은 호스트에서 확인한 현재 대화의 `projectId`입니다.
 Git 작업 경로와 Desktop 소속은 각각 확인합니다.
 
 사용자가 위임을 바꾸면 같은 `project` 명령으로 권한을 갱신합니다.
 상시 위임을 철회하면 `authorization`에서 `scope`를 빼고 현재 권한으로 교체합니다.
 
-컨트롤러의 직접 수행 범위 밖 요청이면 등록된 컨트롤러의 `candidate` 응답에서 `project`와 최상위 `tasks` 배열을 사용합니다.
+컨트롤러의 직접 수행 범위 밖 요청이면 `candidate`가 반환한 현재 대화의 `project`와 최상위 `tasks`를 사용합니다.
 `tasks`가 배열이면 비어 있어도 `status`를 다시 호출하지 않습니다.
-구버전 또는 최초 등록 응답에 `tasks` 배열이 없으면 등록된 `projectId`로 `status`를 조회합니다.
-`candidate`에서 읽은 상태는 배정 권한이나 워커 예약을 제공하지 않습니다.
-`dispatch`는 앞선 조회 결과를 입력으로 받지 않으며, 자체 트랜잭션에서 현재 컨트롤러·권한·워커 상태를 다시 확인합니다.
+`tasks`를 요청하지 않았다면 `projectId`로 `status`를 조회합니다.
+`dispatch`는 자체 트랜잭션에서 호출 대화, 권한, 작업 소유자, 워커 상태를 확인합니다.
 생성 또는 재사용을 계획하기 전에 [Desktop 프로젝트 동기화](#desktop-프로젝트-동기화)를 수행합니다.
 `tasks`의 `taskId`, `prompt`, `result`를 새 요청과 대조해 관련 작업을 찾습니다.
 관련 워커가 실행 중이거나 대기 중이면 기존 실행을 유지하고 새 대화를 만들지 않습니다.
 관련 작업에 `workerRef`가 있고 새 실행을 시작할 수 있으면 같은 `taskId`와 `reuseOnly: true`로 `dispatch`합니다.
 해당 워커가 보관 상태이면 복원 결과를 기록한 뒤 반환된 전달 action을 수행합니다.
-관련 워커가 없고 저장된 직접 위임이 생성을 허용하면 새 `taskId`로 `dispatch`를 실행합니다.
+관련 워커가 없고 현재 대화의 직접 위임이 생성을 허용하면 새 `taskId`로 `dispatch`를 실행합니다.
+다른 대화의 작업과 독립된 작업에는 서로 다른 `taskId`를 사용합니다.
+기존 `taskId`의 배정, 기록, 평가는 해당 작업의 소유자만 수행합니다.
+CLI는 새 실행의 `controllerRef`에 현재 대화를 기록합니다.
 
 ## Desktop 프로젝트 동기화
 
@@ -109,7 +121,7 @@ Git 작업 경로와 Desktop 소속은 각각 확인합니다.
 호출 대화의 호스트 `projectId`를 프로젝트 목록과 대조하십시오.
 등록된 CLI `projectId`, 원문 `projects`, 각 페이지의 `{cursor, result}`를 담은 `threadPages`를 `sync-project`에 넘기십시오.
 
-기존 호스트 대상이 오래됐으면 `sync-project`가 프로젝트 상태와 권한을 보존하며 대상을 갱신합니다.
+기존 호스트 대상이 오래됐으면 `sync-project`가 작업 소유권과 대화별 권한을 보존하며 대상을 갱신합니다.
 다른 Desktop 그룹에 남아 있는 과거 `workerRef`는 기록에 남습니다.
 [동기화 결과와 워커 선택 기준](../../docs/usage.md#desktop-프로젝트-동기화)에 따라 다른 그룹의 워커를 새 실행의 재사용 후보에서 제외하십시오.
 상위 폴더나 워크트리 경로만으로 소속을 추정하지 마십시오.
@@ -118,7 +130,7 @@ Git 작업 경로와 Desktop 소속은 각각 확인합니다.
 
 ## 작업 지시와 검증
 
-등록된 컨트롤러는 작은 작업과 읽기 전용 작업을 포함한 모든 일반 프로젝트 자연어 요청에서 목표, 기존 제약, 되돌릴 수 있는 가정과 검증 가능한 완료 기준을 정합니다.
+컨트롤러는 일반 프로젝트 요청에서 목표, 기존 제약, 되돌릴 수 있는 가정과 검증 가능한 완료 기준을 정합니다.
 [컨트롤러 워크플로](../../workflows/controller.md)에 따라 계획을 세우고 실제 근거를 만들 워커를 배정하십시오.
 `dispatch`에는 프롬프트와 프로필 외에 `workSpec`의 `goal`, `constraints`, `completionCriteria`를 전달하십시오.
 프롬프트나 CLI가 덧붙인 작업 명세에 각 완료 기준의 ID를 포함하십시오.
@@ -167,23 +179,26 @@ Git 작업 경로와 Desktop 소속은 각각 확인합니다.
 
 워커 프롬프트에는 `action.runId`와 [워커 스킬](../worker-executor/SKILL.md)의 설치 경로를 전달합니다.
 프롬프트에는 프로젝트와 파일 소유 범위도 전달합니다.
+사용자가 Desktop worktree 실행을 요청했으면 [worktree 배정 절차](../../workflows/controller.md#실행과-기록)를 적용합니다.
 요청한 모델과 thinking은 요청값으로만 보고합니다.
 호스트 증거가 없으면 실제 적용 프로필은 미확인으로 남깁니다.
 
 ### 이벤트 처리와 턴 종료
 
-푸시 기능을 켠 프로젝트는 [이벤트 처리 절차](../../workflows/controller.md#이벤트-처리)를 따릅니다.
+푸시를 위임받았거나 일회성 결과 전송을 배정한 대화는 [이벤트 처리 절차](../../workflows/controller.md#이벤트-처리)를 따릅니다.
 신규 요청을 독립 작업으로 나눌 수 있으면 서로 다른 `taskId`와 겹치지 않는 파일 소유 범위를 배정하십시오.
 독립 작업의 `dispatch → hostCall → record`를 병렬로 진행하십시오.
 각 작업 안에서는 반환된 action과 실제 응답의 순서를 지키십시오.
-등록된 컨트롤러는 턴 시작과 종료 직전에 `push-inbox`로 미처리 사건을 확인합니다.
+컨트롤러는 턴 시작과 종료 직전에 `push-inbox`로 자신이 배정한 실행의 미처리 사건을 확인합니다.
+새 승인 훅은 저널에만 기록합니다.
+승인 사건은 다음 실제 컨트롤러 턴에 찾을 수 있으며 원본 요청은 워커 대화에 남습니다.
 Desktop의 네이티브 `codex_delegation`에서 실제 `source_thread_id`를 얻은 때만 워커 ID와 marker를 대조해 `notice`를 전달하십시오.
 각 사건을 독립 처리하고 현재 워커 턴의 원문만 `push-observe`에 제출하십시오.
-`ready`의 평가 또는 승인 상태 표시가 끝나면 `push-ack`로 처리 완료를 기록하십시오.
+`ready`의 평가 또는 승인 대기 표시가 끝나면 자신의 사건만 `push-ack`로 확인 처리하십시오.
 실패한 조회나 아직 실행 중인 워커의 결과는 보류하십시오.
 현재 처리할 수 있는 작업을 끝내면 워커 결과를 기다리지 않고 턴을 종료하십시오.
 정상 이벤트 경로에서 공유 데몬, `wait_threads`, 직접 `observe`를 사용하지 마십시오.
-푸시 위임이 없는 프로젝트의 수동 관찰은 [기존 관찰 절차](../../docs/usage.md#기존-수동-관찰)를 따릅니다.
+푸시 위임이 없는 대화의 수동 관찰은 [기존 관찰 절차](../../docs/usage.md#기존-수동-관찰)를 따릅니다.
 
 ### 기준 평가와 후속 실행
 
@@ -203,9 +218,9 @@ Desktop의 네이티브 `codex_delegation`에서 실제 `source_thread_id`를 �
 - `blocked`이면 원인과 허용된 복구 동작을 확인하십시오.
   허용된 다음 동작이 없으면 막힌 항목과 원인을 보고하십시오.
 
-후속 작업이 있으면 `keepWorker: true`를 보내거나 필드를 생략해 워커를 유지하십시오.
-후속 작업이 없고 보관을 위임받았으면 `evaluate`에 `keepWorker: false`를 보내십시오.
-자동 보관에는 `authorization.scope: "project"`와 `archiveCompleted: true`가 모두 필요합니다.
+합의한 후속 작업이 있거나 사용자가 워커 유지를 요청했으면 `keepWorker: true`를 보내십시오.
+그 밖에는 `keepWorker`를 생략하십시오.
+검증한 결과를 채택할 때 프로젝트 단위 보관 위임 또는 현재 실행의 보관 허가가 있으면 CLI가 보관 계획을 반환합니다.
 `complete`에 보관 action이 있으면 현재 권한을 확인한 뒤 보관하십시오.
 실제 응답을 같은 `action.id`로 기록하십시오.
 승인, 입력 대기, 미확정 호스트 동작에 기존 관찰과 복구 절차를 적용하십시오.

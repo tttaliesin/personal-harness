@@ -114,7 +114,7 @@ function fixture(t) {
       source: 'Fixture grant' } };
   const grant = { ...project, authorization: { ...project.authorization, scope: 'project', pushEvents: true } };
   run('project', project, { caller: null });
-  return { run, concurrent, journalApproval, checkout, root, project, grant, projectRoot, defaultData };
+  return { run, concurrent, journalApproval, checkout, root, project, grant, projectRoot, stateDir, defaultData };
 }
 
 function request(taskId, requestId = 'first') {
@@ -126,8 +126,8 @@ function receipt(action, hostResult) {
   return { ...projectScope, taskId, runId, actionId, hostResult, evidenceRef: 'test:receipt' };
 }
 
-function resultInput(projectRoot, { taskId, runId }, workerTurnId = 'turn-' + taskId) {
-  return { ...projectScope, projectRoot, taskId, runId, hostId: 'local', workerTurnId, controllerRef: controller,
+function resultInput(projectRoot, { taskId, runId, controllerRef = controller }, workerTurnId = 'turn-' + taskId) {
+  return { ...projectScope, projectRoot, taskId, runId, hostId: 'local', workerTurnId, controllerRef,
     result: { runId, status: 'completed', summary: 'Synthetic result.', verification: {
       status: 'passed', evidenceRefs: ['test:worker'],
     }, pendingRequests: [] } };
@@ -143,6 +143,16 @@ function hostSnapshot(worker, turnId, result, { waiting = false, status = 'compl
 
 function readEvidence(event, readThreadResult) {
   return { ...projectScope, eventId: event.eventId, readThreadResult, evidenceRef: 'test:read-thread' };
+}
+
+function legacyApprovalGroup(config) {
+  const [group] = config.hooks.PermissionRequest;
+  return { ...group, hooks: [...group.hooks, {
+    type: 'mcp_tool', server: 'codex_app', tool: 'send_message_to_thread', timeout: 10,
+    input: { threadId: 'previous-controller', hostId: 'local',
+      prompt: 'worker-orchestrator-event/1 ' + JSON.stringify({ kind: 'approval', projectId, hostId: 'local',
+        workerThreadId: '${session_id}', workerTurnId: '${turn_id}' }) },
+  }] };
 }
 
 test('push hook is opt-in, targets the actual packaged CLI, and preserves user config', async t => {
@@ -168,7 +178,7 @@ test('push hook is opt-in, targets the actual packaged CLI, and preserves user c
   assert.deepEqual(dryRun.hookConfig, approvalHookFor({ ...grant, controllerRef: controller },
     { nodePath: process.execPath, cliPath: cli }));
   mkdirSync(dirname(dryRun.hookPath));
-  const userGroup = { matcher: '*', hooks: [{ type: 'command', command: 'user-hook' }] };
+  const userGroup = { matcher: '*', hooks: [{ type: 'command', command: 'user-hook journal-approval' }] };
   writeFileSync(dryRun.hookPath, JSON.stringify({ extra: { value: true }, hooks: { PermissionRequest: [userGroup],
     SessionStart: [userGroup] } }));
   const apply = { ...projectScope, apply: true };
@@ -177,8 +187,13 @@ test('push hook is opt-in, targets the actual packaged CLI, and preserves user c
     extra: { value: true },
     hooks: { PermissionRequest: [userGroup, ...dryRun.hookConfig.hooks.PermissionRequest], SessionStart: [userGroup] },
   });
-  const installed = readFileSync(dryRun.hookPath);
   assert.equal(run('push-config', apply, { cli }).applied, false);
+  const legacyConfig = {
+    extra: { value: true }, hooks: { PermissionRequest: [userGroup, legacyApprovalGroup(dryRun.hookConfig)],
+      SessionStart: [userGroup] },
+  };
+  writeFileSync(dryRun.hookPath, JSON.stringify(legacyConfig));
+  const installed = readFileSync(dryRun.hookPath);
   run('push-config', apply, { errorCode: 'HOOK_CONFIG_CONFLICT' });
   assert.deepEqual(readFileSync(dryRun.hookPath), installed);
   const previous = { nodePath: process.execPath, cliPath: cli };
@@ -201,6 +216,9 @@ test('push hook is opt-in, targets the actual packaged CLI, and preserves user c
   run('push-config', { ...apply, remove: true }, { caller: workerA, errorCode: 'CONTROLLER_REQUIRED' });
   assert.equal(run('push-config', { ...projectScope, remove: true }).applied, false);
   assert.deepEqual(JSON.parse(readFileSync(dryRun.hookPath, 'utf8')), installedUpdate);
+  const currentPathLegacy = legacyApprovalGroup(upgrades[0].hookConfig);
+  writeFileSync(dryRun.hookPath, JSON.stringify({ ...installedUpdate,
+    hooks: { ...installedUpdate.hooks, PermissionRequest: [userGroup, currentPathLegacy] } }));
   assert.equal(run('push-config', { ...apply, remove: true }).applied, true);
   assert.equal(run('push-config', { ...apply, remove: true }).applied, false);
   assert.deepEqual(JSON.parse(readFileSync(dryRun.hookPath, 'utf8')), {
@@ -260,7 +278,7 @@ test('a wake from a bound worker can arrive before the approval journal commit',
 });
 
 test('parallel push events survive registration races, notice failures, selective ack and worker reuse', async t => {
-  const { run, concurrent, journalApproval, projectRoot, grant, defaultData } = fixture(t);
+  const { run, concurrent, journalApproval, projectRoot, stateDir, grant, defaultData, root, checkout } = fixture(t);
   run('project', grant);
   const [first, second] = await Promise.all([
     concurrent('dispatch', request('one')),
@@ -268,10 +286,12 @@ test('parallel push events survive registration races, notice failures, selectiv
   ]);
   for (const { action, task } of [first, second]) {
     assert.deepEqual(action.push, { projectRoot, projectId, hostId: 'local', taskId: task.taskId, runId: task.runId,
-      controllerRef: controller, authorizationSource: grant.authorization.source });
+      controllerRef: controller, stateDir, authorizationSource: grant.authorization.source });
     assert.equal(task.pushEnabled, true);
     assert.ok(Number.isFinite(Date.parse(task.runStartedAt)));
   }
+  assert.ok(first.hostCall.arguments.prompt.includes(JSON.stringify(first.action.push)));
+  assert.match(first.hostCall.arguments.prompt, /stateDir[^\n]*--state-dir/);
   const firstReport = resultInput(projectRoot, first.task);
   const secondReport = resultInput(projectRoot, second.task);
   const approvalNotice = 'worker-orchestrator-event/1 ' + JSON.stringify({ kind: 'approval', projectId, hostId: 'local',
@@ -282,28 +302,36 @@ test('parallel push events survive registration races, notice failures, selectiv
   const approval = readPushEvents(projectRoot, projectId)[0];
   assert.equal(approval.kind, 'approval');
   assert.equal(approval.tool_input, undefined);
-  assert.equal(run('push-inbox', approvalScope).noticeStatus, 'deferred');
+  assert.equal(run('push-inbox', approvalScope).noticeStatus, 'pending');
   journalApproval('', 'invalid-turn', projectId, 2);
   journalApproval(workerA.threadId, firstReport.workerTurnId, 'other-project');
-  run('push-result', firstReport, { caller: null, flags: [], errorCode: 'WORKER_REQUIRED' });
-  run('push-result', firstReport, { caller: controller, flags: [], errorCode: 'CONTROLLER_REQUIRED' });
-  run('push-result', { ...firstReport, controllerRef: { ...controller, hostId: 'other' } },
-    { caller: workerA, flags: [], errorCode: 'HOST_MISMATCH' });
+  run('push-result', firstReport, { caller: null, errorCode: 'WORKER_REQUIRED' });
+  run('push-result', firstReport, { caller: controller, errorCode: 'WORKER_REQUIRED' });
+  run('push-result', firstReport, { caller: workerA, flags: ['--state-dir', 'relative'], errorCode: 'INPUT' });
+  run('push-result', firstReport, { caller: workerA, cwd: checkout(join(root, 'elsewhere')),
+    errorCode: 'PROJECT_SCOPE_MISMATCH' });
+  run('push-result', { ...firstReport, controllerRef: { ...controller, threadId: 'redirected' } },
+    { caller: workerA, errorCode: 'CONTROLLER_REQUIRED' });
+  run('push-result', { ...firstReport, hostId: 'other' }, { caller: workerA, errorCode: 'HOST_MISMATCH' });
+  assert.deepEqual(readPushEvents(projectRoot, projectId), [approval]);
   run('record', receipt(second.action, workerB));
+  run('push-result', secondReport, { caller: workerA, errorCode: 'WORKER_MISMATCH' });
   const [resultA, resultB] = await Promise.all([
-    concurrent('push-result', { ...firstReport, workerThreadId: 'ignored' }, { caller: workerA, flags: [] }),
-    concurrent('push-result', secondReport, { caller: workerB, flags: [] }),
+    concurrent('push-result', { ...firstReport, workerThreadId: 'ignored', controllerRef: undefined },
+      { caller: workerA, flags: ['--state-dir', first.action.push.stateDir] }),
+    concurrent('push-result', secondReport, { caller: workerB }),
   ]);
   assert.equal(resultA.event.workerThreadId, workerA.threadId);
+  assert.equal(resultA.hostCall.arguments.threadId, controller.threadId);
   assert.equal(existsSync(defaultData), false);
-  const resultReplay = run('push-result', firstReport, { caller: workerA, flags: [] });
+  const resultReplay = run('push-result', firstReport, { caller: { threadId: workerA.threadId } });
   assert.deepEqual(resultReplay.event, resultA.event);
   assert.deepEqual(resultReplay.hostCall, resultA.hostCall);
   const beforeRecord = run('push-inbox', { ...projectScope, notice: resultA.hostCall.arguments.prompt,
     sourceThreadId: workerB.threadId });
   assert.equal(beforeRecord.noticeStatus, 'invalid');
   assert.deepEqual(beforeRecord.events.map(event => event.eventId), [resultB.event.eventId]);
-  assert.deepEqual(beforeRecord.deferred.map(event => event.eventId), [approval.eventId, resultA.event.eventId]);
+  assert.deepEqual(beforeRecord.deferred.map(event => event.eventId), [resultA.event.eventId]);
   assert.equal(run('push-observe', readEvidence(resultA.event, {})).reason, 'WORKER_PENDING');
 
   run('record', receipt(first.action, workerA));
@@ -342,13 +370,14 @@ test('parallel push events survive registration races, notice failures, selectiv
   const scope = { ...projectScope, taskId: first.task.taskId, runId: first.task.runId };
   run('resolve', { ...scope, waitId: approval.eventId, evidenceRef: recorded.observation.evidenceRef });
   run('verify', { ...scope, resultEventId: resultA.event.eventId, status: 'passed', evidenceRefs: ['test:controller'] });
-  run('accept', scope);
+  run('accept', { ...scope, keepWorker: true });
   assert.equal(run('push-observe', readEvidence(resultA.event, terminal)).state, 'settled');
   const reused = run('dispatch', { ...request('one', 'second'), reuseOnly: true });
   assert.equal(reused.action.type, 'send');
   assert.notEqual(reused.task.runId, first.task.runId);
   assert.ok(reused.task.runStartedAt > first.task.runStartedAt);
   run('record', receipt(reused.action, { threadId: workerA.threadId }));
+  run('push-result', firstReport, { caller: workerA, errorCode: 'STALE_RUN' });
   const afterReuse = run('push-inbox', approvalScope);
   assert.equal(afterReuse.noticeStatus, 'deferred');
   assert.deepEqual(afterReuse.events.map(event => event.eventId), [resultB.event.eventId]);
@@ -367,4 +396,138 @@ test('parallel push events survive registration races, notice failures, selectiv
   assert.equal(readPushEvents(projectRoot, 'other-project').length, 1);
   assert.ok(readPushEvents(projectRoot, projectId).some(event => event.eventId === incompatible.eventId));
   assert.deepEqual(run('status', projectScope).project.authorization, grant.authorization);
+});
+
+test('controllers in one checkout can inspect and acknowledge only their own push events', async t => {
+  const { run, concurrent, grant, journalApproval, projectRoot } = fixture(t);
+  const peer = { threadId: 'peer-controller', hostId: 'local' };
+  const peerCall = { caller: peer };
+  run('project', grant);
+  const desktopEvidence = {
+    projectRoot,
+    projects: { projects: [{ projectId: grant.hostProjectId, projectKind: 'local', path: projectRoot,
+      hostId: 'local', isGitRepository: true }] },
+    threadPages: [{ cursor: null, result: { threads: [{ id: peer.threadId, kind: 'codex', projectId: grant.hostProjectId,
+      hostId: 'local', cwd: projectRoot, status: { type: 'idle' } }], nextCursor: null } }],
+  };
+  const discovered = run('candidate', desktopEvidence, peerCall);
+  assert.equal(discovered.decision, 'controller');
+  assert.deepEqual(discovered.project.controllerRef, peer);
+  run('push-inbox', projectScope, { ...peerCall, errorCode: 'AUTHORIZATION_REQUIRED' });
+  const peerGrant = { ...grant, controller: peer, authorization: { ...grant.authorization, source: 'Peer grant' } };
+  run('project', peerGrant, peerCall);
+  const denyGit = `
+    import childProcess from 'node:child_process';
+    import { syncBuiltinESMExports } from 'node:module';
+    childProcess.spawnSync = () => { throw new Error('Status should not spawn Git'); };
+    syncBuiltinESMExports();
+  `;
+  const status = await concurrent('status', projectScope, { ...peerCall, preload: denyGit });
+  assert.deepEqual(status.project.authorization, peerGrant.authorization);
+  assert.deepEqual(run('status', projectScope).project.authorization, grant.authorization);
+  const binding = run('sync-project', { ...projectScope, ...desktopEvidence }, { caller: { threadId: peer.threadId } });
+  assert.deepEqual(binding.project.controllerRef, peer);
+
+  const first = run('dispatch', request('owner-a'));
+  const second = run('dispatch', request('owner-b'), peerCall);
+  run('record', receipt(first.action, workerA));
+  run('record', receipt(second.action, workerB), peerCall);
+  const reportA = resultInput(projectRoot, first.task);
+  const reportB = resultInput(projectRoot, second.task);
+  journalApproval(workerB.threadId, reportB.workerTurnId);
+  const [approvalB] = readPushEvents(projectRoot, projectId);
+  const resultA = run('push-result', reportA, { caller: workerA });
+  const resultB = run('push-result', { ...reportB, controllerRef: undefined }, { caller: workerB });
+  assert.equal(resultA.hostCall.arguments.threadId, controller.threadId);
+  assert.equal(resultB.hostCall.arguments.threadId, peer.threadId);
+  const inboxA = run('push-inbox', { ...projectScope, notice: resultB.hostCall.arguments.prompt,
+    sourceThreadId: workerB.threadId });
+  assert.deepEqual(inboxA.events.map(event => event.eventId), [resultA.event.eventId]);
+  assert.deepEqual(inboxA.deferred, []);
+  assert.equal(inboxA.noticeReadThread, undefined);
+  const peerInbox = run('push-inbox', projectScope, peerCall);
+  assert.deepEqual(peerInbox.events.map(event => event.eventId), [approvalB.eventId, resultB.event.eventId]);
+  assert.deepEqual(peerInbox.deferred, []);
+
+  const approval = readEvidence(approvalB, hostSnapshot(workerB, reportB.workerTurnId, undefined,
+    { waiting: true, status: 'inProgress' }));
+  assert.equal(run('push-observe', approval).reason, 'EVENT_NOT_FOUND');
+  assert.equal(run('push-observe', approval, peerCall).task.waits[0].id, approvalB.eventId);
+  const evidence = readEvidence(resultB.event, hostSnapshot(workerB, reportB.workerTurnId, reportB.result));
+  assert.equal(run('push-observe', evidence).reason, 'EVENT_NOT_FOUND');
+  const observed = run('push-observe', evidence, peerCall);
+  const { eventId, kind, taskId, runId, hostId, workerThreadId, workerTurnId, createdAt } = resultB.event;
+  assert.equal(observed.task.result.eventId, eventId);
+  assert.equal(run('observe', { ...observed.observation, projectId, taskId, runId,
+    pushEvent: { projectId, eventId, kind, taskId, runId, hostId, workerThreadId, workerTurnId, createdAt },
+  }, peerCall).task.result.eventId, eventId);
+
+  const ack = { ...projectScope, eventIds: [resultA.event.eventId, approvalB.eventId, resultB.event.eventId] };
+  assert.deepEqual(run('push-ack', ack).acknowledgedEventIds, [resultA.event.eventId]);
+  assert.deepEqual(run('push-ack', ack).acknowledgedEventIds, []);
+  assert.deepEqual(run('push-ack', ack, peerCall).acknowledgedEventIds, [approvalB.eventId, resultB.event.eventId]);
+  assert.deepEqual(readPushEvents(projectRoot, projectId), []);
+});
+
+test('a one-run result grant stays with its owner and issues one delivery plan', async t => {
+  const { run, concurrent, project, journalApproval, projectRoot } = fixture(t);
+  const peer = { threadId: 'peer-controller', hostId: 'local' };
+  const peerCall = { caller: peer };
+  run('candidate', {
+    projectRoot,
+    projects: { projects: [{ projectId: project.hostProjectId, projectKind: 'local', path: projectRoot,
+      hostId: 'local', isGitRepository: true }] },
+    threadPages: [{ cursor: null, result: { threads: [{ id: peer.threadId, kind: 'codex',
+      projectId: project.hostProjectId, hostId: 'local', cwd: projectRoot, status: { type: 'idle' } }],
+    nextCursor: null } }],
+  }, peerCall);
+  run('project', { ...project, controller: peer }, peerCall);
+  run('push-inbox', projectScope, { errorCode: 'AUTHORIZATION_REQUIRED' });
+  const inputA = { ...request('one-run-a'), resultPushAuthorizationSource: 'User message in controller A' };
+  const inputB = { ...request('one-run-b'), resultPushAuthorizationSource: 'User message in controller B' };
+  const [first, second] = await Promise.all([
+    concurrent('dispatch', inputA),
+    concurrent('dispatch', inputB, peerCall),
+  ]);
+  assert.equal(first.action.push.authorizationSource, inputA.resultPushAuthorizationSource);
+  assert.equal(second.action.push.authorizationSource, inputB.resultPushAuthorizationSource);
+  assert.notEqual(first.task.runId, second.task.runId);
+  assert.equal(run('dispatch', inputA).task.runId, first.task.runId);
+  run('dispatch', request(first.task.taskId), { errorCode: 'REQUEST_REPLAY_MISMATCH' });
+  run('push-config', { ...projectScope, apply: true }, { errorCode: 'AUTHORIZATION_REQUIRED' });
+  run('record', receipt(first.action, workerA));
+  run('record', receipt(second.action, workerB), peerCall);
+  const reportA = resultInput(projectRoot, first.task);
+  const reportB = resultInput(projectRoot, second.task);
+  journalApproval(workerA.threadId, reportA.workerTurnId);
+  const [approval] = readPushEvents(projectRoot, projectId);
+
+  const [a1, a2, b] = await Promise.all([
+    concurrent('push-result', reportA, { caller: workerA }),
+    concurrent('push-result', reportA, { caller: workerA }),
+    concurrent('push-result', reportB, { caller: workerB }),
+  ]);
+  assert.equal(a1.event.eventId, a2.event.eventId);
+  const plans = [a1, a2].filter(output => output.hostCall);
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].hostCall.arguments.threadId, controller.threadId);
+  assert.equal(b.hostCall.arguments.threadId, peer.threadId);
+  const ownInbox = run('push-inbox', { ...projectScope, notice: plans[0].hostCall.arguments.prompt,
+    sourceThreadId: workerA.threadId });
+  assert.equal(ownInbox.noticeStatus, 'ready');
+  assert.deepEqual(ownInbox.events.map(event => event.eventId), [a1.event.eventId]);
+  assert.deepEqual(run('push-inbox', projectScope, peerCall).events.map(event => event.eventId), [b.event.eventId]);
+
+  const evidenceA = readEvidence(a1.event, hostSnapshot(workerA, reportA.workerTurnId, reportA.result));
+  assert.equal(run('push-observe', evidenceA, peerCall).reason, 'EVENT_NOT_FOUND');
+  assert.equal(run('push-observe', evidenceA).task.result.eventId, a1.event.eventId);
+  const ack = { ...projectScope, eventIds: [a1.event.eventId, b.event.eventId, approval.eventId] };
+  assert.deepEqual(run('push-ack', ack).acknowledgedEventIds, [a1.event.eventId]);
+  assert.deepEqual(run('push-ack', ack).acknowledgedEventIds, []);
+  assert.deepEqual(run('push-ack', ack, peerCall).acknowledgedEventIds, [b.event.eventId]);
+
+  const next = run('dispatch', request(first.task.taskId, 'next'));
+  assert.notEqual(next.task.runId, first.task.runId);
+  assert.equal(next.action.push, undefined);
+  run('push-result', resultInput(projectRoot, next.task), { caller: workerA, errorCode: 'AUTHORIZATION_REQUIRED' });
 });

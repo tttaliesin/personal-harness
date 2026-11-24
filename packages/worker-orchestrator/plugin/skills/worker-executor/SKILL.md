@@ -1,11 +1,12 @@
 ---
 name: worker-executor
-description: Execute a scoped worker assignment and return a structured run result when a controller supplies a runId, task, and ownership boundaries in a Codex worker chat.
+description: Execute a scoped assignment in a bound Codex Desktop worker chat. Report a structured result for the supplied runId and use authorized result push for the chat that assigned it.
 ---
 
 # Codex 워커 실행
 
 컨트롤러가 제공한 `runId`와 작업 범위를 사용합니다.
+현재 대화가 워커로 연결되어 있으면 그 역할을 유지합니다.
 실행 식별자가 없으면 완료 결과를 만들기 전에 누락 사실을 현재 대화에 알립니다.
 허용된 파일과 요청한 검증만 다룹니다.
 다른 에이전트의 변경은 보존합니다.
@@ -20,7 +21,7 @@ description: Execute a scoped worker assignment and return a structured run resu
 
 워커는 컨트롤러 상태를 변경하지 않습니다.
 다른 대화를 생성하거나 복원하거나 보관하지 않습니다.
-다른 대화에 후속 요청을 전달하지 않습니다.
+채팅 간 전송은 사용자 허가를 확인한 종료 결과 후속 메시지 한 건으로 제한합니다.
 권한이나 도구가 부족하면 필요한 항목을 현재 대화에 보고합니다.
 승인과 배정 범위 밖 작업은 사용자 결정으로 남깁니다.
 
@@ -43,8 +44,14 @@ description: Execute a scoped worker assignment and return a structured run resu
 최종 응답의 JSON 앞뒤에 설명 문단을 붙이지 않습니다.
 호스트 완료 판정은 이 최상위 `runId`로 현재 실행을 확인합니다.
 푸시를 위임받은 실행은 종료 결과를 `push-result`로 먼저 영속화합니다.
-반환된 `hostCall`이 이 실행을 배정한 등록 컨트롤러를 가리키면 그 호출을 한 번 실행합니다.
+반환된 `hostCall`의 수신자와 현재 실행의 `controllerRef`를 대조합니다.
+전송 허가를 아직 확인하지 못했으면 공식 Desktop `read_thread`로 `controllerRef`의 채팅을 조회합니다.
+그 채팅의 원본 `userMessage`에서 사용자가 이 실행의 결과를 그 채팅으로 보내도록 명시적으로 허가했는지 확인합니다.
+사용자 허가가 확인되면 받은 인수 그대로 한 번 호출합니다.
+Desktop이 전송을 거절하면 호출을 반복하지 않습니다.
 그 직후 저널에 넣은 것과 동일한 최종 JSON으로 턴을 끝냅니다.
 푸시 권한이 없거나 부족하면 현재 워커 대화의 최종 JSON으로 결과를 전달합니다.
+승인 요청은 현재 워커 대화에 유지합니다.
+새 승인 훅은 저널에만 기록하므로 워커는 승인 대기를 후속 메시지로 보내지 않습니다.
 컨트롤러로 위장하거나 컨트롤러 대신 `record`, `evaluate`, `verify`, `accept`, `archive`를 실행하지 않습니다.
 다른 워커의 생성·전달·복원·보관 도구도 호출하지 않습니다.

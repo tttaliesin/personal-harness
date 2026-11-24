@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+
 const NOTICE_PREFIX = 'worker-orchestrator-event/1 ';
 const SEND_TOOL = 'send_message_to_thread';
 const COMMON_FIELDS = ['projectId', 'hostId', 'workerThreadId', 'workerTurnId'];
@@ -32,16 +34,12 @@ function noticeText(notice) {
 
 export function approvalHookFor(project, {nodePath, cliPath}) {
   const projectId = requireIdentifier(project.projectId, 'projectId');
-  const threadId = requireIdentifier(project.controllerRef?.threadId, 'controllerRef.threadId');
   const hostId = 'local';
   const args = [
     requireCommandPath(nodePath, 'nodePath'), requireCommandPath(cliPath, 'cliPath'),
     'journal-approval', '--input', '-', '--project-root', requireCommandPath(project.projectRoot, 'projectRoot'),
     '--project-id', projectId, '--host-id', hostId
   ];
-  const prompt = noticeText({
-    kind: 'approval', projectId, hostId, workerThreadId: '${session_id}', workerTurnId: '${turn_id}'
-  });
   const command = {
     type: 'command',
     // Keep failures observable without letting journal output decide the permission request.
@@ -50,8 +48,19 @@ export function approvalHookFor(project, {nodePath, cliPath}) {
     async: false,
     timeout: 10
   };
-  const mcp = {type: 'mcp_tool', server: 'codex_app', tool: SEND_TOOL, input: {threadId, hostId, prompt}, timeout: 10};
-  return {hooks: {PermissionRequest: [{matcher: '*', hooks: [command, mcp]}]}};
+  return {hooks: {PermissionRequest: [{matcher: '*', hooks: [command]}]}};
+}
+
+export function isLegacyApprovalCallback(hook, projectId) {
+  const threadId = hook?.input?.threadId;
+  if (!isIdentifier(threadId)) return false;
+  const hostId = 'local';
+  const prompt = noticeText({
+    kind: 'approval', projectId, hostId, workerThreadId: '${session_id}', workerTurnId: '${turn_id}'
+  });
+  return isDeepStrictEqual(hook, {
+    type: 'mcp_tool', server: 'codex_app', tool: SEND_TOOL, input: {threadId, hostId, prompt}, timeout: 10
+  });
 }
 
 export function resultNoticeFor(event, controllerRef) {

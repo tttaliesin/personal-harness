@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import test from 'node:test';
-import { approvalHookFor, parsePushNotice, resultNoticeFor } from '../../src/adapters/codex-desktop/push.mjs';
+import { approvalHookFor, isLegacyApprovalCallback, parsePushNotice, resultNoticeFor } from '../../src/adapters/codex-desktop/push.mjs';
 
 const PREFIX = 'worker-orchestrator-event/1 ';
 const controllerRef = {threadId: 'controller-thread', hostId: 'local'};
@@ -16,24 +16,31 @@ function handlersFor(projectInput = project, pathsInput = paths) {
   return approvalHookFor(projectInput, pathsInput).hooks.PermissionRequest[0].hooks;
 }
 
-test('generates one journal handler and one native MCP notification for each permission request', () => {
+test('generates a single project journal handler regardless of the controller', () => {
   const hook = approvalHookFor(project, paths);
-  const [command, mcp] = handlersFor();
-  assert.deepEqual(hook, {hooks: {PermissionRequest: [{matcher: '*', hooks: [command, mcp]}]}});
+  const [command] = handlersFor();
+  assert.deepEqual(hook, {hooks: {PermissionRequest: [{matcher: '*', hooks: [command]}]}});
+  assert.deepEqual(approvalHookFor({ ...project, controllerRef: undefined }, paths), hook);
   assert.equal(command.type, 'command');
   assert.equal(command.async, false);
   assert.equal(command.command, String.raw`'/opt/with space/node' '/opt/worker'"'"'s cli.mjs' 'journal-approval' '--input' '-' '--project-root' '/repo/worker'"'"'s $(literal)' '--project-id' 'project-1' '--host-id' 'local' >/dev/null 2>&1 || exit 1`);
-  assert.deepEqual(mcp, {
+  assert.throws(() => handlersFor({...project, projectId: '${tool_input.command}'}), /Invalid projectId/);
+});
+
+test('recognizes exact legacy approval callbacks regardless of their former target', () => {
+  const prompt = PREFIX + JSON.stringify({ kind: 'approval', ...event,
+    workerThreadId: '${session_id}', workerTurnId: '${turn_id}' });
+  const legacy = {
     type: 'mcp_tool', server: 'codex_app', tool: 'send_message_to_thread', timeout: 10,
-    input: {...controllerRef, prompt: PREFIX + JSON.stringify({
-      kind: 'approval', ...event, workerThreadId: '${session_id}', workerTurnId: '${turn_id}'
-    })}
-  });
-  const deliveredPrompt = mcp.input.prompt.replace('${session_id}', event.workerThreadId)
+    input: { ...controllerRef, threadId: 'former-controller', prompt },
+  };
+  assert.equal(isLegacyApprovalCallback(legacy, project.projectId), true);
+  assert.equal(isLegacyApprovalCallback(legacy, 'another-project'), false);
+  assert.equal(isLegacyApprovalCallback({ ...legacy, timeout: 12 }, project.projectId), false);
+  const deliveredPrompt = prompt.replace('${session_id}', event.workerThreadId)
     .replace('${turn_id}', event.workerTurnId);
   assert.deepEqual(parsePushNotice(deliveredPrompt, event.workerThreadId), {kind: 'approval', ...event});
-  assert.equal(parsePushNotice(mcp.input.prompt, '${session_id}'), null);
-  assert.throws(() => handlersFor({...project, projectId: '${tool_input.command}'}), /Invalid projectId/);
+  assert.equal(parsePushNotice(prompt, '${session_id}'), null);
 });
 
 test('quotes Windows command paths for PowerShell without interpolation', () => {

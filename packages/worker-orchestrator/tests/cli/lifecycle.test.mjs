@@ -10,8 +10,9 @@ const cli=fileURLToPath(new URL('../../src/cli/main.mjs',import.meta.url));
 function fixture(t) {
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'worker-orchestrator-cli-'));
  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const { CODEX_THREAD_ID, CODEX_HOST_ID, ...env } = process.env;
  const run=(command,input)=>{
-  const r=spawnSync(process.execPath,[cli,command,'--state-dir',path.join(root,'state'),'--input','-'],{input:JSON.stringify(input),encoding:'utf8'});
+  const r=spawnSync(process.execPath,[cli,command,'--state-dir',path.join(root,'state'),'--input','-'],{input:JSON.stringify(input),encoding:'utf8',env});
   assert.equal(r.error,undefined);return {code:r.status,json:JSON.parse(r.stdout)};
  };
  const project={projectId:'p',projectRoot:root,hostProjectId:'host-p',controller:{threadId:'controller',hostId:'local'},authorization:{createWorkers:true,sendFollowups:true,archiveCompleted:true,restoreWorkers:true,source:'test fixture authorized lifecycle'}};

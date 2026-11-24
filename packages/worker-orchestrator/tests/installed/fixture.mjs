@@ -20,13 +20,14 @@ export async function createInstallation(label) {
   const workspace = path.join(sandbox, 'workspace');
   await mkdir(workspace);
   let sequence = 0;
+  const { CODEX_THREAD_ID, CODEX_HOST_ID, ...env } = process.env;
 
   function run(entry, args, input) {
     const result = spawnSync(process.execPath, [path.join(root, entry), ...args], {
       cwd: workspace,
       encoding: 'utf8',
       input: input === undefined ? undefined : JSON.stringify(input),
-      env: { ...process.env, NODE_PATH: '' },
+      env: { ...env, NODE_PATH: '' },
       windowsHide: true,
       timeout: 30_000,
     });

@@ -13,9 +13,10 @@ import { SCHEMA_VERSION } from '../state/sqlite-store.mjs';
 import { capabilityDescription, hostCallFor, receiptFromHost, observationFromPush, observationFromWait,
   unwrapHostResult, validateProfile } from '../adapters/codex-desktop/index.mjs';
 import { assessControllerCandidate, resolveControllerScope, validateProjectBinding } from '../adapters/codex-desktop/controller-candidate.mjs';
-import { approvalHookFor, resultNoticeFor, parsePushNotice } from '../adapters/codex-desktop/push.mjs';
+import { approvalHookFor, isLegacyApprovalCallback, resultNoticeFor, parsePushNotice } from '../adapters/codex-desktop/push.mjs';
 
 const pushControllerCommands = ['push-config', 'push-inbox', 'push-ack', 'push-observe'];
+const checkoutScopedCommands = new Set([...pushControllerCommands, 'dispatch', 'record', 'evaluate', 'archive', 'push-result']);
 const commands = ['candidate', 'project', 'sync-project', 'dispatch', 'record', 'observe', 'resolve', 'verify',
   'evaluate', 'accept', 'archive', 'status', ...pushControllerCommands, 'push-result', 'journal-approval'];
 const hookOptions = ['--project-root', '--project-id', '--host-id'];
@@ -54,16 +55,15 @@ function journalApproval(opts) {
   publishApproval(opts['--project-root'], { projectId: opts['--project-id'], hostId: opts['--host-id'] }, readInput(opts));
 }
 
-function pushResult(input, threadId, hostId) {
-  check(threadId, 'WORKER_REQUIRED', 'push-result requires the current CODEX_THREAD_ID.');
+function pushResult(app, input, caller) {
   const { projectRoot, projectId, taskId, runId, workerTurnId, result } = input;
-  const controllerRef = object(input.controllerRef, 'controllerRef');
-  text(controllerRef.threadId, 'controllerRef.threadId');
-  check(controllerRef.threadId !== threadId, 'CONTROLLER_REQUIRED', 'A worker cannot send its result notice to itself.');
-  check(input.hostId === hostId && controllerRef.hostId === hostId, 'HOST_MISMATCH',
-    'The worker and controller must belong to the current host.');
-  const event = publishResult(projectRoot, { projectId, taskId, runId, hostId, workerThreadId: threadId, workerTurnId, result });
-  return { event, hostCall: resultNoticeFor(event, controllerRef) };
+  const { threadId, hostId } = caller;
+  const { controllerRef, singleDelivery } = app.resultPublication(input, caller);
+  check(caller.projectRoots?.includes(fs.realpathSync.native(projectRoot)), 'PROJECT_SCOPE_MISMATCH',
+    'The current checkout must belong to the registered project.');
+  const { event, inserted } = publishResult(projectRoot,
+    { projectId, taskId, runId, hostId, workerThreadId: threadId, workerTurnId, result }, { withPublication: true });
+  return { event, ...((inserted || !singleDelivery) && { hostCall: resultNoticeFor(event, controllerRef) }) };
 }
 
 function readHookFile(hookPath) {
@@ -73,12 +73,13 @@ function readHookFile(hookPath) {
 }
 
 function isPushHook(hook) {
-  return [hook?.command, hook?.commandWindows].some(command => /\bjournal-approval\b/.test(command ?? ''))
+  return [hook?.command, hook?.commandWindows].some(command =>
+    command?.includes?.("'journal-approval' '--input' '-' '--project-root'"))
     || (hook?.type === 'mcp_tool' && hook.server === 'codex_app' && hook.tool === 'send_message_to_thread'
       && hook.input?.prompt?.startsWith?.('worker-orchestrator-event/'));
 }
 
-function applyHookConfig(hookPath, hookConfig, previousConfig, remove) {
+function applyHookConfig(hookPath, projectId, hookConfig, previousConfig, remove) {
   const directory = path.dirname(hookPath);
   if (remove && !fs.existsSync(directory)) return false;
   fs.mkdirSync(directory, { recursive: true });
@@ -96,13 +97,13 @@ function applyHookConfig(hookPath, hookConfig, previousConfig, remove) {
     }
   }
   try {
-    return updateHookFile(hookPath, hookConfig, previousConfig, remove);
+    return updateHookFile(hookPath, projectId, hookConfig, previousConfig, remove);
   } finally {
     fs.unlinkSync(lockPath);
   }
 }
 
-function updateHookFile(hookPath, hookConfig, previousConfig, remove) {
+function updateHookFile(hookPath, projectId, hookConfig, previousConfig, remove) {
   const original = readHookFile(hookPath);
   let config = {};
   if (original) {
@@ -126,9 +127,14 @@ function updateHookFile(hookPath, hookConfig, previousConfig, remove) {
   }
   const [match] = existing;
   if (!match && remove) return false;
-  const current = match?.name === eventName && isDeepStrictEqual(match.group, newGroup);
-  const previous = oldGroup && match?.name === eventName && isDeepStrictEqual(match.group, oldGroup);
-  check(!match || (existing.length === 1 && (current || previous)), 'HOOK_CONFIG_CONFLICT',
+  const group = match?.name === eventName ? match.group : undefined;
+  const current = isDeepStrictEqual(group, newGroup);
+  const previous = oldGroup && isDeepStrictEqual(group, oldGroup);
+  const legacyCommandOnly = group?.hooks.length === 2 && isLegacyApprovalCallback(group.hooks[1], projectId)
+    ? { ...group, hooks: [group.hooks[0]] } : undefined;
+  const legacy = legacyCommandOnly && (isDeepStrictEqual(legacyCommandOnly, newGroup)
+    || isDeepStrictEqual(legacyCommandOnly, oldGroup));
+  check(!match || (existing.length === 1 && (current || previous || legacy)), 'HOOK_CONFIG_CONFLICT',
     'An existing Worker Orchestrator hook requires its exact previous paths or manual reconciliation.');
   if (current && !remove) return false;
   config.hooks ??= {};
@@ -176,7 +182,7 @@ function pushConfig(project, input) {
     }
     previousConfig = approvalHookFor(project, previous);
   }
-  const applied = apply === true && applyHookConfig(hookPath, hookConfig, previousConfig, remove === true);
+  const applied = apply === true && applyHookConfig(hookPath, project.projectId, hookConfig, previousConfig, remove === true);
   return { hookPath, hookConfig, applied, ...(remove === true && { operation: 'remove' }) };
 }
 
@@ -195,14 +201,23 @@ function readThreadFor(workerRef) {
   return { ...workerRef, turnLimit: 1, includeOutputs: false, maxOutputCharsPerItem: 12000 };
 }
 
-function routePushEvents(project, tasks, journal) {
+function readOwnedPushEvents(project, tasks, resultOnly) {
   const byTask = new Map(tasks.map(task => [task.taskId, task]));
   const byWorker = new Map(tasks.filter(task => task.workerRef?.hostId === project.controllerRef.hostId)
     .map(task => [task.workerRef.threadId, task]));
+  const owned = [];
+  for (const event of readPushEvents(project.projectRoot, project.projectId)) {
+    const task = event?.kind === 'result' ? byTask.get(event.taskId)
+      : event?.kind === 'approval' ? byWorker.get(event.workerThreadId) : undefined;
+    if (task && (!resultOnly || (event.kind === 'result' && event.runId === task.runId))) owned.push({ event, task });
+  }
+  return owned;
+}
+
+function routePushEvents(project, journal) {
   const events = [];
   const deferred = [];
-  for (const event of journal) {
-    const task = event?.kind === 'result' ? byTask.get(event.taskId) : byWorker.get(event?.workerThreadId);
+  for (const { event, task } of journal) {
     const reason = compatiblePushEvent(event, project) ? pushEventRouteReason(project, task, event) : 'INCOMPATIBLE_EVENT';
     if (reason) {
       deferred.push({ eventId: event?.eventId, reason });
@@ -229,14 +244,15 @@ function pushNoticeStatus(notice, journal, events) {
     && event.hostId === notice.hostId && event.workerThreadId === notice.workerThreadId
     && event.workerTurnId === notice.workerTurnId && (notice.kind === 'approval' || event.eventId === notice.eventId);
   if (events.some(matches)) return 'ready';
-  return journal.some(matches) ? 'deferred' : 'pending';
+  return journal.some(({ event }) => matches(event)) ? 'deferred' : 'pending';
 }
 
-function pushInbox(project, tasks, journal, input) {
-  const notice = noticeFor(project, input);
-  let routed = routePushEvents(project, tasks, journal);
+function pushInbox(project, tasks, journal, input, resultOnly) {
+  let notice = noticeFor(project, input);
+  if (resultOnly && notice?.kind === 'approval') notice = null;
+  let routed = routePushEvents(project, journal);
   let noticeStatus = pushNoticeStatus(notice, journal, routed.events);
-  // Desktop may run the permission journal and wake handlers concurrently.
+  // Legacy Desktop hook groups may still run the journal and wake handlers concurrently.
   // Existing ready events take precedence over giving a missing journal commit a short head start.
   if (notice?.kind === 'approval' && noticeStatus === 'pending') {
     const worker = tasks.find(task => task.pushEnabled === true
@@ -247,8 +263,8 @@ function pushInbox(project, tasks, journal, input) {
       const deadline = performance.now() + 750;
       while (performance.now() < deadline && noticeStatus === 'pending' && !routed.events.length) {
         pause(50);
-        journal = readPushEvents(project.projectRoot, project.projectId);
-        routed = routePushEvents(project, tasks, journal);
+        journal = readOwnedPushEvents(project, tasks, resultOnly);
+        routed = routePushEvents(project, journal);
         noticeStatus = pushNoticeStatus(notice, journal, routed.events);
       }
       if (noticeStatus === 'pending') {
@@ -325,19 +341,20 @@ function pushObserve(app, project, tasks, routed, input, caller) {
 }
 
 function pushControllerCommand(app, command, input, caller) {
-  const { project, tasks } = app.execute(command, input, caller);
+  const { project, tasks, resultOnly } = app.execute(command, input, caller);
   if (command === 'push-config') return pushConfig(project, input);
   const { projectRoot, projectId } = project;
-  const journal = readPushEvents(projectRoot, projectId);
+  const journal = readOwnedPushEvents(project, tasks, resultOnly);
   if (command === 'push-ack') {
     check(Array.isArray(input.eventIds) && input.eventIds.every(id => typeof id === 'string' && id.trim()), 'INPUT',
       'eventIds must be an array of nonempty strings.');
-    const existing = new Map(journal.map(event => [event?.eventId, event]));
+    const existing = new Map(journal.map(({ event }) => [event.eventId, event]));
+    // Owners may also acknowledge stale entries that cannot be observed for the current run.
     const eventIds = input.eventIds.filter(id => compatiblePushEvent(existing.get(id), project));
     return { acknowledgedEventIds: ackPushEvents(projectRoot, projectId, eventIds) };
   }
-  if (command === 'push-observe') return pushObserve(app, project, tasks, routePushEvents(project, tasks, journal), input, caller);
-  return pushInbox(project, tasks, journal, input);
+  if (command === 'push-observe') return pushObserve(app, project, tasks, routePushEvents(project, journal), input, caller);
+  return pushInbox(project, tasks, journal, input, resultOnly);
 }
 
 export function main(argv = process.argv.slice(2), packagedVersion) {
@@ -359,10 +376,7 @@ export function main(argv = process.argv.slice(2), packagedVersion) {
     if (opts.command === 'dispatch') validateProfile(input.profile);
     const threadId = process.env.CODEX_THREAD_ID?.trim();
     const hostId = process.env.CODEX_HOST_ID?.trim() || null;
-    if (opts.command === 'push-result') {
-      console.log(JSON.stringify({ ok: true, version, ...pushResult(input, threadId, hostId ?? 'local') }, null, 2));
-      return 0;
-    }
+    if (opts.command === 'push-result') check(threadId, 'WORKER_REQUIRED', 'push-result requires the current CODEX_THREAD_ID.');
     let caller = threadId ? { threadId, hostId } : null;
     const stateDir = opts['--state-dir'] ?? path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), '.local', 'share'), 'WorkerOrchestrator', 'state');
     if (!path.isAbsolute(stateDir)) throw Object.assign(new Error('--state-dir must be absolute'),{code:'INPUT'});
@@ -379,28 +393,46 @@ export function main(argv = process.argv.slice(2), packagedVersion) {
       if (scope) {
         app = new Orchestrator(stateDir);
         const request = { ...scope, caller, claim: input.claim ?? false, includeStatus: input.includeStatus ?? false };
-        result = app.execute('candidate', request);
+        result = app.execute('candidate', request, caller);
         if (result.reason === 'DISCOVERY_REQUIRED' && (Object.hasOwn(input, 'threadPages') || Object.hasOwn(input, 'projects'))) {
           const assessment = assessControllerCandidate(scope, threadId, hostId, input.projects, input.threadPages);
-          result = app.execute('candidate', { ...request, assessment });
+          result = app.execute('candidate', { ...request, assessment }, caller);
         }
       }
       console.log(JSON.stringify({ ok: true, version, ...result }, null, 2));
       return 0;
     }
-    app = new Orchestrator(stateDir);
-    if (caller && [...pushControllerCommands, 'dispatch', 'record', 'evaluate'].includes(opts.command)) {
+    if (caller && (checkoutScopedCommands.has(opts.command)
+      || (opts.command === 'observe' && Object.hasOwn(input, 'pushEvent')))) {
       caller.projectRoots = resolveControllerScope(process.cwd())?.roots;
+    }
+    app = new Orchestrator(stateDir);
+    if (opts.command === 'push-result') {
+      const runtime = { ...caller, hostId: hostId ?? 'local' };
+      console.log(JSON.stringify({ ok: true, version, ...pushResult(app, input, runtime) }, null, 2));
+      return 0;
     }
     if (pushControllerCommands.includes(opts.command)) {
       console.log(JSON.stringify({ ok: true, version, ...pushControllerCommand(app, opts.command, input, caller) }, null, 2));
       return 0;
     }
     if (opts.command === 'sync-project') {
-      const { project } = app.execute('status', { projectId: input.projectId });
+      const { project } = app.execute('status', { projectId: input.projectId }, caller);
       input = validateProjectBinding(project, caller, input.projects, input.threadPages);
       // Desktop shells may only export CODEX_THREAD_ID.
       caller = { ...caller, hostId: input.hostId };
+    }
+    if (opts.command === 'archive') {
+      delete input.workerThread;
+      if (Object.hasOwn(input, 'readThreadResult')) {
+        const raw = input.readThreadResult;
+        const { thread } = unwrapHostResult(typeof raw === 'string' ? JSON.parse(raw) : raw);
+        if (thread) {
+          const { id, hostId, projectId, cwd, status } = thread;
+          input.workerThread = { id, hostId, projectId, cwd, status: { type: status?.type } };
+        }
+        delete input.readThreadResult;
+      }
     }
     let hostIssue;
     let readThread;
@@ -410,7 +442,7 @@ export function main(argv = process.argv.slice(2), packagedVersion) {
         'Record confirmed rejection with outcome and evidenceRef, without hostResult'), {code:'INPUT'});
       const {recordAction} = app.execute('status', {
         projectId:input.projectId, taskId:input.taskId, actionId:input.actionId
-      });
+      }, caller);
       let normalized;
       try { normalized = receiptFromHost(recordAction, input.hostResult); }
       catch (error) {
@@ -433,7 +465,7 @@ export function main(argv = process.argv.slice(2), packagedVersion) {
         readBack = {hostResult: input.readThreadResult, evidenceRef: input.readThreadEvidenceRef};
       }
       if (hasWaitResult) {
-        const snapshot = app.execute('status', {projectId:input.projectId,taskId:input.taskId});
+        const snapshot = app.execute('status', {projectId:input.projectId,taskId:input.taskId}, caller);
         const workerRef = snapshot.task?.workerRef ?? snapshot.task?.worker;
         if (!workerRef) throw Object.assign(new Error('No worker is bound to this task'),{code:'WORKER_MISMATCH'});
         const {readThread: lookup, ...observation} = observationFromWait(

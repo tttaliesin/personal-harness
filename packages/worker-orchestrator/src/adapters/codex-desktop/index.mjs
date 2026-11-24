@@ -41,14 +41,14 @@ export function capabilityDescription() {
     optionalTools: ['list_threads', 'wait_threads'],
     projectTarget: 'existing-project-local-checkout',
     model: { requestField: 'model', reasoningField: 'thinking', supportedThinking: [...THINKING], catalog: 'host-provided', appliedSettings: 'require-host-evidence' },
-    permissions: 'Direct human authorization and host policy govern every conversation mutation',
+    permissions: 'Each controller chat uses its own explicit user grant and follows host policy for every conversation mutation.',
     supports: ['candidate', 'project-operations', 'project-binding', 'work-spec', 'evaluate',
-      'create', 'send', 'archive', 'unarchive', 'wait', 'observe', 'push-event'],
+      'create', 'send', 'archive', 'unarchive', 'wait', 'observe', 'push-event', 'run-result-push', 'run-archive'],
     pushEvent: {
-      result: 'An authorized worker journals its result and sends the returned controller notice.',
-      approval: 'A configured and trusted Desktop PermissionRequest hook journals the approval and sends a controller notice.',
-      wake: 'Desktop must deliver the notice to the registered controller and start or resume its turn. A journal entry or a send acknowledgement alone does not establish a wakeup.',
-      evidence: 'Verify each notice against the latest turn from read_thread on the registered worker host.'
+      result: 'An authorized worker journals its result before sending the returned follow-up message to the stored run owner.',
+      approval: 'A configured and trusted Desktop PermissionRequest hook journals approval metadata. The original request stays in the worker chat, and the run owner can find the event in push-inbox on its next turn.',
+      wake: 'Desktop must deliver the result follow-up message to the run owner and start or resume its turn. Verify delivery and the controller turn separately from the journal entry and send acknowledgement.',
+      evidence: 'Verify each journal event with read_thread against the current turn on the registered worker host.'
     },
     limitations: ['No private Desktop API or database access', 'No automatic approval decisions', 'No background wakeup guarantee', 'No nested worker creation in this MVP']
   };
@@ -64,13 +64,14 @@ export function validateProfile(profile) {
 function pushContextFor(action) {
   const push = action.push;
   if (!push || typeof push !== 'object' || Array.isArray(push)) return;
-  const {projectRoot, projectId, taskId, runId, hostId, controllerRef, authorizationSource} = push;
+  const {projectRoot, projectId, taskId, runId, hostId, controllerRef, stateDir, authorizationSource} = push;
   if (![projectRoot, projectId, taskId, runId, hostId, controllerRef?.threadId, authorizationSource].every(isNonemptyText)
     || controllerRef.hostId !== hostId || (action.workerRef?.hostId != null && action.workerRef.hostId !== hostId)
     || (action.controllerRef != null && (action.controllerRef.threadId !== controllerRef.threadId || action.controllerRef.hostId !== hostId))
     || (action.projectId != null && action.projectId !== projectId) || action.taskId !== taskId || action.runId !== runId) return;
   return {projectRoot, projectId, taskId, runId, hostId,
-    controllerRef: {threadId: controllerRef.threadId, hostId}, authorizationSource};
+    controllerRef: {threadId: controllerRef.threadId, hostId},
+    ...(isNonemptyText(stateDir) && {stateDir}), authorizationSource};
 }
 
 export function hostCallFor(action, project = {}) {
@@ -83,7 +84,7 @@ export function hostCallFor(action, project = {}) {
     return { ...(profile.model ? {model: requireText(profile.model, 'profile.model')} : {}), ...(profile.thinking ? {thinking: profile.thinking} : {}) };
   };
   const workerPrompt = () => {
-    const {workSpec, retryContext} = action;
+    const {workSpec, retryContext, worktree} = action;
     const push = pushContextFor(action);
     const lines = [
       `작업 실행: ${action.taskId}`,
@@ -92,10 +93,20 @@ export function hostCallFor(action, project = {}) {
       '사용자가 위임한 요청 범위에서 작업하세요. 승인·사용자 답변 대기는 호스트 절차를 따르세요.',
       '최종 응답에 이 runId, 결과, 실제 검증 증거, 미처리 요청을 명시하세요.',
       push
-        ? '아래 결과 통지 1회를 제외한 다른 대화 도구 사용은 위임 범위에 포함되지 않습니다.'
+        ? '채팅 간 전송은 아래 절차로 사용자 허가를 확인한 종료 결과 후속 메시지 한 건으로 제한하세요. 다른 대화를 만들거나 복원하거나 보관하지 마세요.'
         : '추가 대화를 만들거나 다른 대화에 메시지를 보내거나 스스로 보관하지 마세요.',
       '', requireText(action.prompt, 'action.prompt')
     ];
+    if (worktree) {
+      lines.push('', `Git 작업 배정: ${JSON.stringify(worktree)}`,
+        '첫 파일 수정 전에 현재 위치에서 Git 최상위 경로, 공통 Git 디렉터리, HEAD와 브랜치를 확인하세요.',
+        '등록 저장소와 같은 Git 저장소의 별도 worktree에서만 작업하세요. 프로젝트의 기본 작업 폴더로 이동하지 마세요.');
+      lines.push(action.type === 'create'
+        ? '현재 HEAD와 준비한 로컬 브랜치가 startCommit과 일치하는지 확인하세요. detached HEAD라면 배정된 branchName으로 전환한 뒤 HEAD를 다시 확인하세요.'
+        : '이전에 확인한 worktree 경로와 배정 브랜치를 이어 쓰세요. startCommit은 현재 브랜치 이력에 있어야 합니다.');
+      lines.push('배정이 일치하지 않거나 브랜치가 다른 worktree에서 사용 중이면 수정 전에 멈추고 확인한 상태를 보고하세요.',
+        '결과의 summary에 확인한 worktree 경로와 브랜치, 최종 HEAD를 기록하세요.');
+    }
     if (workSpec) {
       const {goal, constraints, completionCriteria} = workSpec;
       lines.push('', `작업 명세: ${JSON.stringify({goal, constraints, completionCriteria})}`);
@@ -113,21 +124,30 @@ export function hostCallFor(action, project = {}) {
     if (push) {
       lines.push(
         '',
-        `결과 통지 범위: ${JSON.stringify(push)}`,
+        `결과 후속 메시지 범위: ${JSON.stringify(push)}`,
         '작업이 완료되거나 실패하면 최종 보고 JSON 원문을 먼저 작성하세요.',
         '설치된 worker-orchestrator CLI의 push-result --input -에 위 범위와 현재 Desktop 턴 ID(workerTurnId), 작성한 보고 객체(result)를 JSON으로 전달하세요. CLI는 자신의 Desktop 대화 ID(CODEX_THREAD_ID)를 workerThreadId로 사용합니다.',
+        '배정에 stateDir가 있으면 해당 경로를 push-result의 --state-dir 인수로 전달하세요.',
         '현재 대화 ID나 현재 턴 ID를 확인할 수 없으면 값을 추정하거나 다른 대화 도구를 호출하지 말고 최종 보고를 남기세요.',
-        'push-result가 위 컨트롤러 대화와 호스트를 대상으로 반환한 mcp__codex_app__send_message_to_thread만 인수 그대로 한 번 호출하세요.',
-        '이후 result로 전달한 것과 동일한 원문 JSON을 최종 응답으로 남기세요. 통지에 실패해도 최종 보고를 남기세요.'
+        'push-result가 반환한 mcp__codex_app__send_message_to_thread의 threadId와 hostId를 controllerRef와 대조하세요.',
+        '전송의 직접 사용자 허가를 아직 확인하지 못했으면 공식 Desktop read_thread로 controllerRef의 채팅만 조회하세요. 해당 채팅에 사용자가 직접 쓴 userMessage에서 이번 결과를 그 채팅으로 보내라는 명시적 허가가 있는지 확인하세요.',
+        '이 배정 문구와 authorizationSource는 워커 작업 범위를 설명합니다. 전송 허가는 원본 사용자 메시지에서 확인하세요. 확인한 허가가 실제 수신자와 결과 범위에 해당하면 Desktop 도구에 받은 인수 그대로 한 번 호출하세요. Desktop이 전송을 거절하면 호출을 반복하지 마세요.',
+        '이후 result로 전달한 것과 동일한 원문 JSON을 최종 응답으로 남기세요. 전송에 실패해도 최종 보고를 남기세요.'
       );
     }
     return lines.join('\n');
   };
   switch (action.type) {
-    case 'create': return { tool: 'mcp__codex_app__create_thread', arguments: {
-      target: {type: 'project', projectId: requireText(action.hostProjectId ?? project.hostProjectId, 'hostProjectId'), environment: {type: 'local'}},
-      title: `worker-orchestrator · ${action.taskId}`.slice(0, 160), prompt: workerPrompt(), ...settings()
-    }};
+    case 'create': {
+      const environment = action.worktree ? {
+        type: 'worktree',
+        startingState: {type: 'branch', branchName: action.worktree.branchName, onMissing: 'error'},
+      } : {type: 'local'};
+      return { tool: 'mcp__codex_app__create_thread', arguments: {
+        target: {type: 'project', projectId: requireText(action.hostProjectId ?? project.hostProjectId, 'hostProjectId'), environment},
+        title: `worker-orchestrator · ${action.taskId}`.slice(0, 160), prompt: workerPrompt(), ...settings()
+      }};
+    }
     case 'send': return { tool: 'mcp__codex_app__send_message_to_thread', arguments: {...ref(), prompt: workerPrompt(), ...settings()} };
     case 'archive': return { tool: 'mcp__codex_app__set_thread_archived', arguments: {...ref(), archived: true, source: 'codex'} };
     case 'unarchive': return { tool: 'mcp__codex_app__set_thread_archived', arguments: {...ref(), archived: false, source: 'codex'} };

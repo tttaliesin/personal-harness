@@ -43,7 +43,7 @@ export function resolveControllerScope(start) {
   return projectRoot && roots.includes(current) ? { projectRoot, roots, isGit: true } : null;
 }
 
-function readHistory(pages, { requireComplete = true } = {}) {
+function readHistoryPrefix(pages) {
   if (!Array.isArray(pages) || !pages.length) return null;
   const seenCursors = new Set();
   const threads = [];
@@ -60,7 +60,7 @@ function readHistory(pages, { requireComplete = true } = {}) {
     if (cursor === null && index !== pages.length - 1) return null;
     if (cursor !== null && seenCursors.has(cursor)) return null;
   }
-  return cursor === null || !requireComplete ? threads : null;
+  return threads;
 }
 
 function repositoryMembership(real, scope) {
@@ -139,46 +139,22 @@ function resolveCallerProject(callers, scope, projects, { allowFallback = false 
   return { reason: 'AMBIGUOUS_PROJECT' };
 }
 
-function membership(thread, scope, projects, inRepository) {
-  const owner = projects.get(thread.projectId);
-  const exact = owner && scope.roots.includes(owner.path);
-  if (exact) return inRepository !== false ? true : null;
-  if (inRepository === true) {
-    return !owner || scope.roots.some(root => within(owner.path, root))
-      || repositoryMembership(owner.path, scope) === true ? true : null;
-  }
-  if (inRepository === null && (!owner || scope.roots.some(root => within(owner.path, root)))) return null;
-  return false;
-}
-
 export function assessControllerCandidate(scope, threadId, hostId, projectsResult, pages) {
-  const history = readHistory(pages);
+  const history = readHistoryPrefix(pages);
   if (!history) return { reason: 'INCOMPLETE_HISTORY' };
-  const rows = history.filter(thread => thread.archived !== true);
-  const callers = rows.filter(thread => thread.id === threadId);
+  const callers = history.filter(thread => thread.id === threadId);
   const callerHosts = new Set(callers.map(thread => thread.hostId));
-  if (callerHosts.size !== 1 || (hostId && !callerHosts.has(hostId))) return { reason: 'CALLER_NOT_FOUND' };
+  if (callerHosts.size !== 1 || (hostId && !callerHosts.has(hostId)) ||
+      callers.some(thread => thread.archived !== undefined && thread.archived !== false)) {
+    return { reason: 'CALLER_NOT_FOUND' };
+  }
   const [observedHostId] = callerHosts;
   const projects = readProjects(projectsResult, observedHostId);
   if (!projects) return { reason: 'AMBIGUOUS_PROJECT' };
   const binding = resolveCallerProject(callers, scope, projects, { allowFallback: true });
   if (binding.reason) return binding;
 
-  const members = new Map();
-  const directories = new Map();
-  for (const thread of rows) {
-    if (thread.hostId !== observedHostId) continue;
-    if (!directories.has(thread.cwd)) directories.set(thread.cwd, repositoryMembership(directory(thread.cwd), scope));
-    const match = membership(thread, scope, projects, directories.get(thread.cwd));
-    if (match === null || (members.has(thread.id) && members.get(thread.id) !== match)) {
-      return { reason: 'AMBIGUOUS_THREAD_SCOPE' };
-    }
-    members.set(thread.id, match);
-  }
-  if (members.get(threadId) !== true) return { reason: 'CALLER_NOT_FOUND' };
-  const matchingThreads = [...members.values()].filter(Boolean).length;
-  if (matchingThreads !== 1) return { reason: 'MULTIPLE_THREADS', matchingThreads };
-  return { reason: 'CANDIDATE', hostId: observedHostId, hostProjectId: binding.hostProjectId, matchingThreads };
+  return { reason: 'CANDIDATE', hostId: observedHostId, hostProjectId: binding.hostProjectId };
 }
 
 export function validateProjectBinding(project, caller, projectsResult, pages) {
@@ -186,7 +162,7 @@ export function validateProjectBinding(project, caller, projectsResult, pages) {
   if (caller?.threadId !== threadId || (caller.hostId && caller.hostId !== hostId)) {
     throw new HostContractError('CONTROLLER_REQUIRED', 'Project binding requires the registered controller conversation and host.');
   }
-  const history = readHistory(pages, { requireComplete: false });
+  const history = readHistoryPrefix(pages);
   if (!history) throw new HostContractError('INCOMPLETE_HISTORY', 'Supply a contiguous Desktop history prefix starting at the first page.');
   if (history.some(row => row.hostId !== hostId)) {
     throw new HostContractError('HOST_MISMATCH', 'Desktop history must belong to the registered controller host.');

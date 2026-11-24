@@ -58,7 +58,7 @@ test('only a complete dispatch push context adds the one-shot result callback', 
   };
   for (const dispatch of [action, {...action, type: 'send', workerRef: worker}]) {
     const legacy = hostCallFor(dispatch).arguments.prompt;
-    assert.doesNotMatch(legacy, /push-result|send_message_to_thread/);
+    assert.doesNotMatch(legacy, /push-result|send_message_to_thread|read_thread/);
     assert.ok(legacy.endsWith('\n\nCheck the fixture'));
     for (const field of Object.keys(push)) {
       assert.equal(hostCallFor({...dispatch, push: {...push, [field]: undefined}}).arguments.prompt, legacy, field);
@@ -69,8 +69,10 @@ test('only a complete dispatch push context adds the one-shot result callback', 
     const prompt = hostCallFor({...dispatch, push}).arguments.prompt;
     assert.ok(prompt.includes(JSON.stringify(push)));
     assert.match(prompt, /push-result --input -[^\n]*workerTurnId[^\n]*CODEX_THREAD_ID[^\n]*workerThreadId/);
-    assert.match(prompt, /send_message_to_thread[^\n]*한 번[\s\S]*동일한 원문 JSON/);
-    assert.doesNotMatch(prompt, /read_thread|wait_threads|create_thread|set_thread_archived/);
+    assert.match(prompt, /read_thread로 controllerRef의 채팅만 조회[^\n]*userMessage[^\n]*명시적 허가/);
+    assert.match(prompt, /실제 수신자와 결과 범위에 해당하면[^\n]*한 번 호출/);
+    assert.match(prompt, /Desktop이 전송을 거절하면 호출을 반복하지 마세요/);
+    assert.doesNotMatch(prompt, /wait_threads|create_thread|set_thread_archived/);
   }
 });
 

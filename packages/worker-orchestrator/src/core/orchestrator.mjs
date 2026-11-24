@@ -6,6 +6,7 @@ import { SQLiteStore } from '../state/sqlite-store.mjs';
 import { OrchestratorError, requireCondition as check } from '../contracts/errors.mjs';
 import { decisionEvidence, isSupportedCheck, nextRetryProfile, object, parseEvaluation, parseWorkSpec, text }
   from './structured-work.mjs';
+import { parseWorktree, preservedWorktreePath, verifyWorktreeStart } from './worker-worktree.mjs';
 
 export { OrchestratorError } from '../contracts/errors.mjs';
 
@@ -28,9 +29,34 @@ function sameWorker(left, right) {
   return left?.threadId === right?.threadId && left?.hostId === right?.hostId;
 }
 
+function controllerForRun(project, task) {
+  return task?.controllerRef ?? project.controllerRef;
+}
+
+function defaultAuthorization() {
+  return {
+    ...Object.fromEntries(Object.values(PERMISSIONS).map(permission => [permission, false])),
+    source: 'No worker operation grant has been recorded for this conversation.',
+  };
+}
+
+function pushGranted(authorization) {
+  return authorization.scope === 'project' && authorization.pushEvents === true;
+}
+
+function runResultPushGranted(task) {
+  return task?.pushEnabled === true && typeof task.resultPushAuthorizationSource === 'string';
+}
+
+function runArchiveGranted(project, task) {
+  return typeof task?.archiveAuthorizationSource === 'string'
+    && task.workerHostProjectId === project.hostProjectId;
+}
+
 export function pushEventRouteReason(project, task, event) {
-  if (event.projectId !== project.projectId || event.hostId !== project.controllerRef.hostId
-    || event.workerThreadId === project.controllerRef.threadId) return 'INCOMPATIBLE_EVENT';
+  const controller = controllerForRun(project, task);
+  if (event.projectId !== project.projectId || event.hostId !== controller.hostId
+    || event.workerThreadId === controller.threadId) return 'INCOMPATIBLE_EVENT';
   if (!task?.workerRef || task.phase === 'planned'
     || (task.pendingAction && task.pendingAction.type !== 'archive')) return 'WORKER_PENDING';
   if (task.workerRef.threadId !== event.workerThreadId || task.workerRef.hostId !== event.hostId
@@ -88,56 +114,88 @@ export class Orchestrator {
       check(project, 'PROJECT_NOT_FOUND', `Project is not registered: ${projectId}`);
       if (command === 'sync-project') return this.syncProject(project, payload, caller);
       if (['push-config', 'push-inbox', 'push-ack', 'push-observe'].includes(command)) {
-        this.requirePushController(project, caller, { removingHook: command === 'push-config' && payload.remove === true });
-        return ['push-inbox', 'push-observe'].includes(command) ? { project, tasks: this.store.tasks(projectId) } : { project };
+        if (command === 'push-config') {
+          return { project: this.requirePushController(project, caller, { removingHook: payload.remove === true }) };
+        }
+        const view = this.requireController(project, caller);
+        const tasks = this.controllerTasks(project, view.controllerRef);
+        const resultOnly = !pushGranted(view.authorization);
+        const eligible = resultOnly ? tasks.filter(runResultPushGranted) : tasks;
+        this.requirePushController(project, caller, { runGrant: resultOnly && eligible.length > 0 });
+        return { project: view, tasks: eligible, resultOnly };
       }
       if (command === 'status') {
+        const callerView = caller && (project.controllerSelection === 'automatic' || project.controllerAccess?.length)
+          ? this.requireController(project, caller) : this.controllerView(project, caller);
+        const view = callerView ?? this.projectView(project);
         if (payload.taskId === undefined && payload.actionId === undefined) {
-          return { project, tasks: this.store.tasks(projectId) };
+          const tasks = callerView ? this.controllerTasks(project, view.controllerRef) : this.store.tasks(projectId);
+          return { project: view, tasks };
         }
         const task = this.getTask(projectId, text(payload.taskId, 'taskId'));
-        const snapshot = this.response(project, task, false);
+        if (callerView) this.requireRunController(project, task, view.controllerRef);
+        const snapshot = this.response(view, task, false);
         if (payload.actionId !== undefined) {
           const row = this.getAction(task, text(payload.actionId, 'actionId'));
           snapshot.recordAction = JSON.parse(row.json);
         }
         return snapshot;
       }
-      if (project.authorization.scope === 'project') this.requireController(project, caller);
       text(payload.taskId, 'taskId');
+      const view = caller || project.controllerSelection === 'automatic' || project.authorization.scope === 'project'
+        || payload.workSpec !== undefined || command === 'evaluate'
+        ? this.requireController(project, caller) : this.projectView(project);
+      const pushEnabled = this.canPush(view, caller);
       if (command === 'dispatch') {
-        if (payload.workSpec !== undefined) this.requireController(project, caller);
-        const pushEnabled = this.canPush(project, caller);
-        return this.withPushAction(this.dispatch(project, payload, pushEnabled), pushEnabled);
+        const prior = this.store.task(projectId, payload.taskId);
+        if (prior) this.requireRunController(project, prior, view.controllerRef);
+        if (payload.resultPushAuthorizationSource !== undefined) {
+          text(payload.resultPushAuthorizationSource, 'resultPushAuthorizationSource');
+          check(this.hasControllerContext(view, caller), 'AUTHORIZATION_REQUIRED',
+            'One-run result delivery requires the verified controller and registered checkout.');
+        }
+        if (payload.archiveAuthorizationSource !== undefined) {
+          text(payload.archiveAuthorizationSource, 'archiveAuthorizationSource');
+          check(this.hasControllerContext(view, caller), 'AUTHORIZATION_REQUIRED',
+            'One-run archive authorization requires the verified controller and registered checkout.');
+        }
+        const result = this.dispatch(view, payload, pushEnabled);
+        return this.withPushAction(result, pushEnabled || runResultPushGranted(result.task));
       }
       const task = this.getTask(projectId, payload.taskId);
-      if (task.workSpec || command === 'evaluate') this.requireController(project, caller);
+      if ((task.workSpec || task.archiveAuthorizationSource) && !caller) this.requireController(project, caller);
+      this.requireRunController(project, task, view.controllerRef);
       if (command === 'record') {
-        return this.withPushAction(this.record(project, task, payload), task.pushEnabled && this.canPush(project, caller));
+        const authorized = pushEnabled || (this.hasControllerContext(view, caller) && runResultPushGranted(task));
+        return this.withPushAction(this.record(view, task, payload), authorized);
       }
       if (command === 'evaluate') {
-        const pushEnabled = this.canPush(project, caller);
-        return this.withPushAction(this.evaluate(project, task, payload, pushEnabled), pushEnabled);
+        return this.withPushAction(this.evaluate(view, task, payload, pushEnabled), pushEnabled);
       }
       this.currentRun(task, text(payload.runId, 'runId'));
       if (command === 'observe') {
         if (payload.pushEvent !== undefined) {
-          this.requirePushController(project, caller);
           const event = object(payload.pushEvent, 'pushEvent');
-          const reason = pushEventRouteReason(project, task, event);
+          this.requirePushController(project, caller,
+            { runGrant: event.kind === 'result' && runResultPushGranted(task) });
+          const reason = pushEventRouteReason(view, task, event);
           check(!reason, reason, 'The push event no longer belongs to the bound worker and current run.');
           check(payload.eventId === event.eventId && payload.hostTurnId === event.workerTurnId,
             'INCOMPATIBLE_EVENT', 'The observation must match the push event and worker turn.');
         }
-        return this.observe(project, task, payload);
+        return this.observe(view, task, payload);
       }
-      if (command === 'resolve') return this.resolve(project, task, payload);
+      if (command === 'resolve') return this.resolve(view, task, payload);
       if (command === 'verify' || command === 'accept') {
         check(!task.workSpec, 'STRUCTURED_EVALUATION_REQUIRED', 'Use evaluate for a run with a workSpec.');
       }
-      if (command === 'verify') return this.verify(project, task, payload);
-      if (command === 'accept') return this.accept(project, task, payload);
-      return this.archive(project, task, payload);
+      if (command === 'verify') return this.verify(view, task, payload);
+      if (command === 'accept') return this.accept(view, task, payload);
+      if (task.worktree) {
+        check(this.hasControllerContext(view, caller), 'AUTHORIZATION_REQUIRED',
+          'Worktree archival requires the verified controller and registered checkout.');
+      }
+      return this.archive(view, task, payload);
     });
   }
 
@@ -163,31 +221,34 @@ export class Orchestrator {
       if (registered?.controllerRef.threadId === threadId) return result('undetermined', 'CONFLICTING_REGISTRATION');
       return result('worker', 'REGISTERED_WORKER', worker);
     }
-    if (registered) {
-      return registered.controllerRef.threadId === threadId
-        ? result('controller', 'REGISTERED_CONTROLLER', registered, false,
-          includeStatus ? { tasks: this.store.tasks(registered.projectId) } : {})
-        : result('not_candidate', 'CONTROLLER_EXISTS', registered);
+    const recognized = this.controllerView(registered, caller);
+    if (recognized) {
+      return result('controller', 'REGISTERED_CONTROLLER', recognized, false,
+        includeStatus ? { tasks: this.controllerTasks(registered, recognized.controllerRef) } : {});
     }
     if (!assessment) return result('undetermined', 'DISCOVERY_REQUIRED');
-    if (assessment.reason === 'MULTIPLE_THREADS') {
-      return result('not_candidate', assessment.reason, null, false, { matchingThreads: assessment.matchingThreads });
-    }
     if (assessment.reason !== 'CANDIDATE') return result('undetermined', assessment.reason);
     const controller = workerRef({ threadId, hostId: assessment.hostId }, 'controller');
     if (hostId !== controller.hostId) return result('undetermined', 'HOST_MISMATCH');
     const hostProjectId = text(assessment.hostProjectId, 'hostProjectId');
-    if (!claim) {
-      return result('candidate', 'CANDIDATE', null, false, { controllerRef: controller, hostProjectId, matchingThreads: 1 });
+    if (registered) {
+      if (registered.hostProjectId !== hostProjectId) return result('undetermined', 'HOST_PROJECT_MISMATCH');
+      registered.controllerAccess ??= [];
+      const known = registered.controllerAccess.find(entry => sameWorker(entry.controllerRef, controller));
+      const authorization = known?.authorization ?? defaultAuthorization();
+      if (known) known.hostProjectId = hostProjectId;
+      else registered.controllerAccess.push({ controllerRef: controller, hostProjectId, authorization });
+      this.saveProjectAccess(registered);
+      this.store.history('verify_controller_chat', { controller }, registered);
+      const view = this.projectView(registered, controller, authorization);
+      return result('controller', 'CONTROLLER_READY', view, false,
+        includeStatus ? { tasks: this.controllerTasks(registered, controller) } : {});
     }
     const { project } = this.registerProject({
       projectId: randomUUID(), projectRoot: root, hostProjectId, controller,
-      authorization: {
-        ...Object.fromEntries(Object.values(PERMISSIONS).map(permission => [permission, false])),
-        source: 'Automatic controller registration does not grant conversation permissions.',
-      },
+      authorization: defaultAuthorization(),
     }, { firstClaim: true });
-    return result('controller', 'CONTROLLER_CLAIMED', project, true, { matchingThreads: 1 });
+    return result('controller', 'CONTROLLER_CLAIMED', project, true, includeStatus ? { tasks: [] } : {});
   }
 
   registerProject(input, { firstClaim = false, caller = null } = {}) {
@@ -206,17 +267,37 @@ export class Orchestrator {
     check(authorization.pushEvents === undefined || typeof authorization.pushEvents === 'boolean',
       'INVALID_AUTHORIZATION', 'authorization.pushEvents must be a boolean when specified.');
     const prior = this.store.project(projectId);
-    if (authorization.scope === 'project' || prior?.authorization.scope === 'project') {
-      this.requireController(prior, caller);
-      check(sameWorker(prior.controllerRef, controller), 'CONTROLLER_REQUIRED',
-        'Updating project operation permissions must keep the registered controller.');
-    }
+    const grant = {
+      ...Object.fromEntries([...Object.values(PERMISSIONS), 'source'].map(key => [key, authorization[key]])),
+      ...(authorization.scope === 'project' ? { scope: 'project' } : {}),
+      ...(authorization.pushEvents !== undefined ? { pushEvents: authorization.pushEvents } : {}),
+    };
     if (prior) {
       check(prior.projectRoot === projectRoot && prior.hostProjectId === hostProjectId
         && prior.controllerRef.hostId === controller.hostId,
       'PROJECT_IDENTITY_CONFLICT', 'A registered project root and host project identity are fixed.');
-      check(prior.controllerSelection !== 'automatic' || sameWorker(prior.controllerRef, controller),
-        'CONTROLLER_ALREADY_REGISTERED', 'A permission update must use the automatically registered controller.');
+      if (caller || prior.controllerSelection === 'automatic' || prior.controllerAccess?.length
+        || authorization.scope === 'project' || prior.authorization.scope === 'project') {
+        const view = this.requireController(prior, caller);
+        check(sameWorker(view.controllerRef, controller), 'CONTROLLER_REQUIRED',
+          'A conversation can update only its own delegation.');
+        const peer = prior.controllerAccess?.find(entry => sameWorker(entry.controllerRef, controller));
+        if (peer) {
+          peer.authorization = grant;
+          this.saveProjectAccess(prior);
+          const project = this.projectView(prior, controller, grant);
+          this.store.history('project', input, project);
+          return { project, task: null, action: null, needsReconciliation: false };
+        }
+      } else if (!sameWorker(prior.controllerRef, controller)) {
+        check(this.store.tasks(projectId).length === 0, 'CONTROLLER_REQUIRED',
+          'Existing work retains its controller.');
+      }
+    } else if (!firstClaim) {
+      check(authorization.scope !== 'project' && (!caller ||
+        (caller.threadId === controller.threadId && (!caller.hostId || caller.hostId === controller.hostId)
+          && !this.store.workerProject(caller.threadId, controller.hostId))),
+      'CONTROLLER_REQUIRED', 'Project delegation requires a verified controller conversation.');
     }
     const collision = this.store.db.prepare(`SELECT project_id FROM projects WHERE project_id != ?
       AND (project_root = ? OR (? = 1 AND host_id = ? AND host_project_id = ?))`)
@@ -227,11 +308,8 @@ export class Orchestrator {
     const project = {
       projectId, projectRoot, hostProjectId, controller, controllerRef: controller,
       ...(firstClaim || prior?.controllerSelection === 'automatic' ? {controllerSelection: 'automatic'} : {}),
-      authorization: {
-        ...Object.fromEntries([...Object.values(PERMISSIONS), 'source'].map(key => [key, authorization[key]])),
-        ...(authorization.scope === 'project' ? { scope: 'project' } : {}),
-        ...(authorization.pushEvents !== undefined ? { pushEvents: authorization.pushEvents } : {}),
-      },
+      ...(prior?.controllerAccess ? { controllerAccess: prior.controllerAccess } : {}),
+      authorization: grant,
       createdAt: prior?.createdAt ?? now, updatedAt: now,
     };
     const update = firstClaim ? '' : ' ON CONFLICT(project_id) DO UPDATE SET json = excluded.json';
@@ -239,21 +317,23 @@ export class Orchestrator {
       VALUES (?, ?, ?, ?, ?)${update}`)
       .run(projectId, projectRoot, controller.hostId, hostProjectId, JSON.stringify(project));
     this.store.history(firstClaim ? 'claim_controller' : 'project', input, project);
-    return { project, task: null, action: null, needsReconciliation: false };
+    return { project: this.projectView(project), task: null, action: null, needsReconciliation: false };
   }
 
   syncProject(project, input, caller) {
-    this.requireController(project, caller);
+    const view = this.requireController(project, caller);
     const hostProjectId = text(input.hostProjectId, 'hostProjectId');
     const hostId = text(input.hostId, 'hostId');
     const controllerThreadId = text(input.controllerThreadId, 'controllerThreadId');
-    check(hostId === project.controllerRef.hostId && caller.hostId === hostId
-      && controllerThreadId === project.controllerRef.threadId,
-    'CONTROLLER_REQUIRED', 'Project synchronization requires the registered controller and host.');
+    check(hostId === view.controllerRef.hostId && caller.hostId === hostId
+      && controllerThreadId === view.controllerRef.threadId,
+    'CONTROLLER_REQUIRED', 'Project synchronization requires the verified caller and host.');
     const previousHostProjectId = project.hostProjectId;
     if (previousHostProjectId === hostProjectId) {
-      return { project, task: null, action: null, needsReconciliation: false };
+      return { project: view, task: null, action: null, needsReconciliation: false };
     }
+    check(sameWorker(project.controllerRef, view.controllerRef), 'HOST_PROJECT_MISMATCH',
+      'A peer conversation must use the verified Desktop project group.');
     const tasks = this.store.tasks(project.projectId);
     const pending = tasks.find(task => task.pendingAction?.type === 'create');
     check(!pending, 'PENDING_ACTION', 'Resolve the existing create action before synchronizing the project.',
@@ -269,7 +349,7 @@ export class Orchestrator {
     this.store.db.prepare('UPDATE projects SET host_project_id = ?, json = ? WHERE project_id = ?')
       .run(hostProjectId, JSON.stringify(project), project.projectId);
     this.store.history('sync-project', { ...input, previousHostProjectId }, project);
-    return { project, task: null, action: null, needsReconciliation: false, previousHostProjectId };
+    return { project: this.projectView(project), task: null, action: null, needsReconciliation: false, previousHostProjectId };
   }
 
   getTask(projectId, taskId) {
@@ -290,41 +370,96 @@ export class Orchestrator {
       { currentRunId: task.runId, receivedRunId: runId });
   }
 
-  requireController(project, caller) {
-    check(project && caller?.threadId === project.controllerRef.threadId
-      && (!caller.hostId || caller.hostId === project.controllerRef.hostId),
-    'CONTROLLER_REQUIRED', 'Project operation permissions require the registered controller conversation.');
+  saveProjectAccess(project) {
+    project.updatedAt = new Date().toISOString();
+    this.store.db.prepare('UPDATE projects SET json = ? WHERE project_id = ?')
+      .run(JSON.stringify(project), project.projectId);
   }
 
-  requirePushController(project, caller, { removingHook = false } = {}) {
-    this.requireController(project, caller);
-    check((caller.hostId ?? 'local') === project.controllerRef.hostId,
+  projectView(project, controllerRef = project.controllerRef, authorization = project.authorization) {
+    const { controllerAccess, ...view } = project;
+    return { ...view, controller: controllerRef, controllerRef, authorization };
+  }
+
+  controllerView(project, caller) {
+    if (!project || !caller?.threadId || (caller.hostId && caller.hostId !== project.controllerRef.hostId)
+      || this.store.workerProject(caller.threadId, project.controllerRef.hostId)) return null;
+    if (caller.threadId === project.controllerRef.threadId) return this.projectView(project);
+    const peer = project.controllerAccess?.find(entry => entry.controllerRef.threadId === caller.threadId
+      && entry.hostProjectId === project.hostProjectId);
+    return peer ? this.projectView(project, peer.controllerRef, peer.authorization) : null;
+  }
+
+  controllerTasks(project, controllerRef) {
+    return this.store.tasks(project.projectId)
+      .filter(task => sameWorker(controllerForRun(project, task), controllerRef));
+  }
+
+  requireController(project, caller) {
+    const view = this.controllerView(project, caller);
+    check(view, 'CONTROLLER_REQUIRED', 'Project operations require a verified non-worker conversation.');
+    return view;
+  }
+
+  requireRunController(project, task, controllerRef) {
+    check(sameWorker(controllerForRun(project, task), controllerRef), 'CONTROLLER_REQUIRED',
+      'This execution belongs to the conversation that assigned it.');
+  }
+
+  requirePushController(project, caller, { removingHook = false, runGrant = false } = {}) {
+    const view = this.requireController(project, caller);
+    check((caller.hostId ?? 'local') === view.controllerRef.hostId,
       'CONTROLLER_REQUIRED', 'The current host must match the registered controller host.');
     check(caller.projectRoots?.includes(project.projectRoot),
       'PROJECT_SCOPE_MISMATCH', 'The current checkout must belong to the registered project.');
-    check(removingHook || (project.authorization.scope === 'project' && project.authorization.pushEvents === true),
-      'AUTHORIZATION_REQUIRED', 'Project delegation and explicit pushEvents authorization are required.');
+    if (removingHook) {
+      const ref = view.controllerRef;
+      if (!pushGranted(view.authorization)) {
+        const previousGrant = this.store.db.prepare(`SELECT 1 FROM history
+          WHERE project_id = ? AND command = 'project'
+            AND json_extract(snapshot_json, '$.controllerRef.threadId') = ?
+            AND json_extract(snapshot_json, '$.controllerRef.hostId') = ?
+            AND json_extract(snapshot_json, '$.authorization.scope') = 'project'
+            AND json_extract(snapshot_json, '$.authorization.pushEvents') = 1
+          LIMIT 1`).get(project.projectId, ref.threadId, ref.hostId);
+        check(previousGrant, 'AUTHORIZATION_REQUIRED',
+          'Removing the managed hook requires a current or previous pushEvents grant.');
+      }
+      const anotherGrant = [project, ...(project.controllerAccess ?? [])].some(entry =>
+        !sameWorker(entry.controllerRef, ref) && pushGranted(entry.authorization));
+      check(!anotherGrant, 'HOOK_CONFIG_CONFLICT', 'Another conversation still has pushEvents authorization.');
+    } else {
+      check(runGrant || pushGranted(view.authorization),
+        'AUTHORIZATION_REQUIRED', 'Project delegation and explicit pushEvents authorization are required.');
+    }
+    return view;
+  }
+
+  hasControllerContext(project, caller) {
+    return caller?.threadId === project.controllerRef.threadId
+      && (caller.hostId ?? 'local') === project.controllerRef.hostId
+      && caller.projectRoots?.includes(project.projectRoot) === true;
   }
 
   canPush(project, caller) {
-    return project.authorization.scope === 'project' && project.authorization.pushEvents === true
-      && caller?.threadId === project.controllerRef.threadId
-      && (caller.hostId ?? 'local') === project.controllerRef.hostId
-      && caller.projectRoots?.includes(project.projectRoot) === true;
+    return pushGranted(project.authorization) && this.hasControllerContext(project, caller);
   }
 
   withPushAction(result, authorized) {
     const { action, project, task } = result;
     if (!authorized || !task.pushEnabled || !['create', 'send'].includes(action?.type)) return result;
-    const { projectRoot, projectId, controllerRef, authorization } = project;
+    const { projectRoot, projectId, authorization } = project;
+    const controllerRef = controllerForRun(project, task);
     const { taskId, runId } = task;
     return { ...result, action: { ...action, push: {
       projectRoot, projectId, taskId, runId, hostId: controllerRef.hostId, controllerRef,
-      authorizationSource: authorization.source,
+      stateDir: this.store.stateDir,
+      authorizationSource: task.resultPushAuthorizationSource ?? authorization.source,
     } } };
   }
 
-  authorize(project, type) {
+  authorize(project, type, task) {
+    if (type === 'archive' && runArchiveGranted(project, task)) return;
     const permission = PERMISSIONS[type];
     check(project.authorization[permission] === true,
       'AUTHORIZATION_REQUIRED', `Explicit ${permission} authorization is required.`,
@@ -341,25 +476,29 @@ export class Orchestrator {
       { workerHostProjectId: task.workerHostProjectId, hostProjectId: project.hostProjectId });
   }
 
-  response(project, task, executable = true) {
+  response(project, task, executable = true, archiveWorktreePath = null) {
     let action = executable && !task.needsReconciliation ? task.pendingAction : null;
     if (['send', 'unarchive'].includes(action?.type) && !this.workerProjectMatches(project, task)) action = null;
-    if (action) this.authorize(project, action.type);
+    // A saved worktree archive plan is executable only after a fresh Desktop and Git check.
+    if (action?.type === 'archive' && task.worktree && !archiveWorktreePath) action = null;
+    if (action) this.authorize(project, action.type, task);
     return { project, task, action, needsReconciliation: task.needsReconciliation };
   }
 
-  planAction(project, task, type) {
+  planAction(project, task, type, { archiveWorktreePath } = {}) {
     check(!task.pendingAction, 'PENDING_ACTION', 'An action is already pending.');
-    this.authorize(project, type);
+    this.authorize(project, type, task);
     const id = randomUUID();
     const action = {
       id, actionId: id, type, projectId: project.projectId, projectRoot: project.projectRoot,
       taskId: task.taskId, runId: task.runId, requestId: task.requestId,
       prompt: task.prompt, profile: task.profile,
       workerRef: type === 'create' ? null : task.workerRef,
-      hostProjectId: project.hostProjectId, controllerRef: project.controllerRef,
+      hostProjectId: project.hostProjectId, controllerRef: controllerForRun(project, task),
       ...(task.workSpec && (type === 'create' || type === 'send' || type === 'unarchive')
         ? { workSpec: task.workSpec } : {}),
+      ...(task.worktree && { worktree: task.worktree }),
+      ...(archiveWorktreePath && { archiveWorktreePath }),
       ...(task.retryContext && type === 'send' ? { retryContext: task.retryContext } : {}),
     };
     check(type === 'create' || action.workerRef, 'INVALID_STATE', 'This action requires an existing worker.');
@@ -376,16 +515,22 @@ export class Orchestrator {
     const prompt = text(input.prompt, 'prompt');
     const requestedProfile = profile(input.profile);
     const workSpec = parseWorkSpec(input.workSpec, requestedProfile.thinking);
+    const { resultPushAuthorizationSource, archiveAuthorizationSource } = input;
     const task = this.store.task(project.projectId, input.taskId);
+    const worktree = parseWorktree(input.worktree) ?? task?.worktree;
     check(input.reuseOnly === undefined || typeof input.reuseOnly === 'boolean',
       'INVALID_INPUT', 'reuseOnly must be a boolean when specified.');
     check(input.reuseOnly !== true || task?.workerRef,
       'WORKER_NOT_FOUND', 'Reuse requires an existing bound worker.');
     const request = this.store.request(project.projectId, input.taskId, requestId);
     if (request) {
+      const recordedRequest = JSON.parse(request.json);
       check(request.prompt === prompt && request.profile_json === JSON.stringify(requestedProfile)
-        && isDeepStrictEqual(JSON.parse(request.json).workSpec, workSpec),
-      'REQUEST_REPLAY_MISMATCH', 'requestId was already used with a different prompt, profile, or workSpec.');
+        && isDeepStrictEqual(recordedRequest.workSpec, workSpec)
+        && isDeepStrictEqual(recordedRequest.worktree, worktree)
+        && recordedRequest.resultPushAuthorizationSource === resultPushAuthorizationSource
+        && recordedRequest.archiveAuthorizationSource === archiveAuthorizationSource,
+      'REQUEST_REPLAY_MISMATCH', 'requestId was already used with different dispatch parameters.');
       const currentRequest = request.run_id === task.runId;
       if (currentRequest && task.workerRef) this.requireWorkerProject(project, task);
       // A confirmed unarchive leaves the run planned without an action while send is unauthorized.
@@ -398,6 +543,8 @@ export class Orchestrator {
       return this.response(project, task, currentRequest);
     }
     if (task) {
+      check(isDeepStrictEqual(task.worktree, worktree),
+        'WORKTREE_ASSIGNMENT_MISMATCH', 'An existing task must retain its worktree assignment.');
       if (task.workerRef) this.requireWorkerProject(project, task);
       check(!task.pendingAction && !task.needsReconciliation && task.hostStatus !== 'unknown'
         && !['planned', 'running', 'waiting'].includes(task.phase),
@@ -411,23 +558,35 @@ export class Orchestrator {
     const actionType = task?.workerRef ? task.archived ? 'unarchive' : 'send' : 'create';
     this.authorize(project, task?.workerRef ? 'send' : 'create');
     if (actionType === 'unarchive') this.authorize(project, actionType);
+    const verifiedWorkerProject = !task?.workerRef || task.workerHostProjectId === project.hostProjectId;
+    check(resultPushAuthorizationSource === undefined || verifiedWorkerProject,
+      'WORKER_PROJECT_MISMATCH', 'One-run result delivery requires the registered worker project.');
+    check(archiveAuthorizationSource === undefined || verifiedWorkerProject,
+      'WORKER_PROJECT_MISMATCH', 'One-run archive authorization requires the registered worker project.');
+    if (actionType === 'create' && worktree) verifyWorktreeStart(project.projectRoot, worktree);
     return this.startRun(project, task, {
-      ...input, requestId, prompt, requestedProfile, workSpec, runId: randomUUID(),
-      pushEnabled: pushEnabled && (!task?.workerRef || task.workerHostProjectId === project.hostProjectId),
+      ...input, requestId, prompt, requestedProfile, workSpec, worktree, runId: randomUUID(),
+      pushEnabled: verifiedWorkerProject && (pushEnabled || resultPushAuthorizationSource !== undefined),
     }, actionType, input);
   }
 
   startRun(project, prior, run, actionType, historyInput) {
-    const { runId, requestId, prompt, requestedProfile, workSpec, retryContext, pushEnabled } = run;
+    const { runId, requestId, prompt, requestedProfile, workSpec, retryContext, pushEnabled,
+      resultPushAuthorizationSource, archiveAuthorizationSource } = run;
+    const worktree = prior?.worktree ?? run.worktree;
     const now = new Date().toISOString();
     const task = {
       projectId: project.projectId, taskId: run.taskId, runId, requestId, prompt,
+      controllerRef: controllerForRun(project, prior),
       profile: requestedProfile, requestedProfile, effectiveProfile: null,
       workerRef: prior?.workerRef ?? null,
       ...(prior?.workerHostProjectId != null ? { workerHostProjectId: prior.workerHostProjectId } : {}),
       ...(workSpec && { workSpec }),
+      ...(worktree && { worktree }),
       ...(retryContext && { retryContext }),
       ...(pushEnabled && { pushEnabled: true, runStartedAt: now }),
+      ...(resultPushAuthorizationSource !== undefined && { resultPushAuthorizationSource }),
+      ...(archiveAuthorizationSource !== undefined && { archiveAuthorizationSource }),
       archived: prior?.archived ?? false, phase: 'planned', hostStatus: null,
       pendingAction: null, needsReconciliation: false,
       verification: unverified(runId), accepted: false, resultReviewed: false,
@@ -497,6 +656,8 @@ export class Orchestrator {
       const bound = workerRef(receipt.workerRef, 'receipt.workerRef');
       check(bound.hostId === action.controllerRef.hostId, 'WORKER_IDENTITY_CONFLICT',
         'The created worker must belong to the planned host.');
+      check(!sameWorker(bound, action.controllerRef), 'WORKER_IDENTITY_CONFLICT',
+        'The controller conversation cannot be its own worker.');
       check(!task.workerRef || sameWorker(task.workerRef, bound),
         'WORKER_IDENTITY_CONFLICT', 'A task cannot acquire a second worker.');
       const collision = this.store.db.prepare(`SELECT project_id, task_id FROM tasks
@@ -649,7 +810,7 @@ export class Orchestrator {
       this.currentRun(task, runId);
     }
     check(task.workSpec, 'WORK_SPEC_REQUIRED', 'Evaluation requires a run with a workSpec.');
-    const review = parseEvaluation(input, task.workSpec);
+    const review = parseEvaluation(input, task.workSpec, Boolean(task.worktree));
     if (task.evaluation?.decision.type === 'complete') return this.replayDecision(project, task, task, input);
     const observation = this.evaluationObservation(task, review.resultEventId);
     const diagnostics = decisionEvidence(task.workSpec, review, observation);
@@ -735,7 +896,7 @@ export class Orchestrator {
 
   replayDecision(project, task, prior, input) {
     const { decision, input: original } = prior.evaluation;
-    const review = parseEvaluation(input, prior.workSpec);
+    const review = parseEvaluation(input, prior.workSpec, original.keepWorker);
     check(review.resultEventId === original.resultEventId, 'STALE_RESULT', 'Evaluation must identify the decided result event.',
       { currentResultEventId: original.resultEventId, receivedResultEventId: review.resultEventId });
     check(isDeepStrictEqual(review, original), 'EVALUATION_REPLAY_MISMATCH',
@@ -743,8 +904,8 @@ export class Orchestrator {
     const action = task.pendingAction;
     const retry = task.runId === decision.nextRunId && action?.type === 'send';
     const archive = decision.type === 'complete' && task.runId === decision.runId && action?.type === 'archive';
-    const executable = (retry || archive) && project.authorization[PERMISSIONS[action.type]] === true
-      && (!retry || this.workerProjectMatches(project, task));
+    const executable = (retry && project.authorization.sendFollowups === true && this.workerProjectMatches(project, task))
+      || (archive && (project.authorization.archiveCompleted === true || runArchiveGranted(project, task)));
     return { ...this.response(project, task, executable), decision };
   }
 
@@ -791,8 +952,9 @@ export class Orchestrator {
   accept(project, task, input) {
     check(input.keepWorker === undefined || typeof input.keepWorker === 'boolean',
       'INVALID_INPUT', 'keepWorker must be a boolean when specified.');
-    const archiveOnAcceptance = input.keepWorker === false && project.authorization.scope === 'project'
-      && project.authorization.archiveCompleted === true;
+    const standingArchive = project.authorization.scope === 'project' && project.authorization.archiveCompleted === true;
+    const keepWorker = input.keepWorker ?? Boolean(task.worktree);
+    const archiveOnAcceptance = !task.worktree && !keepWorker && (standingArchive || runArchiveGranted(project, task));
     if (task.phase === 'complete' && task.accepted) {
       if (archiveOnAcceptance && task.pendingAction?.type === 'archive') return this.archive(project, task, input);
       return this.response(project, task, false);
@@ -814,16 +976,71 @@ export class Orchestrator {
   archive(project, task, input) {
     check(task.phase === 'complete' && task.accepted && task.resultReviewed,
       'ACCEPTANCE_REQUIRED', 'Archive requires an accepted and reviewed complete run.');
-    if (task.pendingAction?.type === 'archive') {
-      // The original immutable action is the only allowed repeat plan.
-      return this.response(project, task);
+    const pendingArchive = task.pendingAction?.type === 'archive' ? task.pendingAction : null;
+    if (!pendingArchive) this.readyForAcceptance(task);
+    if (task.archived || task.needsReconciliation) return this.response(project, task, false);
+    this.authorize(project, 'archive', task);
+
+    let archiveWorktreePath;
+    if (task.worktree) {
+      this.requireWorkerProject(project, task);
+      const thread = input.workerThread;
+      check(thread?.id === task.workerRef?.threadId && thread?.hostId === task.workerRef?.hostId
+        && thread?.status?.type === 'idle'
+        && (thread.projectId == null || thread.projectId === project.hostProjectId),
+      'WORKTREE_THREAD_UNVERIFIED', 'Read the bound, idle Desktop worker thread before archiving its worktree.');
+      archiveWorktreePath = preservedWorktreePath(project.projectRoot, task.worktree, thread.cwd);
+      check(archiveWorktreePath
+        && (!pendingArchive?.archiveWorktreePath || pendingArchive.archiveWorktreePath === archiveWorktreePath),
+      'WORKTREE_NOT_PRESERVED', 'The Desktop worker must be in the clean linked worktree for the assigned branch.');
     }
-    this.readyForAcceptance(task);
-    if (task.archived) return this.response(project, task, false);
-    this.planAction(project, task, 'archive');
-    this.store.saveTask(task);
-    this.store.history('archive', input, project, task);
-    return this.response(project, task);
+    if (!pendingArchive) {
+      this.planAction(project, task, 'archive', { archiveWorktreePath });
+      this.store.saveTask(task);
+      this.store.history('archive', input, project, task);
+    }
+    return this.response(project, task, true, archiveWorktreePath);
+  }
+
+  resultPublication(input, caller) {
+    const projectId = text(input.projectId, 'projectId');
+    const taskId = text(input.taskId, 'taskId');
+    const runId = text(input.runId, 'runId');
+    const worker = workerRef(caller, 'caller');
+    return this.store.transaction(() => {
+      const project = this.store.project(projectId);
+      check(project, 'PROJECT_NOT_FOUND', 'The result project is not registered.');
+      check(canonicalRoot(input.projectRoot) === project.projectRoot,
+        'PROJECT_SCOPE_MISMATCH', 'The result must use the registered project root.');
+      const task = this.getTask(projectId, taskId);
+      this.currentRun(task, runId);
+      const controllerRef = controllerForRun(project, task);
+      check(worker.hostId === controllerRef.hostId && input.hostId === worker.hostId,
+        'HOST_MISMATCH', 'The worker and run controller must belong to the current host.');
+      check(!sameWorker(worker, controllerRef), 'WORKER_REQUIRED', 'The controller cannot publish as its own worker.');
+      if (input.controllerRef !== undefined) {
+        check(sameWorker(workerRef(input.controllerRef, 'controllerRef'), controllerRef),
+          'CONTROLLER_REQUIRED', 'The result must return to the conversation that assigned the execution.');
+      }
+      const owner = this.requireController(project, controllerRef);
+      const singleDelivery = runResultPushGranted(task);
+      check(task.pushEnabled === true && (singleDelivery || pushGranted(owner.authorization)),
+        'AUTHORIZATION_REQUIRED', 'The run controller must have authorized push events.');
+      if (task.workerRef) {
+        check(sameWorker(worker, task.workerRef), 'WORKER_MISMATCH', 'The worker identity does not match this execution.');
+        this.requireWorkerProject(project, task);
+      } else {
+        // Desktop can start the worker before the controller records the creation response.
+        check(task.pendingAction?.type === 'create' && task.pendingAction.hostProjectId === project.hostProjectId
+          && !this.store.workerProject(worker.threadId, worker.hostId) && !this.controllerView(project, worker),
+        'WORKER_MISMATCH', 'The worker creation must be pending on the registered project.');
+      }
+      return { controllerRef, singleDelivery };
+    });
+  }
+
+  resultDestination(input, caller) {
+    return this.resultPublication(input, caller).controllerRef;
   }
 
   close() {

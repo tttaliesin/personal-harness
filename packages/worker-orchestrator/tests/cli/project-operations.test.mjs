@@ -168,7 +168,7 @@ test('project authorization persists and guards project mutations against a forg
   denied('verify', verification);
   run('verify', verification);
   denied('accept', { ...scope, keepWorker: false });
-  const accepted = run('accept', scope);
+  const accepted = run('accept', { ...scope, keepWorker: true });
   assertAcceptedAndOpen(accepted);
   denied('archive', scope);
   assert.deepEqual(run('status', task, { caller: outsider }).task, accepted.task);
@@ -189,7 +189,7 @@ test('dispatch rechecks authorization and worker state after a candidate status 
   const first = runScope(create);
   const completed = run('observe', completion(first));
   run('verify', passedVerification(completed.task));
-  const accepted = run('accept', first);
+  const accepted = run('accept', { ...first, keepWorker: true });
   assertAcceptedAndOpen(accepted);
 
   const snapshot = run('candidate', { projectRoot: project.projectRoot, includeStatus: true });
@@ -238,6 +238,7 @@ test('packaged CLI reuses a retained worker and restores it after verified, repl
   run('accept', { ...first, keepWorker: false }, { errorCode: 'VERIFICATION_REQUIRED' });
   run('verify', passedVerification(completed.task));
   assertAcceptedAndOpen(run('accept', { ...first, keepWorker: true }));
+  assertAcceptedAndOpen(run('accept', first));
 
   const followup = run('dispatch', { ...request, requestId: 'fixture-request-2', prompt: 'Follow up.' });
   assert.equal(followup.action.type, 'send');
@@ -252,7 +253,7 @@ test('packaged CLI reuses a retained worker and restores it after verified, repl
   });
   const reviewed = run('observe', completion(second));
   const verified = run('verify', passedVerification(reviewed.task));
-  const accept = { ...second, keepWorker: false };
+  const accept = second;
   run('accept', accept, { errorCode: 'UNRESOLVED_WAITS' });
   assert.deepEqual(run('status', task).task, verified.task);
   run('resolve', { ...second, waitId, evidenceRef: 'fixture:input-resolution' });
@@ -297,7 +298,48 @@ test('packaged CLI reuses a retained worker and restores it after verified, repl
   const fresh = run('observe', completion(third));
   run('accept', { ...third, keepWorker: false }, { errorCode: 'VERIFICATION_REQUIRED' });
   run('verify', passedVerification(fresh.task));
-  assertAcceptedAndOpen(run('accept', third));
+  assertAcceptedAndOpen(run('accept', { ...third, keepWorker: true }));
+});
+
+test('an archive grant for one run is used on acceptance and expires before the next run', async t => {
+  const { run, project, request } = await fixture(t);
+  run('project', { ...project, authorization: { ...project.authorization, archiveCompleted: false } });
+  const dispatch = { ...request, archiveAuthorizationSource: 'Original user request to archive this one worker on success.' };
+  run('dispatch', dispatch, { errorCode: 'AUTHORIZATION_REQUIRED' });
+  const git = spawnSync('git', ['init', '--quiet', '--template='], {
+    cwd: project.projectRoot, env: baseEnv, encoding: 'utf8', windowsHide: true,
+  });
+  assert.ifError(git.error);
+  assert.equal(git.status, 0, git.stderr);
+  const created = run('dispatch', dispatch);
+  assert.equal(created.task.archiveAuthorizationSource, dispatch.archiveAuthorizationSource);
+  run('dispatch', request, { errorCode: 'REQUEST_REPLAY_MISMATCH' });
+  const first = runScope(created.action);
+  run('record', receipt(created.action, worker));
+  run('archive', first, { errorCode: 'ACCEPTANCE_REQUIRED' });
+  const result = run('observe', completion(first));
+  run('verify', passedVerification(result.task));
+
+  const archive = run('accept', first);
+  assert.equal(archive.task.archived, false);
+  assert.deepEqual(archive.hostCall, {
+    tool: 'mcp__codex_app__set_thread_archived',
+    arguments: { ...worker, source: 'codex', archived: true },
+  });
+  assert.equal(run('accept', first).action.id, archive.action.id);
+  assert.equal(run('record', receipt(archive.action, { ...worker, archived: true })).task.archived, true);
+  assert.equal(run('accept', first).action, null);
+
+  const resumed = run('dispatch', { ...request, requestId: 'after-archive' });
+  assert.notEqual(resumed.task.runId, first.runId);
+  assert.equal(resumed.task.archiveAuthorizationSource, undefined);
+  const sent = run('record', receipt(resumed.action, { ...worker, archived: false }));
+  run('record', receipt(sent.action, { threadId: worker.threadId }));
+  const second = runScope(sent.action);
+  const nextResult = run('observe', completion(second));
+  run('verify', passedVerification(nextResult.task));
+  assertAcceptedAndOpen(run('accept', second));
+  run('archive', second, { errorCode: 'AUTHORIZATION_REQUIRED' });
 });
 
 test('archive-on-accept requires a successful worker result even with passing verification', async t => {

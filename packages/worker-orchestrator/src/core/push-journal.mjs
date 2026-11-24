@@ -102,7 +102,7 @@ function workerResult(result, runId) {
   return { runId, status, summary, verification: { status: verification.status, evidenceRefs }, pendingRequests: requests };
 }
 
-function publish(path, fields) {
+function publish(path, fields, withPublication = false) {
   return withInbox(path, true, db => writeTransaction(db, () => {
     if (!hasSchema(db)) db.exec(SCHEMA);
     if (fields.kind === 'result') {
@@ -110,17 +110,18 @@ function publish(path, fields) {
       if (prior) {
         const { eventId, createdAt, ...published } = JSON.parse(prior.event_json);
         check(isDeepStrictEqual(fields, published), 'PUSH_RESULT_CONFLICT', 'This run already has a different result event.');
-        return { eventId, ...published, createdAt };
+        const event = { eventId, ...published, createdAt };
+        return withPublication ? { event, inserted: false } : event;
       }
     }
     const event = { eventId: randomUUID(), ...fields, createdAt: new Date().toISOString() };
     db.prepare('INSERT INTO push_events (event_id, run_id, event_json) VALUES (?, ?, ?)')
       .run(event.eventId, fields.runId ?? null, JSON.stringify(event));
-    return event;
+    return withPublication ? { event, inserted: true } : event;
   }));
 }
 
-export function publishResult(projectRoot, input) {
+export function publishResult(projectRoot, input, { withPublication = false } = {}) {
   const { projectId, taskId, runId, hostId, workerThreadId, workerTurnId, result } = object(input, 'result input');
   const path = inboxPath(canonicalDirectory(projectRoot, 'projectRoot'), projectId);
   return publish(path, {
@@ -132,7 +133,7 @@ export function publishResult(projectRoot, input) {
     workerThreadId: text(workerThreadId, 'workerThreadId'),
     workerTurnId: text(workerTurnId, 'workerTurnId'),
     result: workerResult(result, runId)
-  });
+  }, withPublication);
 }
 
 export function publishApproval(projectRoot, input, payload) {

@@ -141,7 +141,7 @@ test('structured review retries same worker with increasing effort and idempoten
   assert.deepEqual(retry.task.verification, { runId: retry.task.runId, status: 'unverified', evidenceRefs: [] });
   const afterRetry = f.history();
   assert.deepEqual(f.run('evaluate', { ...input, checks: input.checks.toReversed() }), retry);
-  f.run('evaluate', { ...input, keepWorker: false }, 'EVALUATION_REPLAY_MISMATCH');
+  f.run('evaluate', { ...input, keepWorker: true }, 'EVALUATION_REPLAY_MISMATCH');
   assert.deepEqual(f.history(), afterRetry);
   assert.equal(f.run('dispatch', f.request).action, null);
   f.record(retry);
@@ -173,7 +173,7 @@ test('completion needs controller checks and accepts sources also cited by the w
   f.record(plan);
   const old = f.terminal(plan.task.runId, 'first').task;
   const current = f.terminal(plan.task.runId, 'second').task;
-  const input = f.evaluation(current, { keepWorker: false });
+  const input = f.evaluation(current);
   f.run('evaluate', f.evaluation(old), 'STALE_RESULT');
   f.run('evaluate', { ...input, constraintReview: undefined }, 'CONSTRAINT_REVIEW_REQUIRED');
   f.run('evaluate', { ...input, checks: input.checks.slice(0, 1) }, 'INVALID_INPUT');

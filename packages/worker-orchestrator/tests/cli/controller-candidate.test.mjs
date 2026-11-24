@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { assessControllerCandidate, resolveControllerScope } from '../../src/adapters/codex-desktop/controller-candidate.mjs';
 
 const cli = fileURLToPath(new URL('../../src/cli/main.mjs', import.meta.url));
 const workspace = realpathSync.native(fileURLToPath(new URL('../../', import.meta.url)));
@@ -45,7 +46,7 @@ function fixture(t) {
         windowsHide: true, timeout: 20_000,
       }));
 
-    // Start every CLI before supplying input so the claim calls can race on SQLite.
+    // Start every CLI before supplying input so the enrollment calls can race on SQLite.
     for (const [index, execution] of processes.entries()) {
       execution.child.stdin.on('error', () => {}); // The process result reports early exit.
       execution.child.stdin.end(JSON.stringify(calls[index].input));
@@ -94,6 +95,13 @@ function assertUnclaimed(result, decision, reason) {
   if (reason !== undefined) assert.equal(result.reason, reason);
 }
 
+function assertNoPermissions(project) {
+  const { createWorkers, sendFollowups, archiveCompleted, restoreWorkers } = project.authorization;
+  assert.deepEqual({ createWorkers, sendFollowups, archiveCompleted, restoreWorkers }, {
+    createWorkers: false, sendFollowups: false, archiveCompleted: false, restoreWorkers: false,
+  });
+}
+
 function registerLegacyController(run, projectRoot, hostProjectId = 'desktop-project') {
   return run('project', {
     projectId: 'legacy-project', projectRoot, hostProjectId,
@@ -116,18 +124,22 @@ async function assertCliError(run, command, input, code, threadId, hostId) {
   });
 }
 
-test('candidate does not include tasks during unregistered discovery', async t => {
+test('candidate enrolls a verified caller without claim and includes requested status', async t => {
   const { projectRoot, run } = fixture(t);
-  const discovered = await run('candidate', {
-    ...soleThread(projectRoot, 'current'), includeStatus: true,
-  }, 'current');
-  assertUnclaimed(discovered, 'candidate');
-  assert.equal(Object.hasOwn(discovered, 'tasks'), false);
-
   const lookup = await run('candidate', { projectRoot, includeStatus: true }, 'current');
   assertUnclaimed(lookup, 'undetermined', 'DISCOVERY_REQUIRED');
   assert.equal(lookup.project, null);
   assert.equal(Object.hasOwn(lookup, 'tasks'), false);
+
+  const discovered = await run('candidate', {
+    ...soleThread(projectRoot, 'current'), includeStatus: true,
+  }, 'current');
+  assert.equal(discovered.decision, 'controller');
+  assert.equal(discovered.reason, 'CONTROLLER_CLAIMED');
+  assert.equal(discovered.claimed, true);
+  assert.deepEqual(discovered.tasks, []);
+  assert.deepEqual(discovered.project.controller, { threadId: 'current', hostId: 'local' });
+  assertNoPermissions(discovered.project);
 });
 
 test('candidate rejects a non-boolean includeStatus before looking up the caller', async t => {
@@ -149,44 +161,89 @@ test('candidate requires the caller identity from the subprocess environment', a
   assertUnclaimed(await run('candidate', input), 'undetermined', 'MISSING_CURRENT_THREAD');
 });
 
-test('candidate requires the full cursor chain and counts older notLoaded threads', async t => {
-  const { projectRoot, run } = fixture(t);
-  const first = page([thread('current', projectRoot)], { nextCursor: 'older' });
-  const input = { ...soleThread(projectRoot, 'current'), claim: true, threadPages: [first] };
-  assertUnclaimed(await run('candidate', input, 'current'), 'undetermined', 'INCOMPLETE_HISTORY');
+test('Desktop candidate assessment requires a contiguous history prefix through the caller', t => {
+  const { projectRoot } = fixture(t);
+  const scope = resolveControllerScope(projectRoot);
+  const first = page([thread('peer', projectRoot)], { nextCursor: 'older' });
+  const current = thread('current', projectRoot, { status: { type: 'notLoaded' } });
+  const older = page([current], { cursor: 'older', nextCursor: 'unneeded' });
+  const { projects } = soleThread(projectRoot, 'current');
+  const cases = [
+    [undefined, 'INCOMPLETE_HISTORY'],
+    [[older], 'INCOMPLETE_HISTORY'],
+    [[first, { ...older, cursor: 'skipped' }], 'INCOMPLETE_HISTORY'],
+    [[first, page([current], { cursor: 'older', nextCursor: 'older' })], 'INCOMPLETE_HISTORY'],
+    [[first], 'CALLER_NOT_FOUND'],
+    [[page([{ ...current, archived: true }])], 'CALLER_NOT_FOUND'],
+    [[page([{ ...current, hostId: 'remote-host' }])], 'CALLER_NOT_FOUND'],
+    [[page([current, { ...current, hostId: 'remote-host' }])], 'CALLER_NOT_FOUND'],
+    [[page([current, { ...current, archived: true }])], 'CALLER_NOT_FOUND'],
+    [[page([current, { ...current, cwd: null }])], 'AMBIGUOUS_THREAD_SCOPE'],
+    [[page([current, { ...current, projectId: 'other-group' }])], 'AMBIGUOUS_PROJECT'],
+  ];
+  for (const [threadPages, reason] of cases) {
+    assert.deepEqual(assessControllerCandidate(scope, 'current', 'local', projects, threadPages), { reason });
+  }
 
-  const older = page([thread('older-thread', projectRoot, { status: { type: 'notLoaded' } })], { cursor: 'older' });
-  const complete = await run('candidate', { ...input, threadPages: [first, older] }, 'current');
-  assertUnclaimed(complete, 'not_candidate', 'MULTIPLE_THREADS');
+  assert.deepEqual(assessControllerCandidate(scope, 'current', null, projects, [first, older]), {
+    reason: 'CANDIDATE', hostId: 'local', hostProjectId: 'desktop-project',
+  });
 });
 
-test('candidate honors a pre-existing controller absent from stale discovery', async t => {
+test('candidate enrolls a peer without inheriting the legacy controller grant', async t => {
   const { projectRoot, run } = fixture(t);
   const { project } = await registerLegacyController(run, projectRoot);
+  const peerId = 'new-thread';
+  const request = {
+    projectId: project.projectId, taskId: 'legacy-task', requestId: 'legacy-request', prompt: 'Synthetic worker fixture',
+    profile: { model: 'fixture-model', thinking: 'low' },
+  };
+  await run('dispatch', request, 'old-controller');
 
-  const stale = { ...soleThread(projectRoot, 'new-thread'), claim: true, includeStatus: true };
-  const outsider = await run('candidate', stale, 'new-thread');
-  assertUnclaimed(outsider, 'not_candidate', 'CONTROLLER_EXISTS');
-  assert.equal(Object.hasOwn(outsider, 'tasks'), false);
+  const proof = { ...soleThread(projectRoot, peerId), claim: true, includeStatus: true };
+  const peer = await run('candidate', proof, peerId);
+  assertUnclaimed(peer, 'controller', 'CONTROLLER_READY');
+  assert.equal(peer.project.projectId, project.projectId);
+  assert.deepEqual(peer.project.controller, { threadId: peerId, hostId: 'local' });
+  assertNoPermissions(peer.project);
+  assert.deepEqual(peer.tasks, []);
+  await assertCliError(run, 'dispatch', {
+    ...request, taskId: 'peer-task', requestId: 'peer-request',
+  }, 'AUTHORIZATION_REQUIRED', peerId);
 
-  const lookup = await run('candidate', { projectRoot }, 'old-controller');
-  assertUnclaimed(lookup, 'controller');
-  assert.deepEqual(lookup.project, project);
+  const lookup = await run('candidate', { projectRoot, includeStatus: true }, 'old-controller');
+  assertUnclaimed(lookup, 'controller', 'REGISTERED_CONTROLLER');
+  assert.deepEqual(lookup.project.authorization, project.authorization);
+  assert.deepEqual(lookup.project.controllerRef, project.controllerRef);
+  assert.deepEqual(lookup.tasks.map(task => task.taskId), [request.taskId]);
+  const peerLookup = await run('candidate', { projectRoot, includeStatus: true }, peerId);
+  assertUnclaimed(peerLookup, 'controller', 'REGISTERED_CONTROLLER');
+  assert.deepEqual(peerLookup.project, peer.project);
+  assert.deepEqual(peerLookup.tasks, []);
 });
 
-test('candidate counts each nonarchived thread once and holds on an unresolved project peer', async t => {
+test('candidate ignores peers with unresolved checkouts or different hosts', async t => {
   const { root, projectRoot, run } = fixture(t);
   const input = {
     projectRoot,
     projects: { projects: [catalogEntry(root, 'desktop-project', false)] },
     threadPages: [
-      page([thread('current', projectRoot)], { nextCursor: 'older' }),
-      page([thread('current', projectRoot), { ...thread('archived', projectRoot), archived: true }], { cursor: 'older' }),
+      page([
+        thread('peer', projectRoot),
+        thread('unknown-scope', null),
+        { ...thread('remote-peer', null), hostId: 'remote-host' },
+        { ...thread('archived', projectRoot), archived: true },
+        thread('current', projectRoot),
+      ], { nextCursor: 'unneeded' }),
     ],
   };
-  assertUnclaimed(await run('candidate', input, 'current'), 'candidate');
-  input.threadPages[1].result.threads.push(thread('unknown-scope', null));
-  assertUnclaimed(await run('candidate', { ...input, claim: true }, 'current'), 'undetermined', 'AMBIGUOUS_THREAD_SCOPE');
+  const current = await run('candidate', input, 'current');
+  assert.equal(current.reason, 'CONTROLLER_CLAIMED');
+  const peer = await run('candidate', input, 'peer');
+  assertUnclaimed(peer, 'controller', 'CONTROLLER_READY');
+  assert.equal(peer.project.projectId, current.project.projectId);
+  assert.equal(peer.project.controller.threadId, 'peer');
+  assertNoPermissions(peer.project);
 });
 
 test('candidate recognizes a bound worker and prevents a claim in an unbound repository', async t => {
@@ -277,13 +334,32 @@ test('candidate prefers the observed Desktop group and holds ambiguous or contra
   assertUnclaimed(await run('candidate', {
     ...input, claim: true, threadPages: [page([thread('current', sibling)])],
   }, 'current'), 'undetermined', 'AMBIGUOUS_THREAD_SCOPE');
-  const missingGroup = { ...soleThread(projectRoot, 'current'),
-    threadPages: [page([thread('current', projectRoot, { projectId: null })])] };
-  assert.equal((await run('candidate', missingGroup, 'current')).hostProjectId, 'desktop-project');
+  const { projects } = soleThread(projectRoot, 'current');
+  const inferred = assessControllerCandidate(resolveControllerScope(projectRoot), 'current', 'local', projects,
+    [page([thread('current', projectRoot, { projectId: null })])]);
+  assert.deepEqual(inferred, { reason: 'CANDIDATE', hostId: 'local', hostProjectId: 'desktop-project' });
 
   const claimed = await run('candidate', { ...input, claim: true }, 'current');
   assert.equal(claimed.claimed, true);
   assert.equal(claimed.project.hostProjectId, 'desktop-parent');
+
+  const peerId = 'peer';
+  const otherGroupProof = { ...input, threadPages: [page([thread(peerId, projectRoot)])] };
+  const otherGroup = await run('candidate', otherGroupProof, peerId);
+  assertUnclaimed(otherGroup, 'undetermined', 'HOST_PROJECT_MISMATCH');
+  assertUnclaimed(await run('candidate', { projectRoot }, peerId), 'undetermined', 'DISCOVERY_REQUIRED');
+  const sameGroupProof = {
+    ...input, threadPages: [page([thread(peerId, projectRoot, { projectId: 'desktop-parent' })])],
+  };
+  const sameGroup = await run('candidate', sameGroupProof, peerId);
+  assertUnclaimed(sameGroup, 'controller', 'CONTROLLER_READY');
+  assert.equal(sameGroup.project.projectId, claimed.project.projectId);
+  assert.equal(sameGroup.project.hostProjectId, 'desktop-parent');
+  const synced = await run('sync-project', { ...sameGroupProof, projectId: claimed.project.projectId }, peerId);
+  assert.deepEqual(synced.project, sameGroup.project);
+  await assertCliError(run, 'sync-project', { ...otherGroupProof, projectId: claimed.project.projectId },
+    'HOST_PROJECT_MISMATCH', peerId);
+  assert.equal((await run('candidate', { projectRoot }, 'current')).project.hostProjectId, 'desktop-parent');
 });
 
 test('candidate claims a same-host remote group only when its catalog path can be verified', async t => {
@@ -319,9 +395,9 @@ test('candidate uses the same repository and binding from a real linked worktree
   gitCommand(projectRoot, ['worktree', 'add', '--quiet', '--detach', worktree, 'HEAD']);
   const worktreeGroups = { projects: [catalogEntry(projectRoot), catalogEntry(worktree, 'linked-group')] };
   for (const group of ['linked-group', 'desktop-project']) {
-    const discovered = await run('candidate', {
-      ...soleThread(worktree, 'current', group), projects: worktreeGroups,
-    }, 'current');
+    const { threadPages } = soleThread(worktree, 'linked', group);
+    const discovered = assessControllerCandidate(resolveControllerScope(worktree), 'linked', 'local', worktreeGroups, threadPages);
+    assert.equal(discovered.reason, 'CANDIDATE');
     assert.equal(discovered.hostProjectId, group);
   }
   assertUnclaimed(await run('candidate', {
@@ -329,14 +405,17 @@ test('candidate uses the same repository and binding from a real linked worktree
   }, 'current'), 'undetermined', 'AMBIGUOUS_PROJECT');
   const input = {
     ...soleThread(projectRoot, 'current'),
-    threadPages: [page([thread('current', projectRoot), thread('linked', worktree, { projectId: null })])],
+    projects: worktreeGroups,
+    threadPages: [page([thread('current', projectRoot), thread('linked', worktree)])],
   };
-  assertUnclaimed(await run('candidate', input, 'current'), 'not_candidate', 'MULTIPLE_THREADS');
-  const claim = await run('candidate', { ...soleThread(projectRoot, 'current'), claim: true }, 'current');
+  const claim = await run('candidate', input, 'current');
   assert.equal(claim.claimed, true);
-  const fromWorktree = await run('candidate', { projectRoot: worktree }, 'linked');
-  assertUnclaimed(fromWorktree, 'not_candidate', 'CONTROLLER_EXISTS');
-  assert.deepEqual(fromWorktree.project, claim.project);
+  const fromWorktree = await run('candidate', { ...input, projectRoot: worktree }, 'linked');
+  assertUnclaimed(fromWorktree, 'controller', 'CONTROLLER_READY');
+  assert.equal(fromWorktree.project.projectId, claim.project.projectId);
+  assert.equal(fromWorktree.project.projectRoot, projectRoot);
+  assert.equal(fromWorktree.project.hostProjectId, claim.project.hostProjectId);
+  assert.deepEqual(fromWorktree.project.controller, { threadId: 'linked', hostId: 'local' });
 });
 
 test('sync-project repairs a parent binding before planning a create in the verified child group', async t => {
@@ -489,30 +568,29 @@ test('candidate distinguishes a Git catalog parent from a nested repository', as
   assert.equal(child.project.hostProjectId, 'git-child');
 });
 
-test('candidate persists exactly one concurrent first claim without mutation permissions', async t => {
+test('concurrent candidates initialize one project and each gain a permissionless controller view', async t => {
   const { projectRoot, run, runTogether } = fixture(t);
   const callers = ['first', 'second'];
-  const claims = await runTogether(callers.map(threadId => ({
-    command: 'candidate', threadId, input: { ...soleThread(projectRoot, threadId), claim: true, includeStatus: true },
+  const { projects } = soleThread(projectRoot, callers[0]);
+  const threadPages = [page(callers.map(threadId => thread(threadId, projectRoot)), { nextCursor: 'unneeded' })];
+  const claims = await runTogether(callers.map((threadId, index) => ({
+    command: 'candidate', threadId, input: { projectRoot, projects, threadPages, claim: index === 0, includeStatus: true },
   })));
   assert.equal(claims.filter(result => result.claimed === true).length, 1);
-  const winnerIndex = claims.findIndex(result => result.claimed === true);
-  const { project, decision } = claims[winnerIndex];
-  assert.equal(decision, 'controller');
-  assert.equal(Object.hasOwn(claims[winnerIndex], 'tasks'), false);
-  assertUnclaimed(claims[1 - winnerIndex], 'not_candidate', 'CONTROLLER_EXISTS');
-  assert.deepEqual(project.controller, { threadId: callers[winnerIndex], hostId: 'local' });
-  assert.equal(project.projectRoot, projectRoot);
-  assert.equal(project.hostProjectId, 'desktop-project');
+  const projectId = claims[0].project.projectId;
+  for (const [index, { project, decision, reason, claimed, tasks }] of claims.entries()) {
+    const threadId = callers[index];
+    assert.equal(decision, 'controller');
+    assert.equal(reason, claimed ? 'CONTROLLER_CLAIMED' : 'CONTROLLER_READY');
+    assert.deepEqual(tasks, []);
+    assert.equal(project.projectId, projectId);
+    assert.equal(project.projectRoot, projectRoot);
+    assert.equal(project.hostProjectId, 'desktop-project');
+    assert.deepEqual(project.controller, { threadId, hostId: 'local' });
+    assertNoPermissions(project);
 
-  const lookup = await run('candidate', { projectRoot }, callers[winnerIndex]);
-  assertUnclaimed(lookup, 'controller');
-  assert.deepEqual(lookup.project, project);
-  const persisted = await run('status', { projectId: project.projectId });
-  assert.deepEqual(persisted.project, project);
-  assert.deepEqual(persisted.tasks, []);
-  const { createWorkers, sendFollowups, archiveCompleted, restoreWorkers } = persisted.project.authorization;
-  assert.deepEqual({ createWorkers, sendFollowups, archiveCompleted, restoreWorkers }, {
-    createWorkers: false, sendFollowups: false, archiveCompleted: false, restoreWorkers: false,
-  });
+    const lookup = await run('candidate', { projectRoot }, threadId);
+    assertUnclaimed(lookup, 'controller', 'REGISTERED_CONTROLLER');
+    assert.deepEqual({ ...lookup.project, updatedAt: project.updatedAt }, project);
+  }
 });
